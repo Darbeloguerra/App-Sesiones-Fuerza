@@ -1,0 +1,553 @@
+import React, { useState } from "react";
+
+const JUGADORES = ["Marcos G.", "Iván R.", "Diego S.", "Adrián P."];
+
+// Estado de envío por fecha — quién envió esa sesión y quién no
+const ENVIOS_POR_FECHA = {
+  "2026-08-20": {
+    md: "MD-2",
+    estados: {
+      "Marcos G.": true,
+      "Iván R.": true,
+      "Diego S.": false,
+      "Adrián P.": true,
+    },
+  },
+  "2026-08-18": {
+    md: "MD-4",
+    estados: {
+      "Marcos G.": true,
+      "Iván R.": false,
+      "Diego S.": true,
+      "Adrián P.": false,
+    },
+  },
+  "2026-08-15": {
+    md: null,
+    estados: {
+      "Marcos G.": true,
+      "Iván R.": true,
+      "Diego S.": true,
+      "Adrián P.": true,
+    },
+  },
+};
+
+const HISTORIAL_MARCOS = [
+  {
+    fecha: "2026-08-20",
+    md: "MD-2",
+    bloques: [
+      { nombre: "Activación", tareas: [{ nombre: "Bici estática", hecho: true }] },
+      { nombre: "Movilidad", tareas: [{ nombre: "Movilidad cadera 90/90", hecho: true }] },
+      {
+        nombre: "Preventivo",
+        categoria: "Isquiotibiales (muscular)",
+        tareas: [{ nombre: "Nordic curl", hecho: true }],
+      },
+      { nombre: "Core", tareas: [{ nombre: "Plancha frontal", hecho: true }] },
+      {
+        nombre: "Fuerza",
+        tareas: [
+          {
+            nombre: "Sentadilla trasera",
+            hecho: true,
+            unidad: "reps",
+            cantidad: "5",
+            carga: "102",
+            rir: "2",
+            nota: "Baja el ritmo si nota molestia en el isquio",
+          },
+          { nombre: "Sprint lastrado 20m", hecho: true, unidad: "metros", cantidad: "20", carga: "8", rir: null },
+          { nombre: "Dominadas", hecho: true, unidad: "reps", cantidad: "8", subtipo: "Asistencia", carga: null, rir: "1" },
+          { nombre: "RDL a una pierna", hecho: false },
+        ],
+        circuitos: [
+          {
+            tareas: [
+              { nombre: "Zancada con salto", hecho: true, unidad: "reps", cantidad: "10", carga: null, rir: null },
+              { nombre: "Salto lateral con freno", hecho: false, unidad: "reps", cantidad: "8", carga: null, rir: null },
+            ],
+          },
+        ],
+      },
+    ],
+  },
+  {
+    fecha: "2026-08-18",
+    md: "MD-4",
+    bloques: [
+      { nombre: "Activación", tareas: [{ nombre: "Bici estática", hecho: true }] },
+      { nombre: "Movilidad", tareas: [{ nombre: "Rotación torácica", hecho: false }] },
+      {
+        nombre: "Preventivo",
+        categoria: "Isquiotibiales (muscular)",
+        tareas: [{ nombre: "Curl nórdico asistido", hecho: true }],
+      },
+      { nombre: "Core", tareas: [{ nombre: "Dead bug", hecho: true }] },
+      {
+        nombre: "Fuerza",
+        tareas: [{ nombre: "Sentadilla trasera", hecho: true, unidad: "reps", cantidad: "5", carga: "100", rir: "2" }],
+      },
+    ],
+  },
+  {
+    fecha: "2026-08-15",
+    md: null,
+    bloques: [
+      { nombre: "Activación", tareas: [{ nombre: "Bici estática", hecho: true }] },
+      { nombre: "Movilidad", tareas: [{ nombre: "Movilidad cadera 90/90", hecho: true }] },
+      { nombre: "Preventivo", categoria: null, tareas: [] },
+      { nombre: "Core", tareas: [{ nombre: "Plancha frontal", hecho: true }] },
+      {
+        nombre: "Fuerza",
+        tareas: [{ nombre: "Sentadilla trasera", hecho: true, unidad: "reps", cantidad: "5", carga: "97", rir: "3" }],
+      },
+    ],
+  },
+];
+
+function PuntoEstado({ hecho }) {
+  return (
+    <span
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: "50%",
+        background: hecho ? "#22C55E" : "#1A3050",
+        border: hecho ? "none" : "1px solid #EF4444",
+        flexShrink: 0,
+        display: "inline-block",
+      }}
+    />
+  );
+}
+
+function FilaTareaHistorial({ tarea: t, orden }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: orden != null ? 0 : 4 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {orden != null && (
+          <span
+            style={{
+              width: 16,
+              height: 16,
+              borderRadius: "50%",
+              background: "#122440",
+              color: "#F5C518",
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 9,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+            }}
+          >
+            {orden}
+          </span>
+        )}
+        <PuntoEstado hecho={t.hecho} />
+        <span style={{ fontSize: 12, color: t.hecho ? "#F0F4FF" : "#4A6680", flex: 1 }}>{t.nombre}</span>
+        {t.hecho && t.unidad && (
+          <span
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 10.5,
+              color: "#4A6680",
+              textAlign: "right",
+            }}
+          >
+            {t.cantidad} {t.unidad === "metros" ? "m" : "reps"}
+            {t.carga ? ` · ${t.carga}kg` : ""}
+            {t.subtipo ? ` (${t.subtipo})` : ""}
+            {t.rir ? ` · RIR${t.rir}` : ""}
+          </span>
+        )}
+      </div>
+      {t.nota && (
+        <div
+          style={{
+            marginLeft: orden != null ? 24 : 20,
+            display: "flex",
+            gap: 5,
+            fontSize: 10.5,
+            color: "#8BA4C0",
+          }}
+        >
+          <span style={{ color: "#F97316", flexShrink: 0 }}>📝</span>
+          <span>{t.nota}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TarjetaDia({ dia }) {
+  const [abierto, setAbierto] = useState(false);
+
+  const totalTareas = dia.bloques.reduce((acc, b) => acc + b.tareas.length, 0);
+  const hechas = dia.bloques.reduce((acc, b) => acc + b.tareas.filter((t) => t.hecho).length, 0);
+
+  return (
+    <div
+      style={{
+        background: "#0E1E35",
+        border: "1px solid #1A3050",
+        borderRadius: 10,
+        overflow: "hidden",
+      }}
+    >
+      <div
+        onClick={() => setAbierto((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "12px 14px",
+          cursor: "pointer",
+        }}
+      >
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF" }}>{dia.fecha}</span>
+            {dia.md && (
+              <span
+                style={{
+                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontSize: 9.5,
+                  color: "#8BA4C0",
+                  border: "1px solid #1A3050",
+                  borderRadius: 4,
+                  padding: "1px 5px",
+                }}
+              >
+                {dia.md}
+              </span>
+            )}
+          </div>
+          <div style={{ fontSize: 11, color: "#4A6680", marginTop: 2 }}>
+            {hechas}/{totalTareas} tareas completadas
+          </div>
+        </div>
+        <span style={{ color: "#4A6680", fontSize: 12, transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
+      </div>
+
+
+      {abierto && (
+        <div style={{ borderTop: "1px solid #1A3050", padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          {dia.bloques.map((b) => (
+            <div key={b.nombre}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 5 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: "#8BA4C0" }}>{b.nombre}</span>
+                {b.categoria && (
+                  <span style={{ fontSize: 10, color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace" }}>
+                    · {b.categoria}
+                  </span>
+                )}
+              </div>
+              {b.tareas.length === 0 && !(b.circuitos && b.circuitos.length) ? (
+                <div style={{ fontSize: 11, color: "#4A6680", fontStyle: "italic", paddingLeft: 4 }}>
+                  No aplicó ese día
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {b.tareas.map((t, i) => (
+                    <FilaTareaHistorial key={i} tarea={t} />
+                  ))}
+                  {(b.circuitos || []).map((c, ci) => (
+                    <div
+                      key={ci}
+                      style={{
+                        border: "1px solid #F5C51840",
+                        borderRadius: 8,
+                        padding: "8px 8px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 6,
+                      }}
+                    >
+                      <span
+                        style={{
+                          alignSelf: "flex-start",
+                          fontFamily: "'IBM Plex Mono', monospace",
+                          fontSize: 9,
+                          letterSpacing: "0.05em",
+                          color: "#F5C518",
+                          border: "1px solid #F5C51855",
+                          borderRadius: 4,
+                          padding: "1px 6px",
+                        }}
+                      >
+                        CIRCUITO
+                      </span>
+                      {c.tareas.map((t, i) => (
+                        <FilaTareaHistorial key={i} tarea={t} orden={i + 1} />
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function Historial() {
+  const [vista, setVista] = useState("jugador"); // "jugador" | "sesion"
+  const [jugadorSel, setJugadorSel] = useState(JUGADORES[0]);
+  const [desde, setDesde] = useState("");
+  const [hasta, setHasta] = useState("");
+  const [fechaSesionSel, setFechaSesionSel] = useState(Object.keys(ENVIOS_POR_FECHA)[0]);
+
+  const dias = HISTORIAL_MARCOS.filter((d) => {
+    if (desde && d.fecha < desde) return false;
+    if (hasta && d.fecha > hasta) return false;
+    return true;
+  });
+
+  const fechasDisponibles = Object.keys(ENVIOS_POR_FECHA).sort().reverse();
+  const sesionSel = ENVIOS_POR_FECHA[fechaSesionSel];
+  const enviados = sesionSel ? Object.values(sesionSel.estados).filter(Boolean).length : 0;
+  const total = sesionSel ? Object.keys(sesionSel.estados).length : 0;
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "#060D1A",
+        color: "#F0F4FF",
+        fontFamily: "'Inter', -apple-system, sans-serif",
+        padding: "24px 16px 60px",
+      }}
+    >
+      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+
+        <button
+          onClick={() => {}}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 5,
+            background: "transparent",
+            border: "none",
+            color: "#8BA4C0",
+            fontSize: 12.5,
+            cursor: "pointer",
+            padding: 0,
+            marginBottom: 14,
+          }}
+        >
+          ← Volver a Dashboard
+        </button>
+        <div style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 11,
+              letterSpacing: "0.08em",
+              color: "#F5C518",
+              marginBottom: 4,
+            }}
+          >
+            HISTORIAL
+          </div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>
+            Registro diario
+          </h1>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {[
+            { id: "jugador", label: "Por jugador" },
+            { id: "sesion", label: "Por sesión" },
+          ].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setVista(v.id)}
+              style={{
+                fontSize: 12.5,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${vista === v.id ? "#F5C518" : "#1A3050"}`,
+                background: vista === v.id ? "#F5C51822" : "transparent",
+                color: vista === v.id ? "#F5C518" : "#8BA4C0",
+                cursor: "pointer",
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {vista === "jugador" ? (
+          <>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+            JUGADOR
+          </span>
+          <select
+            value={jugadorSel}
+            onChange={(e) => setJugadorSel(e.target.value)}
+            style={{
+              background: "#0E1E35",
+              border: "1px solid #1A3050",
+              borderRadius: 8,
+              color: "#F0F4FF",
+              fontSize: 13,
+              padding: "8px 10px",
+              maxWidth: 240,
+            }}
+          >
+            {JUGADORES.map((j) => (
+              <option key={j} value={j}>
+                {j}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+              DESDE
+            </span>
+            <input
+              type="date"
+              value={desde}
+              onChange={(e) => setDesde(e.target.value)}
+              style={{
+                background: "#0E1E35",
+                border: "1px solid #1A3050",
+                borderRadius: 8,
+                color: "#F0F4FF",
+                fontSize: 12.5,
+                padding: "7px 8px",
+              }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+              HASTA
+            </span>
+            <input
+              type="date"
+              value={hasta}
+              onChange={(e) => setHasta(e.target.value)}
+              style={{
+                background: "#0E1E35",
+                border: "1px solid #1A3050",
+                borderRadius: 8,
+                color: "#F0F4FF",
+                fontSize: 12.5,
+                padding: "7px 8px",
+              }}
+            />
+          </label>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {dias.map((d) => (
+            <TarjetaDia key={d.fecha} dia={d} />
+          ))}
+          {dias.length === 0 && (
+            <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+              Sin sesiones registradas en este rango
+            </div>
+          )}
+        </div>
+          </>
+        ) : (
+          <>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+                FECHA
+              </span>
+              <select
+                value={fechaSesionSel}
+                onChange={(e) => setFechaSesionSel(e.target.value)}
+                style={{
+                  background: "#0E1E35",
+                  border: "1px solid #1A3050",
+                  borderRadius: 8,
+                  color: "#F0F4FF",
+                  fontSize: 13,
+                  padding: "8px 10px",
+                  maxWidth: 260,
+                }}
+              >
+                {fechasDisponibles.map((f) => (
+                  <option key={f} value={f}>
+                    {f}
+                    {ENVIOS_POR_FECHA[f].md ? ` · ${ENVIOS_POR_FECHA[f].md}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {sesionSel && (
+              <>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "#8BA4C0",
+                    marginBottom: 12,
+                    background: "#0E1E35",
+                    border: "1px solid #1A3050",
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                  }}
+                >
+                  <strong style={{ color: enviados === total ? "#22C55E" : "#F97316" }}>
+                    {enviados}/{total}
+                  </strong>{" "}
+                  jugadores han enviado esta sesión
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {Object.entries(sesionSel.estados).map(([jugador, enviado]) => (
+                    <div
+                      key={jugador}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 10,
+                        background: "#0E1E35",
+                        border: "1px solid #1A3050",
+                        borderRadius: 10,
+                        padding: "10px 14px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: 9,
+                          height: 9,
+                          borderRadius: "50%",
+                          background: enviado ? "#22C55E" : "#1A3050",
+                          border: enviado ? "none" : "1px solid #F97316",
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span style={{ flex: 1, fontSize: 13.5, color: "#F0F4FF" }}>{jugador}</span>
+                      <span
+                        style={{
+                          fontFamily: "'IBM Plex Mono', monospace",
+                          fontSize: 10.5,
+                          color: enviado ? "#22C55E" : "#F97316",
+                        }}
+                      >
+                        {enviado ? "✓ Enviada" : "Sin enviar"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
