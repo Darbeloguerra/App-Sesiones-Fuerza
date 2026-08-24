@@ -4169,8 +4169,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [ejercicios, ejerciciosLoaded] = useEntityByIds("ejercicios", tareas.map((t) => t.ejercicio_id));
   const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
   const [circuitos, circuitosLoaded] = useEntityByIds("circuitos", circuitoIds);
-  const [registrosTodos, saveRegistrosTodos, registrosLoaded] = useEntityList("registros");
-  const registros = player && tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id) && r.jugador_id === player.id) : [];
+  // Filtrado en el propio backend por jugador — mucho más rápido que traer
+  // toda la tabla de Registros del equipo entero cada vez que se abre esta
+  // pantalla.
+  const [registrosJugador, saveRegistrosJugador, registrosLoaded] = useEntityList("registros", player ? { jugador_id: player.id } : false);
+  const registros = player && tareaIds.length ? registrosJugador.filter((r) => tareaIds.includes(r.tarea_id)) : [];
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
   const [registrosDraft, setRegistrosDraft] = useState({});
@@ -4293,7 +4296,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           };
         });
       if (nuevos.length) {
-        await saveRegistrosTodos([...registrosTodos, ...nuevos]);
+        await saveRegistrosJugador([...registrosJugador, ...nuevos]);
       }
       setEnviado(true);
     } finally {
