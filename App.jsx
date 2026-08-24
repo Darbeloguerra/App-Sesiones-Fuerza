@@ -79,12 +79,13 @@ function numericWarning(value, { min, max, label }) {
 const genPin = () => String(Math.floor(1000 + Math.random() * 9000));
 
 function genUniquePin(existingPins) {
+  const existentesTexto = existingPins.map((p) => String(p).trim());
   let pin;
   let guard = 0;
   do {
     pin = genPin();
     guard++;
-  } while (existingPins.includes(pin) && guard < 200);
+  } while (existentesTexto.includes(pin) && guard < 200);
   return pin;
 }
 
@@ -2843,12 +2844,12 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   const validar = () => {
     const valor = codigo.trim();
     if (!valor) return;
-    if (coachPin != null && valor === coachPin) {
+    if (coachPin != null && valor === String(coachPin).trim()) {
       setError(false);
       setResultado({ tipo: "entrenador" });
       return;
     }
-    const jugador = players.find((p) => p.pin === valor);
+    const jugador = players.find((p) => String(p.pin).trim() === valor);
     if (jugador) {
       setError(false);
       setResultado({ tipo: "jugador", nombre: jugador.name, id: jugador.id });
@@ -3000,6 +3001,8 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
         onKeyDown={(e) => e.key === "Enter" && validar()}
         placeholder="••••"
         autoFocus
+        type="password"
+        inputMode="numeric"
         style={{
           width: "100%",
           boxSizing: "border-box",
@@ -3266,7 +3269,7 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
   const [pinManual, setPinManual] = useState("");
   const [guardando, setGuardando] = useState(false);
 
-  const pinManualDuplicado = modoPin === "manual" && pinManual.length === 4 && pinsExistentes.includes(pinManual);
+  const pinManualDuplicado = modoPin === "manual" && pinManual.length === 4 && pinsExistentes.map((p) => String(p).trim()).includes(pinManual);
   const puedeGuardar = nombre.trim().length > 0 && (modoPin === "auto" || (pinManual.length === 4 && !pinManualDuplicado));
 
   return (
@@ -3546,13 +3549,21 @@ function TarjetaModuloReal({ modulo, onClick }) {
   );
 }
 
-function DashboardEntrenadorReal({ onAbrirModulo }) {
+function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
   const hoy = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" });
   return (
     <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 16px 60px" }}>
       <div style={{ maxWidth: 480, margin: "0 auto" }}>
         <div style={{ marginBottom: 24 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>MODO ENTRENADOR</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518" }}>MODO ENTRENADOR</div>
+            <button
+              onClick={onCerrarSesion}
+              style={{ fontSize: 11.5, color: "#8BA4C0", background: "transparent", border: "1px solid #1A3050", borderRadius: 6, padding: "4px 9px", cursor: "pointer" }}
+            >
+              Cerrar sesión
+            </button>
+          </div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
           <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{hoy}</div>
         </div>
@@ -5898,7 +5909,7 @@ export default function App() {
     );
   }
 
-  return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} />;
+  return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
 }
 
 // Envoltorio: ProgramacionReal necesita la lista de jugadores para el editor de sesiones.
