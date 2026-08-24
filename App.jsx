@@ -4126,9 +4126,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
   const [registrosDraft, setRegistrosDraft] = useState({});
+  const [hechoDraft, setHechoDraft] = useState({}); // solo local hasta confirmar envío
   const [gifAmpliado, setGifAmpliado] = useState(null);
   const [pidiendoConfirmacion, setPidiendoConfirmacion] = useState(false);
   const [enviado, setEnviado] = useState(false);
+  const [enviando, setEnviando] = useState(false);
 
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
@@ -4147,6 +4149,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const loaded = sesionesLoaded && tareasLoaded && ejerciciosLoaded && registrosLoaded && historyLoaded;
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
+  // Si ya hay registros guardados de hoy para estas tareas, es que esta
+  // sesión ya se confirmó y envió antes (en una visita anterior) — se trata
+  // como ya enviada, sin dejar reabrirla.
+  const yaEnviadaAntes = loaded && tareaIds.length > 0 && tareaIds.some((id) => registrosByTarea.has(id));
 
   const lastValueByName = {};
   [...historyItems]
@@ -4180,31 +4186,48 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   const todasLasTareas = Object.values(bloques).flat();
   const totalTareas = todasLasTareas.length;
-  const totalHechas = todasLasTareas.filter((t) => !!registrosByTarea.get(t.id)?.hecho).length;
+  const totalHechas = todasLasTareas.filter((t) => !!hechoDraft[t.id]).length;
 
-  const getRegistro = (id) => registrosDraft[id] || { reps: registrosByTarea.get(id)?.reps_hechas ?? "", carga: registrosByTarea.get(id)?.carga_kg ?? "", rir: registrosByTarea.get(id)?.rir ?? "" };
+  const getRegistro = (id) => registrosDraft[id] || { reps: "", carga: "", rir: "" };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
-  const toggle = async (t) => {
-    const existing = registrosByTarea.get(t.id);
-    const wasDone = !!existing?.hecho;
-    const draft = getRegistro(t.id);
-    const record = {
-      id: existing?.id,
-      jugador_id: player.id,
-      tarea_id: t.id,
-      fecha: date,
-      hecho: !wasDone,
-      reps_hechas: draft.reps,
-      carga_kg: draft.carga,
-      rir: draft.rir,
-      subtipo_corporal: "",
-    };
-    const next = existing ? registrosTodos.map((r) => (r.id === existing.id ? record : r)) : [...registrosTodos, record];
-    await saveRegistrosTodos(next);
+  // Marcar/desmarcar hecho es SOLO local mientras no se confirme el envío —
+  // así una tarea tocada pero nunca enviada no genera ningún registro real
+  // en el backend, y la sesión no se bloquea para el entrenador antes de
+  // tiempo.
+  const toggle = (t) => {
+    setHechoDraft((prev) => ({ ...prev, [t.id]: !prev[t.id] }));
   };
 
-  if (enviado) {
+  const confirmarEnvio = async () => {
+    setEnviando(true);
+    try {
+      const nuevos = todasLasTareas
+        .filter((t) => hechoDraft[t.id])
+        .map((t) => {
+          const draft = getRegistro(t.id);
+          return {
+            jugador_id: player.id,
+            tarea_id: t.id,
+            fecha: date,
+            hecho: true,
+            reps_hechas: draft.reps,
+            carga_kg: draft.carga,
+            rir: draft.rir,
+            subtipo_corporal: "",
+          };
+        });
+      if (nuevos.length) {
+        await saveRegistrosTodos([...registrosTodos, ...nuevos]);
+      }
+      setEnviado(true);
+    } finally {
+      setEnviando(false);
+      setPidiendoConfirmacion(false);
+    }
+  };
+
+  if (enviado || yaEnviadaAntes) {
     return (
       <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
@@ -4260,7 +4283,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                       <TareaCardReal
                         key={t.id}
                         tarea={t}
-                        hecho={!!registrosByTarea.get(t.id)?.hecho}
+                        hecho={!!hechoDraft[t.id]}
                         onToggle={() => toggle(t)}
                         registro={getRegistro(t.id)}
                         onCambiarRegistro={(val) => setRegistroDraft(t.id, val)}
@@ -4276,18 +4299,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               <div style={{ display: "flex", gap: 8, marginTop: 22 }}>
                 <button
                   onClick={() => setPidiendoConfirmacion(false)}
+                  disabled={enviando}
                   style={{ flex: 1, background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "13px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
                 >
                   Cancelar
                 </button>
                 <button
-                  onClick={() => {
-                    setEnviado(true);
-                    setPidiendoConfirmacion(false);
-                  }}
-                  style={{ flex: 2, background: "#22C55E", border: "1px solid #22C55E", color: "#060D1A", borderRadius: 10, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+                  onClick={confirmarEnvio}
+                  disabled={enviando}
+                  style={{ flex: 2, background: "#22C55E", border: "1px solid #22C55E", color: "#060D1A", borderRadius: 10, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}
                 >
-                  Confirmar envío
+                  {enviando ? "Enviando..." : "Confirmar envío"}
                 </button>
               </div>
             ) : (
