@@ -3863,13 +3863,27 @@ function TareaVisualReal({ tarea }) {
 function TarjetaSesionReal({ sesion, esHoy, onEditar }) {
   const [abierta, setAbierta] = useState(esHoy);
   const bloques = {};
+  const circuitoBuffer = {};
   (sesion.tareas || []).forEach((t) => {
     // Si la tarea tiene fecha propia (Movilidad/Preventivo con varias fechas
     // en la misma sesión), se agrupa aparte con su fecha en la etiqueta, para
     // no mezclar el ejercicio de un día con el de otro bajo el mismo nombre.
     const nombreBloque = t.fecha ? `${t.bloque_sesion || "General"} · ${fmtDateShort(t.fecha)}` : t.bloque_sesion || "General";
-    if (!bloques[nombreBloque]) bloques[nombreBloque] = [];
-    bloques[nombreBloque].push(t);
+    if (t.circuito_id) {
+      if (!circuitoBuffer[t.circuito_id]) circuitoBuffer[t.circuito_id] = { nombreBloque, tareas: [] };
+      circuitoBuffer[t.circuito_id].tareas.push(t);
+    } else {
+      if (!bloques[nombreBloque]) bloques[nombreBloque] = [];
+      bloques[nombreBloque].push({ tipo: "suelta", tarea: t });
+    }
+  });
+  Object.entries(circuitoBuffer).forEach(([circuitoId, datos]) => {
+    if (!bloques[datos.nombreBloque]) bloques[datos.nombreBloque] = [];
+    bloques[datos.nombreBloque].push({
+      tipo: "circuito",
+      circuitoId,
+      tareas: datos.tareas.slice().sort((a, b) => (Number(a.orden_en_circuito) || 999) - (Number(b.orden_en_circuito) || 999)),
+    });
   });
 
   return (
@@ -3903,37 +3917,44 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar }) {
       </div>
       {abierta && (
         <div style={{ borderTop: "1px solid #1A3050", padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-          {sesion.enviada && (
-            <div style={{ fontSize: 11.5, color: "#F97316", background: "#F9731618", border: "1px solid #F9731655", borderRadius: 6, padding: "8px 10px" }}>
-              🔒 Ya hay registros de jugadores en esta sesión — solo visualización, no se puede modificar.
-            </div>
-          )}
           {sesion.objetivo && (
             <div style={{ fontSize: 12, color: "#8BA4C0" }}>
               <strong style={{ color: "#F0F4FF" }}>Objetivo:</strong> {sesion.objetivo}
             </div>
           )}
-          {Object.entries(bloques).map(([nombreBloque, tareas]) => (
+          {Object.entries(bloques).map(([nombreBloque, items]) => (
             <div key={nombreBloque}>
               <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8BA4C0", marginBottom: 6 }}>{nombreBloque}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {tareas.map((t) => (
-                  <TareaVisualReal
-                    key={t.id}
-                    tarea={{ nombre: t.nombreEjercicio, detalle: `${t.series} × ${t.cantidad}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota }}
-                  />
-                ))}
+                {items.map((item) =>
+                  item.tipo === "circuito" ? (
+                    <div key={item.circuitoId} style={{ border: "1.5px solid #F5C51855", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: "#0E1E3540" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, letterSpacing: "0.05em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 6px" }}>CIRCUITO</span>
+                      </div>
+                      {item.tareas.map((t, i) => (
+                        <TareaVisualReal
+                          key={t.id}
+                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <TareaVisualReal
+                      key={item.tarea.id}
+                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota }}
+                    />
+                  )
+                )}
               </div>
             </div>
           ))}
-          {!sesion.enviada && (
-            <button
-              onClick={() => onEditar(sesion)}
-              style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer", fontWeight: 600 }}
-            >
-              Editar esta sesión
-            </button>
-          )}
+          <button
+            onClick={() => onEditar(sesion)}
+            style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer", fontWeight: 600 }}
+          >
+            Editar esta sesión
+          </button>
         </div>
       )}
     </div>
@@ -4108,6 +4129,31 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   );
 }
 
+function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif }) {
+  return (
+    <div style={{ border: "1.5px solid #F5C51855", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "#0E1E3540" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.06em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
+        <span style={{ fontSize: 11, color: "#4A6680" }}>seguir orden</span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {tareas.map((t, i) => (
+          <TareaCardReal
+            key={t.id}
+            tarea={t}
+            orden={i + 1}
+            hecho={!!hechoDraft[t.id]}
+            onToggle={() => onToggle(t)}
+            registro={getRegistro(t.id)}
+            onCambiarRegistro={(val) => onCambiarRegistro(t.id, val)}
+            onAmpliarGif={() => t.gif && onAmpliarGif(t.gif)}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [players, , playersLoaded] = usePlayers();
   const player = players.find((p) => p.id === presetPlayerId) || null;
@@ -4121,6 +4167,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
   const tareaIds = tareas.map((t) => t.id);
   const [ejercicios, ejerciciosLoaded] = useEntityByIds("ejercicios", tareas.map((t) => t.ejercicio_id));
+  const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
+  const [circuitos, circuitosLoaded] = useEntityByIds("circuitos", circuitoIds);
   const [registrosTodos, saveRegistrosTodos, registrosLoaded] = useEntityList("registros");
   const registros = player && tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id) && r.jugador_id === player.id) : [];
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
@@ -4146,7 +4194,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     );
   }
 
-  const loaded = sesionesLoaded && tareasLoaded && ejerciciosLoaded && registrosLoaded && historyLoaded;
+  const loaded = sesionesLoaded && tareasLoaded && ejerciciosLoaded && circuitosLoaded && registrosLoaded && historyLoaded;
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
   // Si ya hay registros guardados de hoy para estas tareas, es que esta
@@ -4162,15 +4210,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       lastValueByName[it.name.toLowerCase()] = it;
     });
 
+  // Cada elemento de un bloque es { tipo: "suelta", tarea } o
+  // { tipo: "circuito", circuitoId, tareas: [...] } — así el jugador ve
+  // los circuitos agrupados y numerados en vez de mezclados sueltos.
   const bloques = {};
-  tareas
-    .filter((t) => !t.fecha || t.fecha === date)
-    .forEach((t) => {
+  const circuitosById = new Map(circuitos.map((c) => [c.id, c]));
+  const circuitoBuffer = {}; // circuito_id -> { nombreBloque, tareas: [...] }
+
+  const construirTareaVisual = (t) => {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
-    const nombreBloque = t.bloque_sesion || "General";
-    if (!bloques[nombreBloque]) bloques[nombreBloque] = [];
     const lv = lastValueByName[(e.nombre || "").toLowerCase()];
-    bloques[nombreBloque].push({
+    return {
       id: t.id,
       nombre: e.nombre || "(ejercicio eliminado)",
       series: t.series,
@@ -4181,10 +4231,35 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       referencia: lv
         ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} reps · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
         : null,
+    };
+  };
+
+  tareas
+    .filter((t) => !t.fecha || t.fecha === date)
+    .forEach((t) => {
+      const nombreBloque = t.bloque_sesion || "General";
+      const tareaVisual = construirTareaVisual(t);
+      if (t.circuito_id && circuitosById.has(t.circuito_id)) {
+        if (!circuitoBuffer[t.circuito_id]) circuitoBuffer[t.circuito_id] = { nombreBloque, tareas: [] };
+        circuitoBuffer[t.circuito_id].tareas.push({ ...tareaVisual, orden: Number(t.orden_en_circuito) || 999 });
+      } else {
+        if (!bloques[nombreBloque]) bloques[nombreBloque] = [];
+        bloques[nombreBloque].push({ tipo: "suelta", tarea: tareaVisual });
+      }
+    });
+
+  Object.entries(circuitoBuffer).forEach(([circuitoId, datos]) => {
+    if (!bloques[datos.nombreBloque]) bloques[datos.nombreBloque] = [];
+    bloques[datos.nombreBloque].push({
+      tipo: "circuito",
+      circuitoId,
+      tareas: datos.tareas.sort((a, b) => a.orden - b.orden),
     });
   });
 
-  const todasLasTareas = Object.values(bloques).flat();
+  const todasLasTareas = Object.values(bloques)
+    .flat()
+    .flatMap((item) => (item.tipo === "circuito" ? item.tareas : [item.tarea]));
   const totalTareas = todasLasTareas.length;
   const totalHechas = todasLasTareas.filter((t) => !!hechoDraft[t.id]).length;
 
@@ -4279,17 +4354,29 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                     <span style={{ fontSize: 13.5, fontWeight: 600, color: "#8BA4C0" }}>{nombreBloque}</span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {tareasBloque.map((t) => (
-                      <TareaCardReal
-                        key={t.id}
-                        tarea={t}
-                        hecho={!!hechoDraft[t.id]}
-                        onToggle={() => toggle(t)}
-                        registro={getRegistro(t.id)}
-                        onCambiarRegistro={(val) => setRegistroDraft(t.id, val)}
-                        onAmpliarGif={() => t.gif && setGifAmpliado(t.gif)}
-                      />
-                    ))}
+                    {tareasBloque.map((item, idx) =>
+                      item.tipo === "circuito" ? (
+                        <CircuitoJugadorReal
+                          key={item.circuitoId}
+                          tareas={item.tareas}
+                          hechoDraft={hechoDraft}
+                          onToggle={toggle}
+                          getRegistro={getRegistro}
+                          onCambiarRegistro={setRegistroDraft}
+                          onAmpliarGif={setGifAmpliado}
+                        />
+                      ) : (
+                        <TareaCardReal
+                          key={item.tarea.id}
+                          tarea={item.tarea}
+                          hecho={!!hechoDraft[item.tarea.id]}
+                          onToggle={() => toggle(item.tarea)}
+                          registro={getRegistro(item.tarea.id)}
+                          onCambiarRegistro={(val) => setRegistroDraft(item.tarea.id, val)}
+                          onAmpliarGif={() => item.tarea.gif && setGifAmpliado(item.tarea.gif)}
+                        />
+                      )
+                    )}
                   </div>
                 </div>
               ))}
