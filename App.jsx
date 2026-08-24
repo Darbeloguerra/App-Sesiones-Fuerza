@@ -1776,9 +1776,9 @@ async function sesionHasRegistros(sesionId) {
   try {
     const tareas = await api.list("tareas", { sesion_id: sesionId });
     if (!tareas.length) return false;
-    const ids = tareas.map((t) => t.id).join(",");
-    const registros = await api.list("registros", { tarea_id: ids });
-    return registros.length > 0;
+    const tareaIds = new Set(tareas.map((t) => t.id));
+    const todosLosRegistros = await api.list("registros", {});
+    return todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
   } catch {
     return false;
   }
@@ -2316,6 +2316,7 @@ function usePlayerHistory(playerId) {
       done: !!r.hecho,
       cargaReal: r.carga_kg ?? "",
       rirReal: r.rir ?? "",
+      repsReal: r.reps_hechas ?? "",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
     };
@@ -3604,7 +3605,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
         <span style={{ fontSize: 12, color: t.done ? "#F0F4FF" : "#4A6680", flex: 1 }}>{t.name}</span>
         {t.done && (
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", textAlign: "right" }}>
-            {t.reps} reps
+            {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} reps
             {t.cargaReal !== "" && t.cargaReal != null ? ` · ${t.cargaReal}kg` : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
           </span>
@@ -3729,7 +3730,8 @@ function HistorialPorSesion({ players }) {
   const sesionIdForTareas = sesionSel?.id;
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIdForTareas ? [sesionIdForTareas] : []);
   const tareaIds = tareas.map((t) => t.id);
-  const [registros, , registrosLoaded] = useEntityList("registros", tareaIds.length ? { tarea_id: tareaIds.join(",") } : false);
+  const [registrosTodos, , registrosLoaded] = useEntityList("registros");
+  const registros = tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id)) : [];
 
   if (!sesionesLoaded) return <LoadingBlock />;
   if (!enviadas.length) {
@@ -4074,6 +4076,15 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
       <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>REPS</span>
+            <input
+              value={registro.reps}
+              onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
+              placeholder="—"
+              style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+            />
+          </label>
+          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>CARGA KG</span>
             <input
               value={registro.carga}
@@ -4110,7 +4121,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
   const tareaIds = tareas.map((t) => t.id);
   const [ejercicios, ejerciciosLoaded] = useEntityByIds("ejercicios", tareas.map((t) => t.ejercicio_id));
-  const [registros, saveRegistros, registrosLoaded] = useEntityList("registros", player && tareaIds.length ? { tarea_id: tareaIds.join(","), jugador_id: player.id } : false);
+  const [registrosTodos, saveRegistrosTodos, registrosLoaded] = useEntityList("registros");
+  const registros = player && tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id) && r.jugador_id === player.id) : [];
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
   const [registrosDraft, setRegistrosDraft] = useState({});
@@ -4138,7 +4150,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   const lastValueByName = {};
   [...historyItems]
-    .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== ""))
+    .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== "" || it.repsReal !== ""))
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .forEach((it) => {
       lastValueByName[it.name.toLowerCase()] = it;
@@ -4160,7 +4172,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       unidad: "reps",
       nota: t.nota || "",
       gif: e.gif_url || "",
-      referencia: lv ? `${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}` : null,
+      referencia: lv
+        ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} reps · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
+        : null,
     });
   });
 
@@ -4168,7 +4182,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const totalTareas = todasLasTareas.length;
   const totalHechas = todasLasTareas.filter((t) => !!registrosByTarea.get(t.id)?.hecho).length;
 
-  const getRegistro = (id) => registrosDraft[id] || { carga: registrosByTarea.get(id)?.carga_kg ?? "", rir: registrosByTarea.get(id)?.rir ?? "" };
+  const getRegistro = (id) => registrosDraft[id] || { reps: registrosByTarea.get(id)?.reps_hechas ?? "", carga: registrosByTarea.get(id)?.carga_kg ?? "", rir: registrosByTarea.get(id)?.rir ?? "" };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
   const toggle = async (t) => {
@@ -4181,13 +4195,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       tarea_id: t.id,
       fecha: date,
       hecho: !wasDone,
-      reps_hechas: "",
+      reps_hechas: draft.reps,
       carga_kg: draft.carga,
       rir: draft.rir,
       subtipo_corporal: "",
     };
-    const next = existing ? registros.map((r) => (r.id === existing.id ? record : r)) : [...registros, record];
-    await saveRegistros(next);
+    const next = existing ? registrosTodos.map((r) => (r.id === existing.id ? record : r)) : [...registrosTodos, record];
+    await saveRegistrosTodos(next);
   };
 
   if (enviado) {
