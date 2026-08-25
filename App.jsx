@@ -333,6 +333,51 @@ function LoadingBlock() {
   );
 }
 
+// Contenedor compartido de cada pantalla. Sustituye a los `minHeight: "100vh"`
+// sueltos que había en cada componente (crecían sin límite hacia abajo, dando
+// el efecto de scroll infinito). Ahora es una caja del tamaño exacto de la
+// pantalla (100dvh, no 100vh — así no salta con la barra de Safari en móvil),
+// centrada horizontal y verticalmente, con scroll solo dentro del contenido.
+// - rol="entrenador" (por defecto): ancho adaptado al dispositivo, cómodo en
+//   tablet/escritorio, hasta el maxWidth indicado por cada pantalla.
+// - rol="jugador": ancho fijo tipo móvil, siempre vertical — no se adapta a
+//   pantallas grandes aunque se abra en la tablet del entrenador.
+// - centrarContenido: para estados pequeños (carga, error, PIN) en vez de
+//   contenido de página completa — centra el bloque también verticalmente.
+function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido = false }) {
+  const anchoMax = maxWidth || (rol === "jugador" ? 420 : 640);
+  return (
+    <div
+      style={{
+        height: "100dvh",
+        width: "100%",
+        background: "#060D1A",
+        color: "#F0F4FF",
+        fontFamily: "'Inter', -apple-system, sans-serif",
+        display: "flex",
+        justifyContent: "center",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: anchoMax,
+          height: "100%",
+          overflowY: "auto",
+          boxSizing: "border-box",
+          display: centrarContenido ? "flex" : "block",
+          flexDirection: "column",
+          justifyContent: centrarContenido ? "center" : "flex-start",
+          padding: centrarContenido ? "24px" : "24px 16px 40px",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function PinInput({ value, onChange, autoFocus }) {
   return (
     <input
@@ -602,20 +647,9 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   };
 
   const screenWrap = (content) => (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#060D1A",
-        color: "#F0F4FF",
-        fontFamily: "'Inter', -apple-system, sans-serif",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
+    <PantallaBase centrarContenido>
       {content}
-    </div>
+    </PantallaBase>
   );
 
   if (!loaded) return screenWrap(<LoadingBlock />);
@@ -795,9 +829,24 @@ function ChipReal({ children, tono = "neutro" }) {
   );
 }
 
+// Fondo invisible a pantalla completa para cerrar desplegables al tocar fuera.
+// Sustituye a onMouseLeave, que no existe en pantallas táctiles (tablet/iPad) —
+// sin esto, un menú abierto con el dedo nunca se cerraba solo, solo ejecutando
+// una de sus opciones. zIndex bajo: se coloca por debajo de cualquier contenido
+// de menú real (todos usan zIndex >= 10) pero por encima del resto de la app.
+function CerrablePorFuera({ onCerrar, children }) {
+  return (
+    <>
+      <div onClick={onCerrar} style={{ position: "fixed", inset: 0, zIndex: 5 }} />
+      {children}
+    </>
+  );
+}
+
 function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar }) {
   const tipos = ["Muscular", "Tendinosa", "Articular"];
   return (
+    <CerrablePorFuera onCerrar={onCerrar}>
     <div
       style={{
         position: "absolute",
@@ -813,7 +862,6 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
         maxHeight: 320,
         overflowY: "auto",
       }}
-      onMouseLeave={onCerrar}
     >
       <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680", padding: "2px 4px 6px" }}>
         CATEGORÍAS PREVENTIVAS
@@ -870,6 +918,7 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
         );
       })}
     </div>
+    </CerrablePorFuera>
   );
 }
 
@@ -883,6 +932,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
     { id: "eliminar", label: "Eliminar perfil", tono: "peligro" },
   ];
   return (
+    <CerrablePorFuera onCerrar={onCerrar}>
     <div
       style={{
         position: "absolute",
@@ -896,7 +946,6 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
         boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
         padding: 6,
       }}
-      onMouseLeave={onCerrar}
     >
       {acciones.map((a) => {
         const color = a.tono === "peligro" ? "#EF4444" : a.tono === "ambar" ? "#F97316" : a.tono === "verde" ? "#22C55E" : "#F0F4FF";
@@ -916,6 +965,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
         );
       })}
     </div>
+    </CerrablePorFuera>
   );
 }
 
@@ -1143,8 +1193,8 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
   const suspendidos = players.filter((j) => j.estado === "suspendido").length;
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 16px 60px" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -1202,7 +1252,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
         </button>
       </div>
       {panelAltaAbierto && <PanelAltaReal pinsExistentes={players.map((j) => j.pin)} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -1280,8 +1330,8 @@ function TarjetaModuloReal({ modulo, onClick }) {
 function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
   const hoy = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" });
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 16px 60px" }}>
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={480}>
+      <div>
         <div style={{ marginBottom: 24 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518" }}>MODO ENTRENADOR</div>
@@ -1301,7 +1351,7 @@ function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
           ))}
         </div>
       </div>
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -1387,8 +1437,8 @@ function TarjetaDiaReal({ fecha, tareasDelDia }) {
   );
 }
 
-function HistorialPorJugador({ players }) {
-  const [jugadorSel, setJugadorSel] = useState(players[0]?.id || "");
+function HistorialPorJugador({ players, jugadorInicial }) {
+  const [jugadorSel, setJugadorSel] = useState(jugadorInicial || players[0]?.id || "");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const { loaded, items } = usePlayerHistory(jugadorSel || null);
@@ -1523,8 +1573,8 @@ function HistorialReal({ onBack }) {
   const [vista, setVista] = useState("jugador");
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 16px 60px" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
@@ -1556,7 +1606,7 @@ function HistorialReal({ onBack }) {
         </div>
         {!playersLoaded ? <LoadingBlock /> : vista === "jugador" ? <HistorialPorJugador players={players} /> : <HistorialPorSesion players={players} />}
       </div>
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -1733,8 +1783,8 @@ function ProgramacionReal({ players, onBack }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 16px 60px" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
@@ -1763,7 +1813,7 @@ function ProgramacionReal({ players, onBack }) {
           </div>
         </div>
       </div>
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -1920,14 +1970,14 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
     return (
-      <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+      <PantallaBase rol="jugador" centrarContenido>
         <div style={{ textAlign: "center" }}>
           <div style={{ marginBottom: 12 }}>No se encontró tu perfil.</div>
           <button onClick={onExit} style={{ background: "#F5C518", border: "none", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontWeight: 700, cursor: "pointer" }}>
             Volver al portal
           </button>
         </div>
-      </div>
+      </PantallaBase>
     );
   }
 
@@ -2041,7 +2091,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   if (enviado || yaEnviadaAntes) {
     return (
-      <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", display: "flex", alignItems: "center", justifyContent: "center", padding: "0 24px" }}>
+      <PantallaBase rol="jugador" centrarContenido>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#0E1E35", border: "2px solid #22C55E", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#22C55E" }}>✓</div>
           <div style={{ fontSize: 17, fontWeight: 700, color: "#F0F4FF" }}>Sesión enviada</div>
@@ -2050,13 +2100,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             ← Volver al portal
           </button>
         </div>
-      </div>
+      </PantallaBase>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 14px 60px" }}>
-      <div style={{ maxWidth: 480, margin: "0 auto" }}>
+    <PantallaBase rol="jugador" maxWidth={480}>
+      <div>
         <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Cambiar de jugador
         </button>
@@ -2172,7 +2222,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </button>
         </div>
       )}
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -2461,8 +2511,8 @@ function BibliotecaEjerciciosReal({ onBack }) {
   };
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 16px 60px" }}>
-      <div style={{ maxWidth: 560, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
@@ -2569,7 +2619,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
           }}
         />
       )}
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -2685,7 +2735,8 @@ function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregar
         {seleccionados.length ? seleccionados.join(", ") : "Ninguno"}
       </button>
       {abierto && (
-        <div onMouseLeave={() => setAbierto(false)} style={{ position: "absolute", zIndex: 15, top: "100%", left: 0, marginTop: 4, width: 220, maxHeight: 260, overflowY: "auto", background: "#122440", border: "1px solid #1A3050", borderRadius: 8, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 6 }}>
+        <CerrablePorFuera onCerrar={() => setAbierto(false)}>
+        <div style={{ position: "absolute", zIndex: 15, top: "100%", left: 0, marginTop: 4, width: 220, maxHeight: 260, overflowY: "auto", background: "#122440", border: "1px solid #1A3050", borderRadius: 8, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 6 }}>
           {disponibles.map((m) => {
             const activo = seleccionados.includes(m);
             return (
@@ -2729,6 +2780,7 @@ function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregar
             </button>
           </div>
         </div>
+        </CerrablePorFuera>
       )}
     </div>
   );
@@ -2897,6 +2949,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
         + Añadir tarea desde biblioteca
       </button>
       {abierto && (
+        <CerrablePorFuera onCerrar={() => setAbierto(false)}>
         <div style={{ position: "absolute", zIndex: 10, top: "110%", left: 0, width: 260, background: "#122440", border: "1px solid #1A3050", borderRadius: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 8 }}>
           <input
             autoFocus
@@ -2937,6 +2990,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
             )}
           </div>
         </div>
+        </CerrablePorFuera>
       )}
     </div>
   );
@@ -3397,8 +3451,8 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
 
   if (hasData) {
     return (
-      <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 16px 60px" }}>
-        <div style={{ maxWidth: 640, margin: "0 auto" }}>
+      <PantallaBase rol="entrenador" maxWidth={640}>
+        <div>
           <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
             ← Volver a Dashboard
           </button>
@@ -3406,13 +3460,13 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
             <div style={{ fontSize: 13, color: "#8BA4C0" }}>Ya hay datos registrados por jugadores para esta sesión — queda bloqueada para proteger ese historial.</div>
           </div>
         </div>
-      </div>
+      </PantallaBase>
     );
   }
 
   return (
-    <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "28px 16px 60px" }}>
-      <div style={{ maxWidth: 640, margin: "0 auto" }}>
+    <PantallaBase rol="entrenador" maxWidth={640}>
+      <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
@@ -3711,7 +3765,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
           </button>
         </div>
       </div>
-    </div>
+    </PantallaBase>
   );
 }
 
@@ -3719,6 +3773,7 @@ export default function App() {
   const [screen, setScreen] = useState("portal"); // "portal" | "coach" | "player"
   const [playerId, setPlayerId] = useState(null);
   const [coachModulo, setCoachModulo] = useState(null); // null = dashboard
+  const [historialJugador, setHistorialJugador] = useState(null); // jugador para "Ver historial" desde Roster
 
   if (screen === "portal") {
     return (
@@ -3740,8 +3795,11 @@ export default function App() {
   }
 
   // screen === "coach"
+  if (historialJugador) {
+    return <HistorialJugadorModuloReal jugador={historialJugador} onBack={() => setHistorialJugador(null)} />;
+  }
   if (coachModulo === "roster") {
-    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={() => {}} />;
+    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} />;
   }
   if (coachModulo === "historial") {
     return <HistorialReal onBack={() => setCoachModulo(null)} />;
@@ -3756,31 +3814,6 @@ export default function App() {
     return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} />;
   }
 
-  if (coachModulo && !["roster", "historial", "programacion", "biblioteca", "diseno"].includes(coachModulo)) {
-    // Pantallas todavía sin calcar de su mockup en esta pasada — se avisa
-    // explícitamente en vez de mostrar la interfaz antigua sin decirlo.
-    const nombreModulo = MODULOS_DASHBOARD.find((m) => m.id === coachModulo)?.nombre || coachModulo;
-    return (
-      <div style={{ minHeight: "100vh", background: "#060D1A", color: "#F0F4FF", fontFamily: "'Inter', -apple-system, sans-serif", padding: "24px 16px 60px" }}>
-        <div style={{ maxWidth: 480, margin: "0 auto" }}>
-          <button
-            onClick={() => setCoachModulo(null)}
-            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 20 }}
-          >
-            ← Volver a Dashboard
-          </button>
-          <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center" }}>
-            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 8 }}>{nombreModulo}</div>
-            <div style={{ fontSize: 13, color: "#8BA4C0", lineHeight: 1.5 }}>
-              Este módulo todavía no está calcado de su mockup en esta pasada — sigue siendo trabajo pendiente, no
-              algo roto. Roster, Programación e Historial ya están terminados.
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
 }
 
@@ -3789,4 +3822,30 @@ function ProgramacionModuloReal({ onBack }) {
   const [players, , playersLoaded] = usePlayers();
   if (!playersLoaded) return <LoadingBlock />;
   return <ProgramacionReal players={players} onBack={onBack} />;
+}
+
+// "Ver historial" de un jugador concreto desde el Roster: reutiliza
+// HistorialPorJugador (la misma pieza que usa el módulo de Historial general),
+// preseleccionando el jugador sobre el que se pulsó, pero sin perder la
+// posibilidad de cambiar a otro desde el propio desplegable.
+function HistorialJugadorModuloReal({ jugador, onBack }) {
+  const [players, , playersLoaded] = usePlayers();
+  if (!playersLoaded) return <LoadingBlock />;
+  return (
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
+        <button
+          onClick={onBack}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+        >
+          ← Volver al Roster
+        </button>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>HISTORIAL</div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>{jugador?.name || "Jugador"}</h1>
+        </div>
+        <HistorialPorJugador players={players} jugadorInicial={jugador?.id} />
+      </div>
+    </PantallaBase>
+  );
 }
