@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil } from "lucide-react";
 
 // ====== Backend remoto (Google Sheets vía Apps Script) ======
@@ -200,6 +200,24 @@ function isNotFoundError(e) {
   return msg.includes("not found") || msg.includes("404") || msg.includes("no existe") || msg.includes("does not exist");
 }
 
+// Caché en memoria compartida entre TODAS las pantallas de la app (vive
+// mientras la pestaña del navegador esté abierta). Sin esto, cada vez que
+// cambias de pantalla se vuelve a pedir todo desde cero a Apps Script, que
+// es lento por naturaleza — con la caché, la segunda vez que hace falta un
+// dato ya está en memoria y no hay que esperar a la red.
+const sharedDataCache = new Map();
+
+// Para los sitios que guardan directamente con api.save/api.delete sin pasar
+// por useEntityList (p. ej. el guardado de Diseñar sesión, que escribe
+// Sesiones/Tareas/Circuitos en varias llamadas sueltas) — limpia la caché de
+// esa entidad para que la próxima pantalla que la necesite pida datos frescos
+// en vez de mostrar lo de antes de guardar.
+function invalidateEntityCache(entity) {
+  for (const k of sharedDataCache.keys()) {
+    if (k.startsWith(`list:${entity}:`)) sharedDataCache.delete(k);
+  }
+}
+
 // Sustituye a usePersistentList: sincroniza el array COMPLETO de una entidad
 // (jugadores, ejercicios, sesiones, tareas, registros...) contra su pestaña.
 // save(next) recibe la lista completa deseada (igual que antes) y por debajo
@@ -207,11 +225,20 @@ function isNotFoundError(e) {
 // los que ya no están — así el resto del código que hace `players.map(...)`,
 // `[...items, nuevo]`, `.filter(...)` no necesita cambiar de forma.
 function useEntityList(entity, filters) {
-  const [items, setItems] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const filtersKey = JSON.stringify(filters || null);
+  const cacheKey = `list:${entity}:${filtersKey}`;
+  const [items, setItems] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
-  const filtersKey = JSON.stringify(filters || null);
+  // Se mantiene siempre al día, de forma síncrona, independientemente de
+  // cuándo React decida re-renderizar. save() compara contra esta referencia
+  // en vez de contra el "items" cerrado en el momento en que se creó la
+  // función — así, si guardas dos veces seguidas muy rápido, el segundo
+  // guardado ve de verdad el resultado del primero y no lo deshace ni
+  // duplica nada por comparar contra una foto vieja.
+  const itemsRef = useRef(items);
+  itemsRef.current = items;
 
   useEffect(() => {
     let cancelled = false;
@@ -222,11 +249,20 @@ function useEntityList(entity, filters) {
       setLoaded(true);
       return;
     }
+    // Si ya está en caché y no es un refresco explícito (tick), se usa tal
+    // cual, sin ir a la red — esto es lo que hace que volver a una pantalla
+    // ya visitada sea instantáneo.
+    if (tick === 0 && sharedDataCache.has(cacheKey)) {
+      setItems(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return;
+    }
     setLoaded(false);
     (async () => {
       try {
         const res = await api.list(entity, filters);
         if (cancelled) return;
+        sharedDataCache.set(cacheKey, res || []);
         setItems(res || []);
       } catch (e) {
         if (cancelled) return;
@@ -243,7 +279,8 @@ function useEntityList(entity, filters) {
 
   const save = useCallback(
     async (next) => {
-      const previous = items;
+      const previous = itemsRef.current;
+      itemsRef.current = next; // optimista e inmediato: la siguiente llamada a save(), aunque sea milisegundos después, ya lo ve
       setItems(next);
       try {
         const previousById = new Map(previous.filter((i) => i.id).map((i) => [i.id, i]));
@@ -259,7 +296,28 @@ function useEntityList(entity, filters) {
         toSaveIdx.forEach((idx, i) => {
           reconciled[idx] = savedResults[i];
         });
-        setItems(reconciled);
+        // Si mientras esta llamada estaba en marcha llegó OTRA más reciente
+        // (itemsRef.current ya no es "next"), no pisamos su resultado — nos
+        // limitamos a fusionar los ids reales que acabamos de crear.
+        if (itemsRef.current === next) {
+          itemsRef.current = reconciled;
+          setItems(reconciled);
+        } else {
+          const finalItems = itemsRef.current.map((item) => {
+            const idx = next.indexOf(item);
+            return idx !== -1 && toSaveIdx.includes(idx) ? reconciled[idx] : item;
+          });
+          itemsRef.current = finalItems;
+          setItems(finalItems);
+        }
+        sharedDataCache.set(cacheKey, itemsRef.current);
+        // Cualquier otra pantalla que tenga esta misma entidad cacheada con
+        // OTRO filtro (p. ej. "registros de este jugador" vs "todos los
+        // registros") puede haberse quedado desactualizada — se invalida
+        // para que la próxima vez que se visite, se vuelva a pedir.
+        for (const k of sharedDataCache.keys()) {
+          if (k.startsWith(`list:${entity}:`) && k !== cacheKey) sharedDataCache.delete(k);
+        }
         setError(null);
         return true;
       } catch (e) {
@@ -268,7 +326,7 @@ function useEntityList(entity, filters) {
         return false;
       }
     },
-    [entity, items]
+    [entity, cacheKey]
   );
 
   const retry = useCallback(() => setTick((t) => t + 1), []);
@@ -1418,7 +1476,9 @@ async function resolveEjercicio(ejercicios, def) {
     gif_url: def.gif_url !== undefined ? def.gif_url : match?.gif_url || "",
     orden_rotacion: match?.orden_rotacion || "",
   };
-  return api.save("ejercicios", record);
+  const saved = await api.save("ejercicios", record);
+  invalidateEntityCache("ejercicios"); // escribe directo, sin pasar por useEntityList
+  return saved;
 }
 
 const emptyDraft = { name: "", sets: 3, reps: 8, rir: "", notas: "", videoUrl: "", tipos: [] };
@@ -1717,14 +1777,19 @@ function ExerciseBuilderBlock({ exercises, onAdd, onUpdate, onRemove, categoria,
 // ---------- SESIONES / TAREAS / REGISTROS (en vivo, sin caché) ----------
 
 function useCategoriasPreventivas() {
-  const [items, setItems] = useState([]);
-  const [loaded, setLoaded] = useState(false);
+  const cacheKey = "categoriasPreventivas";
+  const [items, setItems] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
   useEffect(() => {
+    if (sharedDataCache.has(cacheKey)) return; // fija (lista de 12 categorías) — no cambia entre pantallas
     let cancelled = false;
     api
       .categoriasPreventivas()
       .then((res) => {
-        if (!cancelled) setItems(res || []);
+        if (!cancelled) {
+          sharedDataCache.set(cacheKey, res || []);
+          setItems(res || []);
+        }
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -1741,9 +1806,11 @@ function useCategoriasPreventivas() {
 
 // Carga las tareas de una o varias sesiones en una sola llamada (usa el filtro "IN" del backend).
 function useTareasForSesiones(sesionIds) {
-  const [tareas, setTareas] = useState([]);
-  const [loaded, setLoaded] = useState(false);
   const key = sesionIds.slice().sort().join(",");
+  const sesionIdsSet = new Set(sesionIds);
+  const cacheKey = `list:tareas:bySesiones:${key}`;
+  const [tareas, setTareas] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => !key || sharedDataCache.has(cacheKey));
   useEffect(() => {
     let cancelled = false;
     if (!key) {
@@ -1751,11 +1818,25 @@ function useTareasForSesiones(sesionIds) {
       setLoaded(true);
       return;
     }
+    if (sharedDataCache.has(cacheKey)) {
+      setTareas(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return;
+    }
     setLoaded(false);
     api
       .list("tareas", { sesion_id: key })
       .then((res) => {
-        if (!cancelled) setTareas(res || []);
+        if (!cancelled) {
+          // CRÍTICO: nunca fiarse de que el backend filtre de verdad por
+          // sesion_id — se ha confirmado que no lo hace y devuelve TODAS las
+          // tareas de TODAS las sesiones que hayan existido nunca. Sin este
+          // filtro, un jugador vería mezcladas tareas de sesiones antiguas
+          // que no le corresponden.
+          const filtradas = (res || []).filter((t) => sesionIdsSet.has(t.sesion_id));
+          sharedDataCache.set(cacheKey, filtradas);
+          setTareas(filtradas);
+        }
       })
       .catch(() => {
         if (!cancelled) setTareas([]);
@@ -1766,7 +1847,7 @@ function useTareasForSesiones(sesionIds) {
     return () => {
       cancelled = true;
     };
-  }, [key]);
+  }, [key, cacheKey]);
   return [tareas, loaded];
 }
 
@@ -1774,7 +1855,12 @@ function useTareasForSesiones(sesionIds) {
 // para no invalidar un historial que el jugador ya vio y completó.
 async function sesionHasRegistros(sesionId) {
   try {
-    const tareas = await api.list("tareas", { sesion_id: sesionId });
+    // Igual que en todos los demás sitios: nunca fiarse de que el backend
+    // filtre de verdad — se ha confirmado que devuelve la tabla entera sin
+    // filtrar. Se filtra siempre aquí, o esto bloquearía CUALQUIER sesión en
+    // cuanto existiera un solo registro en toda la aplicación.
+    const todasLasTareas = await api.list("tareas", { sesion_id: sesionId });
+    const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionId);
     if (!tareas.length) return false;
     const tareaIds = new Set(tareas.map((t) => t.id));
     const todosLosRegistros = await api.list("registros", {});
@@ -2258,9 +2344,13 @@ function InjuryGroupManager({ players }) {
 
 // Trae varias filas de una entidad por id en una sola llamada (usa el filtro "IN" del backend).
 function useEntityByIds(entity, ids) {
-  const [items, setItems] = useState([]);
-  const [loaded, setLoaded] = useState(false);
   const key = [...new Set(ids)].sort().join(",");
+  // Comparte el mismo prefijo de caché que useEntityList("entity") para que,
+  // si se guarda algo en esa entidad desde otra pantalla, esta caché también
+  // se invalide junto con la otra (ver invalidación cruzada en save() de arriba).
+  const cacheKey = `list:${entity}:byIds:${key}`;
+  const [items, setItems] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => !key || sharedDataCache.has(cacheKey));
   useEffect(() => {
     let cancelled = false;
     if (!key) {
@@ -2268,11 +2358,19 @@ function useEntityByIds(entity, ids) {
       setLoaded(true);
       return;
     }
+    if (sharedDataCache.has(cacheKey)) {
+      setItems(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return;
+    }
     setLoaded(false);
     api
       .list(entity, { id: key })
       .then((res) => {
-        if (!cancelled) setItems(res || []);
+        if (!cancelled) {
+          sharedDataCache.set(cacheKey, res || []);
+          setItems(res || []);
+        }
       })
       .catch(() => {
         if (!cancelled) setItems([]);
@@ -2283,14 +2381,17 @@ function useEntityByIds(entity, ids) {
     return () => {
       cancelled = true;
     };
-  }, [entity, key]);
+  }, [entity, key, cacheKey]);
   return [items, loaded];
 }
 
 // Historial completo de un jugador: sus Registros, unidos con la Tarea (series/reps/RIR
 // prescritos) y el Ejercicio (nombre, tipos, GIF) correspondientes. Todo en vivo, sin caché.
 function usePlayerHistory(playerId) {
-  const [registros, , registrosLoaded] = useEntityList("registros", playerId ? { jugador_id: playerId } : false);
+  const [registrosTraidos, , registrosLoaded] = useEntityList("registros", playerId ? { jugador_id: playerId } : false);
+  // Mismo blindaje que en la pantalla del jugador: el backend no filtra de
+  // verdad por jugador_id, así que se filtra siempre aquí también.
+  const registros = playerId ? registrosTraidos.filter((r) => r.jugador_id === playerId) : [];
   const tareaIds = registros.map((r) => r.tarea_id);
   const [tareas, tareasLoaded] = useEntityByIds("tareas", tareaIds);
   const ejercicioIds = tareas.map((t) => t.ejercicio_id);
@@ -4044,7 +4145,7 @@ function ProgramacionReal({ players, onBack }) {
 
 // ---------- PANTALLA DEL JUGADOR (calcado de pantalla-jugador.jsx) ----------
 
-function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden }) {
+function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
   return (
     <div style={{ background: "#0E1E35", border: `1px solid ${hecho ? "#22C55E55" : "#1A3050"}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -4094,42 +4195,44 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           <span style={{ fontSize: 11.5, color: "#8BA4C0", lineHeight: 1.35 }}>{tarea.nota}</span>
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>REPS</span>
-            <input
-              value={registro.reps}
-              onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
-              placeholder="—"
-              style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>CARGA KG</span>
-            <input
-              value={registro.carga}
-              onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
-              placeholder="—"
-              style={{ width: 60, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>RIR</span>
-            <input
-              value={registro.rir}
-              onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
-              placeholder="—"
-              style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-            />
-          </label>
+      {mostrarRegistro && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>REPS</span>
+              <input
+                value={registro.reps}
+                onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
+                placeholder="—"
+                style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>CARGA KG</span>
+              <input
+                value={registro.carga}
+                onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
+                placeholder="—"
+                style={{ width: 60, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>RIR</span>
+              <input
+                value={registro.rir}
+                onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
+                placeholder="—"
+                style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+              />
+            </label>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
-function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif }) {
+function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
   return (
     <div style={{ border: "1.5px solid #F5C51855", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "#0E1E3540" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
@@ -4147,6 +4250,7 @@ function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCamb
             registro={getRegistro(t.id)}
             onCambiarRegistro={(val) => onCambiarRegistro(t.id, val)}
             onAmpliarGif={() => t.gif && onAmpliarGif(t.gif)}
+            mostrarRegistro={mostrarRegistro}
           />
         ))}
       </div>
@@ -4173,7 +4277,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // toda la tabla de Registros del equipo entero cada vez que se abre esta
   // pantalla.
   const [registrosJugador, saveRegistrosJugador, registrosLoaded] = useEntityList("registros", player ? { jugador_id: player.id } : false);
-  const registros = player && tareaIds.length ? registrosJugador.filter((r) => tareaIds.includes(r.tarea_id)) : [];
+  // OJO: nunca fiarse de que el backend filtre de verdad por jugador_id — se
+  // ha confirmado que no lo hace (devuelve la tabla entera). Filtramos aquí
+  // siempre, sea cual sea el comportamiento real del backend en cada momento.
+  const registros =
+    player && tareaIds.length ? registrosJugador.filter((r) => r.jugador_id === player.id && tareaIds.includes(r.tarea_id)) : [];
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
   const [registrosDraft, setRegistrosDraft] = useState({});
@@ -4367,6 +4475,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                           getRegistro={getRegistro}
                           onCambiarRegistro={setRegistroDraft}
                           onAmpliarGif={setGifAmpliado}
+                          mostrarRegistro={nombreBloque === "Fuerza"}
                         />
                       ) : (
                         <TareaCardReal
@@ -4377,6 +4486,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                           registro={getRegistro(item.tarea.id)}
                           onCambiarRegistro={(val) => setRegistroDraft(item.tarea.id, val)}
                           onAmpliarGif={() => item.tarea.gif && setGifAmpliado(item.tarea.gif)}
+                          mostrarRegistro={nombreBloque === "Fuerza"}
                         />
                       )
                     )}
@@ -5372,8 +5482,14 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
         setCargandoExistente(false);
         return;
       }
-      const tareas = await api.list("tareas", { sesion_id: sesionExistente.id });
-      const circuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
+      // Nunca fiarse del filtro del backend — se ha confirmado que no
+      // filtra de verdad. Se filtra siempre aquí también, o al editar
+      // cualquier sesión aparecerían mezcladas tareas y circuitos de todas
+      // las demás sesiones que existan.
+      const todasLasTareas = await api.list("tareas", { sesion_id: sesionExistente.id });
+      const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
+      const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
+      const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
       if (cancelled) return;
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
       const toDraft = (t) => {
@@ -5636,6 +5752,10 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
       const circuitosABorrar = previousCircuitoIds.filter((id) => !keepCircuitoIds.has(id));
       await Promise.all(tareasABorrar.map((id) => api.delete("tareas", id)));
       await Promise.all(circuitosABorrar.map((id) => api.delete("circuitos", id)));
+
+      invalidateEntityCache("sesiones");
+      invalidateEntityCache("tareas");
+      invalidateEntityCache("circuitos");
 
       setOk(true);
       onGuardado?.();
