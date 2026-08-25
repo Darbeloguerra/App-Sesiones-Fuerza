@@ -324,6 +324,51 @@ const inputStyle = {
   boxSizing: "border-box",
 };
 
+// Extrae el ID de un enlace de YouTube en cualquiera de sus formatos habituales
+// (watch?v=, youtu.be/, shorts/, embed/). Devuelve null si no es de YouTube —
+// así el resto de la app puede seguir aceptando enlaces antiguos (GIFs de
+// Drive de antes de este cambio) sin romperse.
+function extractYouTubeId(url) {
+  if (!url) return null;
+  const m = url.match(/(?:youtube\.com\/watch\?v=|youtube\.com\/shorts\/|youtu\.be\/|youtube\.com\/embed\/)([\w-]{11})/);
+  return m ? m[1] : null;
+}
+
+// Miniatura para las tarjetas de tarea/biblioteca: si es un vídeo de YouTube,
+// usa la miniatura oficial de YouTube; si no (GIF antiguo de Drive, u otro
+// enlace de imagen), usa el propio enlace tal cual.
+function miniaturaTarea(url) {
+  const videoId = extractYouTubeId(url);
+  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : url;
+}
+
+// Reproductor incrustado. Si el enlace es de YouTube, reproduce dentro de la
+// app (16:9, sin marca ni vídeos relacionados de más). Si no lo es —
+// compatibilidad con GIFs ya subidos a Drive antes de este cambio—, se
+// muestra como imagen normal.
+function VideoEmbed({ url }) {
+  if (!url) return null;
+  const videoId = extractYouTubeId(url);
+  if (videoId) {
+    return (
+      <div style={{ marginTop: 8, position: "relative", width: "100%", paddingTop: "56.25%", borderRadius: 8, overflow: "hidden", background: "#000" }} onClick={(e) => e.stopPropagation()}>
+        <iframe
+          src={`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1`}
+          title="Demostración del ejercicio"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+        />
+      </div>
+    );
+  }
+  return (
+    <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
+      <img src={url} alt="Demostración de la tarea" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 8, display: "block", background: "#060D1A" }} />
+    </div>
+  );
+}
+
 function LoadingBlock() {
   return (
     <div style={{ display: "flex", justifyContent: "center", padding: 40, color: "#8BA4C0" }}>
@@ -1296,6 +1341,12 @@ function IconoModulo({ tipo }) {
           <path d="M12 7v5l3.5 2" />
         </svg>
       );
+    case "rayo":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -1304,6 +1355,7 @@ function IconoModulo({ tipo }) {
 const MODULOS_DASHBOARD = [
   { id: "programacion", nombre: "Programación", descripcion: "Sesión de hoy y próximas programadas", icono: "calendario" },
   { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
+  { id: "complementarias", nombre: "Dinámicas complementarias", descripcion: "Programas puntuales (ej. Miembro Superior) para días concretos", icono: "rayo" },
   { id: "roster", nombre: "Jugadores", descripcion: "Roster, PINs y categorías preventivas", icono: "personas" },
   { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
@@ -1617,10 +1669,17 @@ function TareaVisualReal({ tarea }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#122440", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 10px" }}>
       {tarea.gif ? (
-        <img src={tarea.gif} alt="" style={{ width: 42, height: 42, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />
+        <div style={{ position: "relative", width: 42, height: 42, borderRadius: 7, flexShrink: 0 }}>
+          <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: 7, objectFit: "cover", display: "block" }} />
+          {extractYouTubeId(tarea.gif) && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 7 }}>
+              <Play size={13} color="#fff" fill="#fff" />
+            </div>
+          )}
+        </div>
       ) : (
         <div style={{ width: 42, height: 42, borderRadius: 7, background: "#0E1E35", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
-          GIF
+          VÍDEO
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -1747,8 +1806,9 @@ function ProgramacionReal({ players, onBack }) {
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
 
   if (showEditor) {
+    const EditorComponent = editingSesion?.tipo === "complementaria" ? DinamicaComplementariaReal : DisenoSesionReal;
     return (
-      <DisenoSesionReal
+      <EditorComponent
         sesionExistente={editingSesion}
         onBack={() => setShowEditor(false)}
         onGuardado={() => {
@@ -1831,10 +1891,17 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </span>
         )}
         {tarea.gif ? (
-          <img src={tarea.gif} alt={`Demostración: ${tarea.nombre}`} onClick={onAmpliarGif} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", flexShrink: 0, cursor: "pointer" }} />
+          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: "pointer" }}>
+            <img src={miniaturaTarea(tarea.gif)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block" }} />
+            {extractYouTubeId(tarea.gif) && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 8 }}>
+                <Play size={16} color="#fff" fill="#fff" />
+              </div>
+            )}
+          </div>
         ) : (
           <div style={{ width: 46, height: 46, borderRadius: 8, background: "#122440", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
-            GIF
+            VÍDEO
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -2213,7 +2280,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
       {gifAmpliado && (
         <div onClick={() => setGifAmpliado(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 40, padding: 24 }}>
-          <img src={gifAmpliado} alt="Demostración ampliada" style={{ maxWidth: "100%", maxHeight: "80vh", borderRadius: 12 }} />
+          <div style={{ width: "100%", maxWidth: 480 }}>
+            <VideoEmbed url={gifAmpliado} />
+          </div>
           <button
             onClick={() => setGifAmpliado(null)}
             style={{ position: "absolute", top: 20, right: 20, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", width: 34, height: 34, borderRadius: "50%", fontSize: 16, cursor: "pointer" }}
@@ -2266,7 +2335,14 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10 }}>
       {ejercicio.gif_url ? (
-        <img src={ejercicio.gif_url} alt="" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />
+        <div style={{ position: "relative", width: 40, height: 40, borderRadius: 7, flexShrink: 0 }}>
+          <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", display: "block" }} />
+          {extractYouTubeId(ejercicio.gif_url) && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 7 }}>
+              <Play size={13} color="#fff" fill="#fff" />
+            </div>
+          )}
+        </div>
       ) : (
         <div style={{ width: 40, height: 40, borderRadius: 7, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
           —
@@ -2300,30 +2376,13 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
   const [bloque, setBloque] = useState(ejercicioEditar?.bloque || "Fuerza");
   const [categoriaId, setCategoriaId] = useState(ejercicioEditar?.categoria_preventiva_id || categorias[0]?.id || "");
   const [tagsSel, setTagsSel] = useState(ejercicioEditar?.tags_descriptivos || []);
-  const [gifUrl, setGifUrl] = useState(ejercicioEditar?.gif_url || "");
-  const [subiendo, setSubiendo] = useState(false);
+  const [videoUrl, setVideoUrl] = useState(ejercicioEditar?.gif_url || "");
   const [guardando, setGuardando] = useState(false);
-  const fileInputRef = React.useRef(null);
 
   const esPreventivo = bloque === "Preventivo";
   const toggleTag = (t) => setTagsSel((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
-
-  const subirGif = (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      setSubiendo(true);
-      try {
-        const upload = await api.uploadGif(reader.result);
-        if (upload?.fileId) setGifUrl(`https://lh3.googleusercontent.com/d/${upload.fileId}`);
-      } finally {
-        setSubiendo(false);
-      }
-    };
-    reader.readAsDataURL(file);
-  };
+  const videoIdValido = extractYouTubeId(videoUrl);
+  const enlaceNoReconocido = videoUrl.trim().length > 0 && !videoIdValido;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
@@ -2370,23 +2429,17 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
           </div>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>GIF</span>
-          {gifUrl ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <img src={gifUrl} alt="Vista previa del GIF" style={{ width: 56, height: 56, borderRadius: 8, objectFit: "cover", border: "1px solid #1A3050" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <span style={{ fontSize: 12, color: "#F5C518" }}>GIF cargado</span>
-                <button onClick={() => setGifUrl("")} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 6, padding: "4px 8px", fontSize: 11.5, cursor: "pointer", width: "fit-content" }}>
-                  Quitar y subir otro
-                </button>
-              </div>
-            </div>
-          ) : (
-            <div onClick={() => fileInputRef.current?.click()} style={{ border: "1px dashed #1A3050", borderRadius: 8, padding: 14, textAlign: "center", color: "#4A6680", fontSize: 12, cursor: "pointer" }}>
-              {subiendo ? "Subiendo..." : "Subir GIF del ejercicio"}
-              <input ref={fileInputRef} type="file" accept="image/gif,image/*" onChange={subirGif} style={{ display: "none" }} />
-            </div>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>ENLACE DE VÍDEO (YouTube, oculto o público)</span>
+          <input
+            value={videoUrl}
+            onChange={(e) => setVideoUrl(e.target.value)}
+            placeholder="https://youtu.be/..."
+            style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? "#EF4444" : undefined }}
+          />
+          {enlaceNoReconocido && (
+            <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace como YouTube — revisa que sea el enlace de compartir del vídeo.</span>
           )}
+          {videoIdValido && <VideoEmbed url={videoUrl} />}
         </label>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
@@ -2403,7 +2456,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
                 bloque,
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
                 tags_descriptivos: tagsSel,
-                gif_url: gifUrl,
+                gif_url: videoUrl,
                 orden_rotacion: ejercicioEditar?.orden_rotacion || "",
               });
               setGuardando(false);
@@ -2938,7 +2991,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
   const opciones = ejercicios.filter((e) => {
-    const coincideBloque = e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
+    const coincideBloque = !bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
     const coincideTexto = (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
     return coincideBloque && coincideTexto;
   });
@@ -3079,6 +3132,23 @@ async function elegirSiguienteRotacion(claveCategoria, poolOrdenado) {
   return elegido;
 }
 
+// Igual que elegirSiguienteRotacion pero para cuando ese día se quieren N
+// ejercicios seguidos de la misma categoría en vez de solo 1 (p. ej. una
+// sesión dedicada por completo al trabajo preventivo). Una sola lectura y
+// una sola escritura del puntero, no N — importa porque cada llamada a Apps
+// Script tiene latencia propia.
+async function elegirVariosRotacion(claveCategoria, poolOrdenado, cantidad) {
+  if (!poolOrdenado.length || cantidad <= 0) return [];
+  const actual = await api.rotacion(claveCategoria);
+  const punteroInicial = actual ? Number(actual.puntero_actual) || 0 : 0;
+  const elegidos = [];
+  for (let i = 0; i < cantidad; i++) {
+    elegidos.push(poolOrdenado[(punteroInicial + i) % poolOrdenado.length]);
+  }
+  await api.setRotacion(claveCategoria, punteroInicial + cantidad);
+  return elegidos;
+}
+
 // Categoría preventiva común a TODOS los jugadores destinatarios (versión
 // "simple" elegida: un único ejercicio por sesión, no uno por jugador).
 // Devuelve null si no hay una única categoría compartida por todos.
@@ -3130,7 +3200,17 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   const [targetPlayerIds, setTargetPlayerIds] = useState(sesionExistente?.jugadores_destino ?? null);
   const [activacionActiva, setActivacionActiva] = useState(sesionExistente ? !!sesionExistente.activacion_activa : true);
   const [duracionBici, setDuracionBici] = useState("8");
-  const [preventivoActivo, setPreventivoActivo] = useState(sesionExistente ? !!sesionExistente.preventivo_activo : true);
+  // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
+  // categoría se aplican ese día, 0 = no se aplica) sin cambiar el nombre de
+  // la columna en la Sheet — las sesiones antiguas guardaron ahí un booleano
+  // (true/false), así que se convierten a 1/0 la primera vez que se leen;
+  // las nuevas guardan directamente el número elegido.
+  const [preventivoCantidad, setPreventivoCantidad] = useState(() => {
+    if (!sesionExistente) return 1;
+    const v = sesionExistente.preventivo_activo;
+    if (typeof v === "boolean") return v ? 1 : 0;
+    return Number(v) || 0;
+  });
 
   const [tareasCore, setTareasCore] = useState([]);
   const [circuitosCore, setCircuitosCore] = useState([]);
@@ -3142,7 +3222,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
   const [activacionTareaId, setActivacionTareaId] = useState(null);
   const [movilidadTareaIdsPorFecha, setMovilidadTareaIdsPorFecha] = useState({});
-  const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({});
+  const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({}); // fecha -> [id, id, ...]
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
   const [cargandoExistente, setCargandoExistente] = useState(isEditing);
   const [hasData, setHasData] = useState(false);
@@ -3231,8 +3311,17 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
         });
         return mapa;
       };
+      const mapaPorFechaArray = (nombreBloque) => {
+        const mapa = {};
+        tareas.filter((t) => t.bloque_sesion === nombreBloque).forEach((t) => {
+          const clave = t.fecha || "";
+          if (!mapa[clave]) mapa[clave] = [];
+          mapa[clave].push(t.id);
+        });
+        return mapa;
+      };
       setMovilidadTareaIdsPorFecha(mapaPorFecha("Movilidad"));
-      setPreventivoTareaIdsPorFecha(mapaPorFecha("Preventivo"));
+      setPreventivoTareaIdsPorFecha(mapaPorFechaArray("Preventivo"));
       setPreviousTareaIds(tareas.map((t) => t.id));
       setPreviousCircuitoIds(circuitos.map((c) => c.id));
       setCargandoExistente(false);
@@ -3276,7 +3365,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
         md,
         objetivo,
         jugadores_destino: targetPlayerIds,
-        preventivo_activo: preventivoActivo,
+        preventivo_activo: preventivoCantidad,
         activacion_activa: activacionActiva,
         lote_origen_id: "",
         enviada: true,
@@ -3388,7 +3477,13 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
       // todos los jugadores destinatarios. Igual que Movilidad, cada fecha
       // avanza el puntero por separado. Si no hay una única categoría
       // común, se omite sin avisar con error — es una omisión esperada.
-      if (preventivoActivo) {
+      // Preventivo: versión simple — de 0 a N ejercicios por fecha (elegidos
+      // por el entrenador, no fijo a 1), según la categoría común a todos
+      // los jugadores destinatarios. Igual que Movilidad, cada fecha avanza
+      // el puntero por separado (aquí, N posiciones en vez de 1). Si no hay
+      // una única categoría común, se omite sin avisar con error — es una
+      // omisión esperada.
+      if (preventivoCantidad > 0) {
         const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
         if (catId) {
           const poolPreventivo = ejercicios
@@ -3397,25 +3492,27 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
             .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
           if (poolPreventivo.length) {
             for (const fecha of fechas) {
-              const elegido = await elegirSiguienteRotacion(catId, poolPreventivo);
-              if (!elegido) continue;
-              const saved = await api.save("tareas", {
-                id: preventivoTareaIdsPorFecha[fecha] || undefined,
-                sesion_id: savedSesion.id,
-                bloque_sesion: "Preventivo",
-                ejercicio_id: elegido.id,
-                fecha,
-                modo: "",
-                series: "",
-                cantidad: "",
-                rir: "",
-                tipo_resistencia: "",
-                material: "",
-                nota: "",
-                circuito_id: "",
-                orden_en_circuito: "",
-              });
-              keepTareaIds.add(saved.id);
+              const elegidos = await elegirVariosRotacion(catId, poolPreventivo, preventivoCantidad);
+              const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
+              for (let i = 0; i < elegidos.length; i++) {
+                const saved = await api.save("tareas", {
+                  id: idsExistentes[i] || undefined,
+                  sesion_id: savedSesion.id,
+                  bloque_sesion: "Preventivo",
+                  ejercicio_id: elegidos[i].id,
+                  fecha,
+                  modo: "",
+                  series: "",
+                  cantidad: "",
+                  rir: "",
+                  tipo_resistencia: "",
+                  material: "",
+                  nota: "",
+                  circuito_id: "",
+                  orden_en_circuito: "",
+                });
+                keepTareaIds.add(saved.id);
+              }
             }
           }
         }
@@ -3594,13 +3691,30 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                 })()}
                 {b.id === "preventivo" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div onClick={() => setPreventivoActivo((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                      <span style={{ width: 34, height: 20, borderRadius: 10, background: preventivoActivo ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
-                        <span style={{ position: "absolute", top: 2, left: preventivoActivo ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
-                      </span>
-                      <span style={{ fontSize: 13, color: preventivoActivo ? "#F0F4FF" : "#4A6680" }}>{preventivoActivo ? "Activado para esta sesión" : "Desactivado — no se aplicará hoy"}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicios ese día</span>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <button
+                          type="button"
+                          onClick={() => setPreventivoCantidad((v) => Math.max(0, v - 1))}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: "#122440", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                        >
+                          −
+                        </button>
+                        <span style={{ width: 24, textAlign: "center", fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: preventivoCantidad > 0 ? "#F5C518" : "#4A6680" }}>
+                          {preventivoCantidad}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPreventivoCantidad((v) => v + 1)}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: "#122440", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                        >
+                          +
+                        </button>
+                      </div>
+                      <span style={{ fontSize: 12, color: "#4A6680" }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
                     </div>
-                    {preventivoActivo &&
+                    {preventivoCantidad > 0 &&
                       (() => {
                         const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
                         const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
@@ -3618,7 +3732,9 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                               Categoría detectada para este roster: <span style={{ color: "#F5C518", fontWeight: 500 }}>{cat.nombre}</span>
                             </div>
                             <div style={{ fontSize: 11.5, color: poolPrev.length ? "#4A6680" : "#F97316" }}>
-                              {poolPrev.length ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría.` : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
+                              {poolPrev.length
+                                ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
+                                : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
                             </div>
                           </>
                         );
@@ -3769,6 +3885,394 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   );
 }
 
+// ---------- DINÁMICAS COMPLEMENTARIAS ----------
+// Sesión "de pleno derecho" pero con tipo:"complementaria" y un único bloque
+// de nombre libre (en vez de los 6 fijos de Diseñar sesión) — pensada para
+// programas puntuales (ej. "Miembro Superior") que se activan solo los días
+// concretos que elijas, para el equipo entero o para jugadores concretos.
+// Al guardarse como una Sesión más, la pantalla del jugador la fusiona sola
+// junto a lo que tenga programado ese día (o la muestra sola si no hay nada
+// más), sin ningún cambio en PantallaJugadorReal — ya agrupa por bloque_sesion
+// cualquier sesión que coincida con la fecha y el jugador.
+function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
+  const isEditing = !!sesionExistente;
+  const [players, , playersLoaded] = usePlayers();
+  const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
+  const [materialesDisponibles, setMaterialesDisponibles] = useState([]);
+  const [materialesLoaded, setMaterialesLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .materiales()
+      .then((res) => {
+        if (!cancelled) setMaterialesDisponibles(res || []);
+      })
+      .catch(() => {
+        if (!cancelled) setMaterialesDisponibles([]);
+      })
+      .finally(() => {
+        if (!cancelled) setMaterialesLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const agregarMaterial = async (m) => {
+    if (materialesDisponibles.includes(m)) return;
+    setMaterialesDisponibles((prev) => [...prev, m]);
+    await api.guardarMaterial(m);
+  };
+
+  const [nombreBloque, setNombreBloque] = useState("");
+  const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
+  const [nuevaFecha, setNuevaFecha] = useState("");
+  const [targetPlayerIds, setTargetPlayerIds] = useState(sesionExistente?.jugadores_destino ?? null);
+  const [tareasBloque, setTareasBloque] = useState([]);
+  const [circuitosBloque, setCircuitosBloque] = useState([]);
+
+  const [previousTareaIds, setPreviousTareaIds] = useState([]);
+  const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
+  const [cargandoExistente, setCargandoExistente] = useState(isEditing);
+  const [hasData, setHasData] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  const [ok, setOk] = useState(false);
+
+  useEffect(() => {
+    if (!isEditing || !ejerciciosLoaded) return;
+    let cancelled = false;
+    (async () => {
+      const found = sesionExistente.enviada ? await sesionHasRegistros(sesionExistente.id) : false;
+      if (cancelled) return;
+      setHasData(found);
+      if (found) {
+        setCargandoExistente(false);
+        return;
+      }
+      const todasLasTareas = await api.list("tareas", { sesion_id: sesionExistente.id });
+      const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
+      const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
+      const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
+      if (cancelled) return;
+      const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+      const toDraft = (t) => {
+        let materiales = [];
+        try {
+          materiales = t.material ? JSON.parse(t.material) : [];
+        } catch {
+          materiales = [];
+        }
+        const e = ejerciciosById.get(t.ejercicio_id) || {};
+        return {
+          key: t.id,
+          tareaId: t.id,
+          nombre: e.nombre || "(ejercicio eliminado)",
+          ejercicioId: t.ejercicio_id,
+          modo: t.modo || "reps",
+          series: t.series ?? "",
+          cantidad: t.cantidad ?? "",
+          rir: t.rir ?? "",
+          tipoResistencia: t.tipo_resistencia || "Peso libre",
+          materiales,
+          nota: t.nota || "",
+          circuito_id: t.circuito_id || "",
+          orden_en_circuito: t.orden_en_circuito || "",
+        };
+      };
+      // El nombre del bloque no se guarda aparte — se lee directamente de
+      // bloque_sesion de sus propias tareas, así no hace falta ninguna
+      // columna nueva en Sesiones solo para esto.
+      const nombreDetectado = tareas[0]?.bloque_sesion || circuitos[0]?.bloque_sesion || "";
+      setNombreBloque(nombreDetectado);
+      setTareasBloque(tareas.filter((t) => !t.circuito_id).map(toDraft));
+      setCircuitosBloque(
+        circuitos.map((c) => ({
+          key: c.id,
+          circuitoId: c.id,
+          tareas: tareas
+            .filter((t) => t.circuito_id === c.id)
+            .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
+            .map(toDraft),
+        }))
+      );
+      setPreviousTareaIds(tareas.map((t) => t.id));
+      setPreviousCircuitoIds(circuitos.map((c) => c.id));
+      setCargandoExistente(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, ejerciciosLoaded]);
+
+  const addFecha = () => {
+    if (!nuevaFecha) return;
+    if (!fechas.includes(nuevaFecha)) setFechas((prev) => [...prev, nuevaFecha].sort());
+    setNuevaFecha("");
+  };
+  const removeFecha = (f) => setFechas((prev) => prev.filter((d) => d !== f));
+
+  const agregarTarea = (bloqueSetter) => async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    if (!ejercicioId) {
+      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+      ejercicioId = creado.id;
+      retryEjercicios();
+    }
+    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
+  };
+
+  const guardar = async () => {
+    setError("");
+    setOk(false);
+    if (!fechas.length) {
+      setError("Añade al menos una fecha.");
+      return;
+    }
+    if (!nombreBloque.trim()) {
+      setError("Ponle un nombre a esta dinámica (ej. Miembro Superior).");
+      return;
+    }
+    setGuardando(true);
+    try {
+      const sesionRecord = {
+        id: sesionExistente?.id,
+        tipo: "complementaria",
+        fechas,
+        md: "",
+        objetivo: "",
+        jugadores_destino: targetPlayerIds,
+        preventivo_activo: 0,
+        activacion_activa: false,
+        lote_origen_id: "",
+        enviada: true,
+      };
+      const savedSesion = await api.save("sesiones", sesionRecord);
+
+      const keepTareaIds = new Set();
+      const keepCircuitoIds = new Set();
+      const nombre = nombreBloque.trim();
+
+      const guardarTareaSuelta = async (t) => {
+        const saved = await api.save("tareas", {
+          id: t.tareaId,
+          sesion_id: savedSesion.id,
+          bloque_sesion: nombre,
+          ejercicio_id: t.ejercicioId,
+          modo: t.modo,
+          series: t.series,
+          cantidad: t.cantidad,
+          rir: t.rir,
+          tipo_resistencia: t.tipoResistencia || "",
+          material: JSON.stringify(t.materiales || []),
+          nota: t.nota || "",
+          circuito_id: "",
+          orden_en_circuito: "",
+        });
+        keepTareaIds.add(saved.id);
+      };
+
+      const guardarCircuito = async (c) => {
+        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre });
+        keepCircuitoIds.add(savedCircuito.id);
+        await Promise.all(
+          c.tareas.map(async (t, i) => {
+            const saved = await api.save("tareas", {
+              id: t.tareaId,
+              sesion_id: savedSesion.id,
+              bloque_sesion: nombre,
+              ejercicio_id: t.ejercicioId,
+              modo: t.modo,
+              series: t.series,
+              cantidad: t.cantidad,
+              rir: t.rir,
+              tipo_resistencia: t.tipoResistencia || "",
+              material: JSON.stringify(t.materiales || []),
+              nota: t.nota || "",
+              circuito_id: savedCircuito.id,
+              orden_en_circuito: i + 1,
+            });
+            keepTareaIds.add(saved.id);
+          })
+        );
+      };
+
+      await Promise.all(tareasBloque.map(guardarTareaSuelta));
+      await Promise.all(circuitosBloque.map(guardarCircuito));
+
+      const tareasABorrar = previousTareaIds.filter((id) => !keepTareaIds.has(id));
+      const circuitosABorrar = previousCircuitoIds.filter((id) => !keepCircuitoIds.has(id));
+      await Promise.all(tareasABorrar.map((id) => api.delete("tareas", id)));
+      await Promise.all(circuitosABorrar.map((id) => api.delete("circuitos", id)));
+
+      invalidateEntityCache("sesiones");
+      invalidateEntityCache("tareas");
+      invalidateEntityCache("circuitos");
+
+      setOk(true);
+      onGuardado?.();
+    } catch (e) {
+      setError("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const loaded = playersLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
+  if (!loaded) return <LoadingBlock />;
+
+  if (hasData) {
+    return (
+      <PantallaBase rol="entrenador" maxWidth={640}>
+        <div>
+          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+            ← Volver a Dashboard
+          </button>
+          <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center" }}>
+            <div style={{ fontSize: 13, color: "#8BA4C0" }}>Ya hay datos registrados por jugadores para esta dinámica — queda bloqueada para proteger ese historial.</div>
+          </div>
+        </div>
+      </PantallaBase>
+    );
+  }
+
+  return (
+    <PantallaBase rol="entrenador" maxWidth={640}>
+      <div>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+          ← Volver a Dashboard
+        </button>
+        <div style={{ marginBottom: 22 }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? "EDITAR DINÁMICA" : "NUEVA DINÁMICA"}</div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE DE LA DINÁMICA</span>
+            <input value={nombreBloque} onChange={(e) => setNombreBloque(e.target.value)} placeholder="Ej. Miembro Superior" style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }} />
+            <span style={{ fontSize: 11, color: "#4A6680" }}>Es lo que verá el jugador como título de este bloque en su pantalla.</span>
+          </label>
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>PARA</div>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              {[
+                { id: "equipo", label: "Todo el equipo" },
+                { id: "concretos", label: "Jugadores concretos" },
+              ].map((t) => (
+                <button
+                  key={t.id}
+                  onClick={() => setTargetPlayerIds(t.id === "equipo" ? null : targetPlayerIds || [])}
+                  style={{
+                    flex: 1,
+                    padding: "7px 0",
+                    borderRadius: 8,
+                    border: "1px solid #1A3050",
+                    cursor: "pointer",
+                    fontSize: 12,
+                    fontWeight: 600,
+                    background: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C51822" : "transparent",
+                    color: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C518" : "#8BA4C0",
+                  }}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            {targetPlayerIds !== null && (
+              <select
+                multiple
+                value={targetPlayerIds}
+                onChange={(e) => setTargetPlayerIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
+                style={{ width: "100%", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
+              >
+                {players.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>DÍAS EN LOS QUE SE ACTIVA</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {fechas.map((f) => (
+                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 6, padding: "4px 8px" }}>
+                  {f}
+                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: "#4A6680" }}>
+                    ×
+                  </span>
+                </span>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px" }} />
+              <button onClick={addFecha} style={{ background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
+                + Añadir fecha
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 14 }}>
+          <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 10 }}>Tareas</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {tareasBloque.map((t) => (
+              <FilaTareaReal
+                key={t.key}
+                tarea={t}
+                mostrarCarga={true}
+                materialesDisponibles={materialesDisponibles}
+                onAgregarMaterial={agregarMaterial}
+                onCambiar={(nuevo) => setTareasBloque((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
+                onEliminar={() => setTareasBloque((prev) => prev.filter((x) => x.key !== t.key))}
+              />
+            ))}
+            {circuitosBloque.map((c) => (
+              <CajaCircuitoReal
+                key={c.key}
+                circuito={c}
+                bloque={nombreBloque || "Complementaria"}
+                mostrarCarga={true}
+                ejercicios={ejercicios}
+                materialesDisponibles={materialesDisponibles}
+                onAgregarMaterial={agregarMaterial}
+                onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                onEliminarCircuito={() => setCircuitosBloque((prev) => prev.filter((x) => x.key !== c.key))}
+              />
+            ))}
+            <div style={{ display: "flex", gap: 8 }}>
+              <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} />
+              <button
+                onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [] }])}
+                style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+              >
+                + Añadir circuito
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
+        {ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+          <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
+            Cancelar
+          </button>
+          <button
+            onClick={guardar}
+            disabled={guardando}
+            style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+          >
+            {guardando ? "Guardando..." : "Guardar y enviar"}
+          </button>
+        </div>
+      </div>
+    </PantallaBase>
+  );
+}
+
 export default function App() {
   const [screen, setScreen] = useState("portal"); // "portal" | "coach" | "player"
   const [playerId, setPlayerId] = useState(null);
@@ -3809,6 +4313,9 @@ export default function App() {
   }
   if (coachModulo === "diseno") {
     return <DisenoSesionReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
+  }
+  if (coachModulo === "complementarias") {
+    return <DinamicaComplementariaReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
   }
   if (coachModulo === "programacion") {
     return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} />;
