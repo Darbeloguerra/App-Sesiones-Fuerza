@@ -334,21 +334,55 @@ function extractYouTubeId(url) {
   return m ? m[1] : null;
 }
 
-// Miniatura para las tarjetas de tarea/biblioteca: si es un vídeo de YouTube,
-// usa la miniatura oficial de YouTube; si no (GIF antiguo de Drive, u otro
-// enlace de imagen), usa el propio enlace tal cual.
-function miniaturaTarea(url) {
-  const videoId = extractYouTubeId(url);
-  return videoId ? `https://img.youtube.com/vi/${videoId}/hqdefault.jpg` : url;
+// Un enlace "de vídeo directo" es cualquier URL que termine en una extensión
+// de vídeo reproducible por <video> nativo — es lo que da Cloudflare R2 (o
+// cualquier bucket de objetos): la URL pública del archivo tal cual, sin
+// intermediario de por medio.
+function esVideoDirecto(url) {
+  return !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url.trim());
 }
 
-// Reproductor incrustado. Si el enlace es de YouTube, reproduce dentro de la
-// app (16:9, sin marca ni vídeos relacionados de más). Si no lo es —
-// compatibilidad con GIFs ya subidos a Drive antes de este cambio—, se
-// muestra como imagen normal.
+// Miniatura para las tarjetas de tarea/biblioteca: si es un vídeo de YouTube,
+// usa la miniatura oficial de YouTube. Un vídeo directo (R2 y similares) no
+// trae miniatura propia — se resuelve con un icono de play sobre fondo liso
+// en el sitio donde se pinta (ver TareaCardReal/TarjetaEjercicioReal). Si no
+// es ninguna de las dos cosas (GIF antiguo de Drive), se usa el enlace tal
+// cual como imagen.
+function miniaturaTarea(url) {
+  const videoId = extractYouTubeId(url);
+  if (videoId) return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  if (esVideoDirecto(url)) return null;
+  return url;
+}
+
+// El material seleccionado se guarda como texto JSON en la columna `material`
+// de Tareas. Este helper lo interpreta de forma segura en cualquier sitio
+// donde haga falta mostrarlo (nunca deja caer una excepción si el campo está
+// vacío o corrupto).
+function parseMateriales(material) {
+  if (!material) return [];
+  try {
+    const v = JSON.parse(material);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+// Reproductor incrustado. Tres casos:
+// - YouTube: iframe embebido (16:9, sin marca ni vídeos relacionados de más).
+// - Vídeo directo (R2 u otro bucket): <video> nativo, con su propio estado
+//   de carga (spinner mientras hace buffer) y de error visible si la URL no
+//   responde — antes esto fallaba en silencio, ahora nunca lo hace.
+// - Cualquier otra cosa (GIF antiguo de Drive, de antes de este cambio):
+//   se muestra como imagen normal, para no romper lo que ya hubiera.
 function VideoEmbed({ url }) {
+  const [estado, setEstado] = useState("cargando"); // cargando | listo | error
+  useEffect(() => setEstado("cargando"), [url]);
+
   if (!url) return null;
   const videoId = extractYouTubeId(url);
+
   if (videoId) {
     return (
       <div style={{ marginTop: 8, position: "relative", width: "100%", paddingTop: "56.25%", borderRadius: 8, overflow: "hidden", background: "#000" }} onClick={(e) => e.stopPropagation()}>
@@ -362,6 +396,35 @@ function VideoEmbed({ url }) {
       </div>
     );
   }
+
+  if (esVideoDirecto(url)) {
+    return (
+      <div style={{ marginTop: 8, position: "relative", width: "100%", borderRadius: 8, overflow: "hidden", background: "#000", minHeight: estado === "error" ? 0 : 160 }} onClick={(e) => e.stopPropagation()}>
+        {estado === "cargando" && (
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#8BA4C0", background: "#0E1E35" }}>
+            <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
+          </div>
+        )}
+        {estado === "error" ? (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "18px 12px", background: "#0E1E35", border: "1px solid #EF444455", borderRadius: 8, color: "#EF4444", fontSize: 12.5, textAlign: "center" }}>
+            <span>No se pudo cargar el vídeo.</span>
+            <span style={{ color: "#8BA4C0", fontSize: 11.5 }}>Comprueba tu conexión o que el enlace siga siendo válido.</span>
+          </div>
+        ) : (
+          <video
+            src={url}
+            controls
+            playsInline
+            preload="metadata"
+            onCanPlay={() => setEstado("listo")}
+            onError={() => setEstado("error")}
+            style={{ width: "100%", maxHeight: 320, display: "block", opacity: estado === "listo" ? 1 : 0 }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
       <img src={url} alt="Demostración de la tarea" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 8, display: "block", background: "#060D1A" }} />
@@ -1669,11 +1732,13 @@ function TareaVisualReal({ tarea }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#122440", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 10px" }}>
       {tarea.gif ? (
-        <div style={{ position: "relative", width: 42, height: 42, borderRadius: 7, flexShrink: 0 }}>
-          <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: 7, objectFit: "cover", display: "block" }} />
-          {extractYouTubeId(tarea.gif) && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 7 }}>
-              <Play size={13} color="#fff" fill="#fff" />
+        <div style={{ position: "relative", width: 42, height: 42, borderRadius: 7, flexShrink: 0, background: "#0E1E35", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {miniaturaTarea(tarea.gif) && (
+            <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: 7, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+          )}
+          {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 7 }}>
+              <Play size={13} color={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} fill={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} />
             </div>
           )}
         </div>
@@ -1685,6 +1750,15 @@ function TareaVisualReal({ tarea }) {
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 12.5, color: "#F0F4FF" }}>{tarea.nombre}</div>
         <div style={{ fontSize: 10.5, color: "#4A6680", fontFamily: "'IBM Plex Mono', monospace" }}>{tarea.detalle}</div>
+        {tarea.materiales && tarea.materiales.length > 0 && (
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+            {tarea.materiales.map((m) => (
+              <span key={m} style={{ fontSize: 9.5, color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace" }}>
+                {m}
+              </span>
+            ))}
+          </div>
+        )}
         {tarea.nota && (
           <div style={{ display: "flex", gap: 4, marginTop: 3, fontSize: 10, color: "#8BA4C0" }}>
             <span style={{ color: "#F97316" }}>📝</span>
@@ -1771,14 +1845,14 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar }) {
                       {item.tareas.map((t, i) => (
                         <TareaVisualReal
                           key={t.id}
-                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota }}
+                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota, materiales: parseMateriales(t.material) }}
                         />
                       ))}
                     </div>
                   ) : (
                     <TareaVisualReal
                       key={item.tarea.id}
-                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota }}
+                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota, materiales: parseMateriales(item.tarea.material) }}
                     />
                   )
                 )}
@@ -1891,11 +1965,13 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </span>
         )}
         {tarea.gif ? (
-          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: "pointer" }}>
-            <img src={miniaturaTarea(tarea.gif)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block" }} />
-            {extractYouTubeId(tarea.gif) && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 8 }}>
-                <Play size={16} color="#fff" fill="#fff" />
+          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: "pointer", background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {miniaturaTarea(tarea.gif) && (
+              <img src={miniaturaTarea(tarea.gif)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            )}
+            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 8 }}>
+                <Play size={16} color={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} fill={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} />
               </div>
             )}
           </div>
@@ -1932,6 +2008,18 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           {hecho ? "✓" : ""}
         </button>
       </div>
+      {tarea.materiales && tarea.materiales.length > 0 && (
+        <div style={{ marginLeft: 56, display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {tarea.materiales.map((m) => (
+            <span
+              key={m}
+              style={{ fontSize: 10.5, color: "#F5C518", background: "#F5C51818", border: "1px solid #F5C51840", borderRadius: 5, padding: "2px 7px", fontFamily: "'IBM Plex Mono', monospace" }}
+            >
+              {m}
+            </span>
+          ))}
+        </div>
+      )}
       {tarea.nota && (
         <div style={{ marginLeft: 56, display: "flex", gap: 6, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, padding: "6px 8px" }}>
           <span style={{ color: "#F97316", fontSize: 11.5, flexShrink: 0 }}>📝</span>
@@ -2082,6 +2170,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       unidad: "reps",
       nota: t.nota || "",
       gif: e.gif_url || "",
+      materiales: parseMateriales(t.material),
       referencia: lv
         ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} reps · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
         : null,
@@ -2335,11 +2424,13 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10 }}>
       {ejercicio.gif_url ? (
-        <div style={{ position: "relative", width: 40, height: 40, borderRadius: 7, flexShrink: 0 }}>
-          <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", display: "block" }} />
-          {extractYouTubeId(ejercicio.gif_url) && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.25)", borderRadius: 7 }}>
-              <Play size={13} color="#fff" fill="#fff" />
+        <div style={{ position: "relative", width: 40, height: 40, borderRadius: 7, flexShrink: 0, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {miniaturaTarea(ejercicio.gif_url) && (
+            <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+          )}
+          {(extractYouTubeId(ejercicio.gif_url) || esVideoDirecto(ejercicio.gif_url)) && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(ejercicio.gif_url) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 7 }}>
+              <Play size={13} color={miniaturaTarea(ejercicio.gif_url) ? "#fff" : "#F5C518"} fill={miniaturaTarea(ejercicio.gif_url) ? "#fff" : "#F5C518"} />
             </div>
           )}
         </div>
@@ -2382,7 +2473,9 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
   const esPreventivo = bloque === "Preventivo";
   const toggleTag = (t) => setTagsSel((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
   const videoIdValido = extractYouTubeId(videoUrl);
-  const enlaceNoReconocido = videoUrl.trim().length > 0 && !videoIdValido;
+  const esDirectoValido = esVideoDirecto(videoUrl);
+  const enlaceReconocido = !!videoIdValido || esDirectoValido;
+  const enlaceNoReconocido = videoUrl.trim().length > 0 && !enlaceReconocido;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
@@ -2429,17 +2522,17 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
           </div>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>ENLACE DE VÍDEO (YouTube, oculto o público)</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>ENLACE DE VÍDEO (YouTube, o enlace directo .mp4/.webm/.mov)</span>
           <input
             value={videoUrl}
             onChange={(e) => setVideoUrl(e.target.value)}
-            placeholder="https://youtu.be/..."
+            placeholder="https://youtu.be/... o https://pub-xxxx.r2.dev/....mp4"
             style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? "#EF4444" : undefined }}
           />
           {enlaceNoReconocido && (
-            <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace como YouTube — revisa que sea el enlace de compartir del vídeo.</span>
+            <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace — debe ser de YouTube o terminar en .mp4/.webm/.mov.</span>
           )}
-          {videoIdValido && <VideoEmbed url={videoUrl} />}
+          {enlaceReconocido && <VideoEmbed url={videoUrl} />}
         </label>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
