@@ -452,28 +452,78 @@ function LoadingBlock() {
 //   pantallas grandes aunque se abra en la tablet del entrenador.
 // - centrarContenido: para estados pequeños (carga, error, PIN) en vez de
 //   contenido de página completa — centra el bloque también verticalmente.
+// Safari en iPad no siempre reporta bien 100vh/100dvh (varía con la barra de
+// pestañas, el rebote, la rotación...), y eso es lo que llevaba causando el
+// descentrado del portal por más vueltas que le diéramos a las unidades CSS.
+// El primer intento medía window.innerHeight — pero en iPadOS ese valor
+// puede incluir alto "de más" oculto detrás de la barra de pestañas/dirección
+// (el "viewport de diseño", no lo que de verdad se ve). Eso deja la caja más
+// alta de lo real, con el sobrante fuera de la pantalla por abajo, y el
+// centrado calculado sobre esa caja inflada queda desplazado hacia arriba en
+// lo que sí se ve — exactamente el síntoma. window.visualViewport.height
+// existe justo para esto: el alto realmente visible en cada momento.
+function useAlturaVentana() {
+  const medirAhora = () => {
+    if (typeof window === "undefined") return 900;
+    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
+  };
+  const [alto, setAlto] = useState(medirAhora);
+  useEffect(() => {
+    const medir = () => setAlto(medirAhora());
+    medir();
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener("resize", medir);
+      vv.addEventListener("scroll", medir);
+    } else {
+      window.addEventListener("resize", medir);
+    }
+    window.addEventListener("orientationchange", medir);
+    return () => {
+      if (vv) {
+        vv.removeEventListener("resize", medir);
+        vv.removeEventListener("scroll", medir);
+      } else {
+        window.removeEventListener("resize", medir);
+      }
+      window.removeEventListener("orientationchange", medir);
+    };
+  }, []);
+  return alto;
+}
+
 function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido = false }) {
+  const alto = useAlturaVentana();
   const anchoMax = maxWidth || (rol === "jugador" ? 420 : 640);
   return (
     <div
       style={{
         position: "fixed",
-        inset: 0,
+        top: 0,
+        left: 0,
+        right: 0,
+        height: alto,
         background: "#060D1A",
         color: "#F0F4FF",
         fontFamily: "'Inter', -apple-system, sans-serif",
         display: "flex",
         justifyContent: "center",
-        overflow: "hidden",
+        // Capa 1: SOLO scroll. No lleva justifyContent ni ninguna alineación —
+        // mezclar overflow:auto con centrado flex en el mismo elemento es
+        // justo lo que causaba que el centrado se ignorase.
+        overflowY: "auto",
       }}
     >
       <div
         style={{
           width: "100%",
           maxWidth: anchoMax,
-          height: "100%",
-          overflowY: "auto",
           boxSizing: "border-box",
+          // Capa 2: SOLO centrado. Ocupa como mínimo toda la altura visible
+          // (min-height, no height — así, si el contenido es más alto que la
+          // pantalla, esta capa crece y es la de fuera la que hace scroll,
+          // en vez de recortar nada) y no tiene overflow propio.
+          minHeight: centrarContenido ? alto : undefined,
           display: centrarContenido ? "flex" : "block",
           flexDirection: "column",
           justifyContent: centrarContenido ? "center" : "flex-start",
@@ -743,6 +793,36 @@ function usePlayerHistory(playerId) {
   return { loaded: true, items };
 }
 
+// Pantalla dedicada solo al portal de acceso — independiente de PantallaBase
+// a propósito. Ninguna de las variantes de PantallaBase (flexbox + alto
+// medido por JS) conseguía centrar de verdad en el dispositivo real, así
+// que aquí se usa la técnica de centrado más antigua y con menos piezas
+// móviles que hay en CSS: posición absoluta + transform, calculada sobre un
+// contenedor fijo anclado a los 4 bordes de la ventana. No depende de medir
+// ninguna altura, ni de flexbox, ni de que el navegador soporte dvh/vh bien.
+function PantallaPortal({ children, maxWidth = 320 }) {
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#060D1A" }}>
+      <div
+        style={{
+          position: "absolute",
+          top: "50%",
+          left: "50%",
+          transform: "translate(-50%, -50%)",
+          width: "100%",
+          maxWidth,
+          padding: "0 24px",
+          boxSizing: "border-box",
+          color: "#F0F4FF",
+          fontFamily: "'Inter', -apple-system, sans-serif",
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
 // ---------- PORTAL DE ACCESO ÚNICO ----------
 // Calca el diseño validado de portal-acceso.jsx: pantalla completa,
 // sin la cabecera antigua, tipografía monoespaciada, un solo código de
@@ -794,11 +874,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
     setResultado({ tipo: "entrenador" });
   };
 
-  const screenWrap = (content) => (
-    <PantallaBase centrarContenido>
-      {content}
-    </PantallaBase>
-  );
+  const screenWrap = (content) => <PantallaPortal>{content}</PantallaPortal>;
 
   if (!loaded) return screenWrap(<LoadingBlock />);
 
@@ -1810,8 +1886,10 @@ function TareaVisualReal({ tarea }) {
   );
 }
 
-function TarjetaSesionReal({ sesion, esHoy, onEditar }) {
+function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar }) {
   const [abierta, setAbierta] = useState(esHoy);
+  const [confirmando, setConfirmando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
   const bloques = {};
   const circuitoBuffer = {};
   (sesion.tareas || []).forEach((t) => {
@@ -1905,6 +1983,33 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar }) {
           >
             Editar esta sesión
           </button>
+          {confirmando ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontSize: 12, color: "#EF4444" }}>
+                {sesion.enviada ? "Esta sesión ya se envió — ¿eliminarla igualmente?" : "¿Eliminar esta sesión? No se puede deshacer."}
+              </span>
+              <button
+                onClick={async () => {
+                  setBorrando(true);
+                  await onEliminar(sesion.id);
+                }}
+                disabled={borrando}
+                style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #EF4444", background: "#EF444422", color: "#EF4444", cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
+              >
+                {borrando ? "Eliminando..." : "Sí, eliminar"}
+              </button>
+              <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer" }}>
+                Cancelar
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={() => setConfirmando(true)}
+              style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #EF444455", background: "transparent", color: "#EF4444", cursor: "pointer", fontWeight: 600 }}
+            >
+              Eliminar sesión
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1956,6 +2061,24 @@ function ProgramacionReal({ players, onBack }) {
     setShowEditor(true);
   };
 
+  // Borra la sesión y todo lo que le pertenece (sus tareas y sus circuitos)
+  // — nada queda huérfano apuntando a una sesión que ya no existe. Los
+  // registros que los jugadores ya hubieran enviado de esas tareas se
+  // quedan tal cual en el historial (igual que cuando se borra un ejercicio
+  // de la Biblioteca): dejan de poder resolver el nombre y se muestran como
+  // "(tarea eliminada)", pero no se pierde el dato de que se hizo algo ese día.
+  const eliminarSesion = async (sesionId) => {
+    const tareasDeSesion = tareas.filter((t) => t.sesion_id === sesionId);
+    const circuitoIds = [...new Set(tareasDeSesion.filter((t) => t.circuito_id).map((t) => t.circuito_id))];
+    await Promise.all(tareasDeSesion.map((t) => api.delete("tareas", t.id)));
+    await Promise.all(circuitoIds.map((id) => api.delete("circuitos", id)));
+    await api.delete("sesiones", sesionId);
+    invalidateEntityCache("sesiones");
+    invalidateEntityCache("tareas");
+    invalidateEntityCache("circuitos");
+    retry();
+  };
+
   return (
     <PantallaBase rol="entrenador" maxWidth={560}>
       <div>
@@ -1972,7 +2095,7 @@ function ProgramacionReal({ players, onBack }) {
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>HOY</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {hoy.map((s) => (
-                <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} />
+                <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} onEliminar={eliminarSesion} />
               ))}
             </div>
           </div>
@@ -1981,7 +2104,7 @@ function ProgramacionReal({ players, onBack }) {
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>PRÓXIMAS</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {futuras.map((s) => (
-              <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} />
+              <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} />
             ))}
             {futuras.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>No hay más sesiones programadas</div>}
           </div>
