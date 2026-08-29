@@ -457,8 +457,8 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
   return (
     <div
       style={{
-        height: "100dvh",
-        width: "100%",
+        position: "fixed",
+        inset: 0,
         background: "#060D1A",
         color: "#F0F4FF",
         fontFamily: "'Inter', -apple-system, sans-serif",
@@ -2431,7 +2431,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 // se mostraba siempre "reps" tanto en la pantalla del jugador como en el
 // historial del entrenador, sin mirar este campo, aunque la tarea fuera de
 // tiempo o de distancia.
-const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", metros: "m" };
+const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "m" };
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
 const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior"];
@@ -3009,8 +3009,8 @@ function NotaTareaReal({ nota, onCambiar }) {
 }
 
 function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar }) {
-  const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "metros"] : ["reps", "tiempo"];
-  const etiquetaModo = { reps: "REPS", tiempo: "SEG", metros: "M" };
+  const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
+  const etiquetaModo = { reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" };
   const ciclarModo = () => {
     const idx = modosDisponibles.indexOf(tarea.modo);
     onCambiar({ ...tarea, modo: modosDisponibles[(idx + 1) % modosDisponibles.length] });
@@ -3058,7 +3058,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <CampoEtiquetadoDiseno etiqueta="MODO" w={50}>
-          <button onClick={ciclarModo} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#8BA4C0", background: "#1A3050", border: "1px solid #1A3050", borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }} title="Alternar reps / tiempo / metros">
+          <button onClick={ciclarModo} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#8BA4C0", background: "#1A3050", border: "1px solid #1A3050", borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }} title="Alternar reps / seg / min / metros">
             {etiquetaModo[tarea.modo]}
           </button>
         </CampoEtiquetadoDiseno>
@@ -4409,6 +4409,34 @@ export default function App() {
   useEffect(() => {
     if (screen === "coach") precalentarDatosEntrenador();
   }, [screen]);
+
+  return (
+    <>
+      {/* Sin esto, el "rebote" elástico de Safari en iPad al hacer scroll deja
+          ver un instante el blanco por defecto de la página detrás de la app
+          (líneas blancas en el borde) — con el fondo del propio documento ya
+          oscuro y el rebote desactivado, no hay nada blanco que se pueda
+          asomar. PantallaBase, además, usa position:fixed en vez de depender
+          del alto del documento, así que ya no compite con este reset. */}
+      <style>{`
+        html, body { background: #060D1A; margin: 0; padding: 0; height: 100%; overscroll-behavior: none; }
+        #root { height: 100%; }
+      `}</style>
+      <AppRouter
+        screen={screen}
+        setScreen={setScreen}
+        playerId={playerId}
+        setPlayerId={setPlayerId}
+        coachModulo={coachModulo}
+        setCoachModulo={setCoachModulo}
+        historialJugador={historialJugador}
+        setHistorialJugador={setHistorialJugador}
+      />
+    </>
+  );
+}
+
+function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setCoachModulo, historialJugador, setHistorialJugador }) {
 
   if (screen === "portal") {
     return (
