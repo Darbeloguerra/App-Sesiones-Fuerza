@@ -552,6 +552,45 @@ function useCategoriasPreventivas() {
   return [items, loaded];
 }
 
+// Igual que useCategoriasPreventivas: caché compartida entre pantallas, para
+// no volver a pedir el listado de materiales cada vez que se entra a Diseñar
+// sesión o a Dinámicas complementarias (antes cada una lo pedía por su cuenta,
+// sin caché, en cada visita).
+function useMaterialesDisponibles() {
+  const cacheKey = "materiales";
+  const [items, setItems] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
+  useEffect(() => {
+    if (sharedDataCache.has(cacheKey)) return;
+    let cancelled = false;
+    api
+      .materiales()
+      .then((res) => {
+        if (!cancelled) {
+          sharedDataCache.set(cacheKey, res || []);
+          setItems(res || []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const agregar = useCallback(async (m) => {
+    if (sharedDataCache.get(cacheKey)?.includes(m)) return;
+    const next = [...(sharedDataCache.get(cacheKey) || items), m];
+    sharedDataCache.set(cacheKey, next);
+    setItems(next);
+    await api.guardarMaterial(m);
+  }, [items]);
+  return [items, loaded, agregar];
+}
+
 // Carga las tareas de una o varias sesiones en una sola llamada (usa el filtro "IN" del backend).
 function useTareasForSesiones(sesionIds) {
   const key = sesionIds.slice().sort().join(",");
@@ -695,6 +734,7 @@ function usePlayerHistory(playerId) {
       cargaReal: r.carga_kg ?? "",
       rirReal: r.rir ?? "",
       repsReal: r.reps_hechas ?? "",
+      unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
     };
@@ -1497,7 +1537,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
         <span style={{ fontSize: 12, color: t.done ? "#F0F4FF" : "#4A6680", flex: 1 }}>{t.name}</span>
         {t.done && (
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", textAlign: "right" }}>
-            {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} reps
+            {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} {t.unidad || "reps"}
             {t.cargaReal !== "" && t.cargaReal != null ? ` · ${t.cargaReal}kg` : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
           </span>
@@ -2030,7 +2070,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>REPS</span>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>{(tarea.unidad || "reps").toUpperCase()}</span>
               <input
                 value={registro.reps}
                 onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
@@ -2167,12 +2207,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       nombre: e.nombre || "(ejercicio eliminado)",
       series: t.series,
       cantidad: t.cantidad,
-      unidad: "reps",
+      unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
       gif: e.gif_url || "",
       materiales: parseMateriales(t.material),
       referencia: lv
-        ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} reps · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
+        ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} ${lv.unidad || "reps"} · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
         : null,
     };
   };
@@ -2386,6 +2426,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
 
 // ---------- BIBLIOTECA DE EJERCICIOS (calcado de biblioteca-ejercicios.jsx) ----------
+
+// Unidad real de cada tarea según su "modo" (elegido al diseñarla) — antes
+// se mostraba siempre "reps" tanto en la pantalla del jugador como en el
+// historial del entrenador, sin mirar este campo, aunque la tarea fuera de
+// tiempo o de distancia.
+const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", metros: "m" };
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
 const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior"];
@@ -3142,7 +3188,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onEliminarCircuito }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onEliminarCircuito }) {
   const tareas = circuito.tareas;
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
   const eliminarTarea = (key) => onCambiarTareas(tareas.filter((t) => t.key !== key));
@@ -3154,11 +3200,23 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, material
     onCambiarTareas(nueva);
   };
 
-  const agregarEjercicioAlCircuito = (ejercicio) => {
+  // Si el ejercicio es nuevo (escrito a mano, todavía no existe en la
+  // Biblioteca — viene sin `id`), hay que crearlo de verdad antes de usar su
+  // id. Antes esto solo se hacía para tareas sueltas; dentro de un circuito
+  // se guardaba con ejercicioId vacío y el nombre se perdía para siempre
+  // (aparecía luego como "(ejercicio eliminado)" sin haberse eliminado nada).
+  const agregarEjercicioAlCircuito = async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    if (!ejercicioId) {
+      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+      ejercicioId = creado.id;
+      onEjercicioCreado?.();
+    }
     const base =
       bloque === "Resistencia"
-        ? { key: Date.now() + Math.random(), nombre: ejercicio.nombre, ejercicioId: ejercicio.id, intervalos: "", trabajo: "", descanso: "", nota: "" }
-        : { key: Date.now() + Math.random(), nombre: ejercicio.nombre, ejercicioId: ejercicio.id, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], nota: "" };
+        ? { key: Date.now() + Math.random(), nombre, ejercicioId, intervalos: "", trabajo: "", descanso: "", nota: "" }
+        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], nota: "" };
     onCambiarTareas([...tareas, base]);
   };
 
@@ -3259,32 +3317,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   const [players, , playersLoaded] = usePlayers();
   const [categoriasPreventivas, categoriasLoaded] = useCategoriasPreventivas();
   const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
-  const [materialesDisponibles, setMaterialesDisponibles] = useState([]);
-  const [materialesLoaded, setMaterialesLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .materiales()
-      .then((res) => {
-        if (!cancelled) setMaterialesDisponibles(res || []);
-      })
-      .catch(() => {
-        if (!cancelled) setMaterialesDisponibles([]);
-      })
-      .finally(() => {
-        if (!cancelled) setMaterialesLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const agregarMaterial = async (m) => {
-    if (materialesDisponibles.includes(m)) return;
-    setMaterialesDisponibles((prev) => [...prev, m]);
-    await api.guardarMaterial(m);
-  };
+  const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
 
   const [md, setMd] = useState(sesionExistente?.md || "");
   const [objetivo, setObjetivo] = useState(sesionExistente?.objetivo || "");
@@ -3854,6 +3887,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                         bloque="Core"
                         mostrarCarga={false}
                         ejercicios={ejercicios}
+                        onEjercicioCreado={retryEjercicios}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -3887,6 +3921,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                         circuito={c}
                         bloque="Resistencia"
                         ejercicios={ejercicios}
+                        onEjercicioCreado={retryEjercicios}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -3937,6 +3972,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                         bloque="Fuerza"
                         mostrarCarga={true}
                         ejercicios={ejercicios}
+                        onEjercicioCreado={retryEjercicios}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -3991,32 +4027,7 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
   const [players, , playersLoaded] = usePlayers();
   const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
-  const [materialesDisponibles, setMaterialesDisponibles] = useState([]);
-  const [materialesLoaded, setMaterialesLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .materiales()
-      .then((res) => {
-        if (!cancelled) setMaterialesDisponibles(res || []);
-      })
-      .catch(() => {
-        if (!cancelled) setMaterialesDisponibles([]);
-      })
-      .finally(() => {
-        if (!cancelled) setMaterialesLoaded(true);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const agregarMaterial = async (m) => {
-    if (materialesDisponibles.includes(m)) return;
-    setMaterialesDisponibles((prev) => [...prev, m]);
-    await api.guardarMaterial(m);
-  };
+  const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
 
   const [nombreBloque, setNombreBloque] = useState("");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
@@ -4329,6 +4340,7 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
                 bloque={nombreBloque || "Complementaria"}
                 mostrarCarga={true}
                 ejercicios={ejercicios}
+                        onEjercicioCreado={retryEjercicios}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -4366,11 +4378,37 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
   );
 }
 
+// Al entrar en modo entrenador, adelanta la carga de los datos que casi
+// nunca cambian de un minuto a otro (jugadores, ejercicios, categorías
+// preventivas, materiales) — una sola vez, en paralelo — dejándolos ya en
+// sharedDataCache. Así, cuando cualquier pantalla (Roster, Diseño,
+// Biblioteca...) monte su propio usePlayers()/useEntityList("ejercicios")/etc.,
+// se los encuentra ya en caché y no repite la petición a Apps Script. Si ya
+// estaban cacheados (se volvió a entrar en la misma sesión), no hace nada.
+function precalentarDatosEntrenador() {
+  if (!sharedDataCache.has("list:jugadores:null")) {
+    api.list("jugadores").then((res) => sharedDataCache.set("list:jugadores:null", res || [])).catch(() => {});
+  }
+  if (!sharedDataCache.has("list:ejercicios:null")) {
+    api.list("ejercicios").then((res) => sharedDataCache.set("list:ejercicios:null", res || [])).catch(() => {});
+  }
+  if (!sharedDataCache.has("categoriasPreventivas")) {
+    api.categoriasPreventivas().then((res) => sharedDataCache.set("categoriasPreventivas", res || [])).catch(() => {});
+  }
+  if (!sharedDataCache.has("materiales")) {
+    api.materiales().then((res) => sharedDataCache.set("materiales", res || [])).catch(() => {});
+  }
+}
+
 export default function App() {
   const [screen, setScreen] = useState("portal"); // "portal" | "coach" | "player"
   const [playerId, setPlayerId] = useState(null);
   const [coachModulo, setCoachModulo] = useState(null); // null = dashboard
   const [historialJugador, setHistorialJugador] = useState(null); // jugador para "Ver historial" desde Roster
+
+  useEffect(() => {
+    if (screen === "coach") precalentarDatosEntrenador();
+  }, [screen]);
 
   if (screen === "portal") {
     return (
