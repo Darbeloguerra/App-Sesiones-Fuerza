@@ -57,13 +57,37 @@ const api = {
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+// A veces Google Sheets convierte por su cuenta un texto de fecha
+// ("2026-08-31") en un valor de fecha real de la hoja, sin que nadie se lo
+// pida — pasa con solo que la columna "parezca" una fecha. Al leerlo de
+// vuelta, Apps Script lo devuelve como fecha completa con hora ("2026-08-30
+// T22:00:00.000Z"), no como el texto plano "YYYY-MM-DD" que el resto de la
+// app espera — y eso es lo que producía "Fecha inválida" en el Historial.
+// Esto recupera el día tal como Apps Script lo serializa (en UTC, que es
+// como lo hace `JSON.stringify` de un Date), sea cual sea el formato en que
+// haya llegado.
+const normalizarFecha = (d) => {
+  if (!d) return "";
+  const s = String(d);
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  const dt = new Date(s);
+  if (!isNaN(dt.getTime())) {
+    const y = dt.getUTCFullYear();
+    const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const da = String(dt.getUTCDate()).padStart(2, "0");
+    return `${y}-${mo}-${da}`;
+  }
+  return s;
+};
+
 const fmtDateLabel = (d) => {
-  const dt = new Date(d + "T00:00:00");
+  const dt = new Date(normalizarFecha(d) + "T00:00:00");
   return dt.toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
 };
 
 const fmtDateShort = (d) => {
-  const dt = new Date(d + "T00:00:00");
+  const dt = new Date(normalizarFecha(d) + "T00:00:00");
   return dt.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" });
 };
 
@@ -774,7 +798,7 @@ function usePlayerHistory(playerId) {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
     return {
       id: r.id,
-      date: r.fecha,
+      date: normalizarFecha(r.fecha),
       name: e.nombre || "(tarea eliminada)",
       sets: t.series,
       reps: t.cantidad,
@@ -1682,8 +1706,9 @@ function HistorialPorJugador({ players, jugadorInicial }) {
   items
     .filter((it) => (!desde || it.date >= desde) && (!hasta || it.date <= hasta))
     .forEach((it) => {
-      if (!porFecha[it.date]) porFecha[it.date] = [];
-      porFecha[it.date].push(it);
+      const f = normalizarFecha(it.date);
+      if (!porFecha[f]) porFecha[f] = [];
+      porFecha[f].push(it);
     });
   const fechas = Object.keys(porFecha).sort().reverse();
 
@@ -1750,8 +1775,14 @@ function HistorialPorSesion({ players }) {
   const loaded = tareasLoaded && (tareaIds.length ? registrosLoaded : true);
   const estados = loaded
     ? targets.map((p) => {
-        const enviado = tareas.length > 0 && tareas.every((t) => registros.some((r) => r.tarea_id === t.id && r.jugador_id === p.id && r.hecho));
-        return { jugador: p.name, enviado };
+        // Antes exigía TODAS las tareas hechas para contar como "enviada" —
+        // una sola tarea sin registrar (o añadida a mitad de semana) dejaba
+        // a un jugador como "sin enviar" aunque hubiera mandado casi todo.
+        // Ahora "enviada" es "ha mandado algo", con la fracción real al lado
+        // (ej. 8/10) para que se vea de un vistazo cuánto le falta.
+        const hechas = tareas.filter((t) => registros.some((r) => r.tarea_id === t.id && r.jugador_id === p.id && r.hecho)).length;
+        const enviado = hechas > 0;
+        return { jugador: p.name, enviado, hechas, total: tareas.length };
       })
     : [];
   const enviadosCount = estados.filter((e) => e.enviado).length;
@@ -1785,13 +1816,19 @@ function HistorialPorSesion({ players }) {
             jugadores han enviado esta sesión
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {estados.map((e) => (
-              <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, padding: "10px 14px" }}>
-                <span style={{ width: 9, height: 9, borderRadius: "50%", background: e.enviado ? "#22C55E" : "#1A3050", border: e.enviado ? "none" : "1px solid #F97316", flexShrink: 0 }} />
-                <span style={{ flex: 1, fontSize: 13.5, color: "#F0F4FF" }}>{e.jugador}</span>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: e.enviado ? "#22C55E" : "#F97316" }}>{e.enviado ? "✓ Enviada" : "Sin enviar"}</span>
-              </div>
-            ))}
+            {estados.map((e) => {
+              const completo = e.enviado && e.hechas === e.total;
+              const color = e.enviado ? (completo ? "#22C55E" : "#F5C518") : "#F97316";
+              return (
+                <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, padding: "10px 14px" }}>
+                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: e.enviado ? color : "#1A3050", border: e.enviado ? "none" : "1px solid #F97316", flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 13.5, color: "#F0F4FF" }}>{e.jugador}</span>
+                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color }}>
+                    {e.enviado ? `✓ Enviada (${e.hechas}/${e.total})` : "Sin enviar"}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </>
       )}
