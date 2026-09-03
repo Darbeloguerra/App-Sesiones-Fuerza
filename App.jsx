@@ -2010,14 +2010,14 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar }) {
                       {item.tareas.map((t, i) => (
                         <TareaVisualReal
                           key={t.id}
-                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota, materiales: parseMateriales(t.material) }}
+                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad} · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota, materiales: parseMateriales(t.material) }}
                         />
                       ))}
                     </div>
                   ) : (
                     <TareaVisualReal
                       key={item.tarea.id}
-                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota, materiales: parseMateriales(item.tarea.material) }}
+                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad} · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota, materiales: parseMateriales(item.tarea.material) }}
                     />
                   )
                 )}
@@ -3391,7 +3391,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             {etiquetaModo[tarea.modo]}
           </button>
         </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="LADO" w={66}>
+        <CampoEtiquetadoDiseno etiqueta="LADO" w={92}>
           <button
             onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })}
             style={{
@@ -3405,10 +3405,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
               width: "100%",
               textAlign: "center",
               cursor: "pointer",
+              whiteSpace: "nowrap",
             }}
             title="Bilateral: a la vez con las dos piernas/brazos. Unilateral: se repite cada lado por separado."
           >
-            {tarea.lateralidad === "unilateral" ? "Unilat." : "Bilat."}
+            {tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}
           </button>
         </CampoEtiquetadoDiseno>
         <CampoEtiquetadoDiseno etiqueta="SERIES" w={44}>
