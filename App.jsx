@@ -813,6 +813,7 @@ function usePlayerHistory(playerId) {
       nota: t.nota || "",
       materiales: parseMateriales(t.material),
       subtipoCorporal: r.subtipo_corporal || "",
+      unilateral: t.lateralidad === "unilateral",
     };
   });
 
@@ -1643,10 +1644,10 @@ function FilaTareaHistorialReal({ tarea: t }) {
             {t.cargaReal !== "" && t.cargaReal != null ? (t.subtipoCorporal === "asistencia" ? ` · banda ${t.cargaReal}` : ` · ${t.cargaReal}kg`) : ""}
             {t.subtipoCorporal === "lastre"
               ? " (lastre)"
-              : t.subtipoCorporal === "Barra" || t.subtipoCorporal === "Multipower"
+              : t.subtipoCorporal && EQUIPOS_AMBIGUOS.includes(t.subtipoCorporal)
               ? ` (${t.subtipoCorporal})`
-              : !t.subtipoCorporal && (t.materiales || []).includes("Multipower")
-              ? " (Multipower)"
+              : !t.subtipoCorporal && (t.materiales || []).some((m) => EQUIPOS_AMBIGUOS.includes(m))
+              ? ` (${(t.materiales || []).find((m) => EQUIPOS_AMBIGUOS.includes(m))})`
               : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
           </span>
@@ -2194,17 +2195,15 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
             {tarea.series ? `${tarea.series} × ` : ""}
             {tarea.cantidad} {tarea.unidad}
+            {tarea.unilateral ? " · cada lado" : ""}
+            {tarea.rirObjetivo != null && <span style={{ color: "#F5C518", fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
           </div>
           <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
             {tarea.eligeEquipo
-              ? registro.subtipo === "Multipower"
-                ? tarea.referenciaMultipower
-                  ? `Última vez (Multipower): ${tarea.referenciaMultipower}`
-                  : "Sin registro previo en Multipower"
-                : registro.subtipo === "Barra"
-                ? tarea.referenciaBarra
-                  ? `Última vez (Barra): ${tarea.referenciaBarra}`
-                  : "Sin registro previo con Barra"
+              ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
+                ? tarea.referenciasPorEquipo?.[registro.subtipo]
+                  ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
+                  : `Sin registro previo con ${registro.subtipo}`
                 : "Elige con qué material lo has hecho"
               : tarea.referencia
               ? `Última vez: ${tarea.referencia}`
@@ -2255,7 +2254,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518" }}>¿CON QUÉ LO HAS HECHO?</span>
               <div style={{ display: "flex", gap: 6 }}>
-                {["Barra", "Multipower"].map((op) => (
+                {(tarea.equiposElegibles || []).map((op) => (
                   <button
                     key={op}
                     onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}
@@ -2339,13 +2338,11 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   {registro.subtipo === "lastre"
                     ? "KG LASTRE"
                     : tarea.eligeEquipo
-                    ? registro.subtipo === "Multipower"
-                      ? "KG (MULTIPOWER)"
-                      : registro.subtipo === "Barra"
-                      ? "KG (BARRA)"
+                    ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
+                      ? `KG (${registro.subtipo.toUpperCase()})`
                       : "CARGA KG"
-                    : tarea.esMultipower
-                    ? "KG (MULTIPOWER)"
+                    : tarea.equipoUnico
+                    ? `KG (${tarea.equipoUnico.toUpperCase()})`
                     : "CARGA KG"}
                 </span>
                 <input
@@ -2454,21 +2451,21 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const yaEnviadaAntes = loaded && tareaIds.length > 0 && tareaIds.some((id) => registrosByTarea.has(id));
 
   // La referencia de "última vez" se guarda por ejercicio + equipo usado —
-  // la carga en un Multipower no es comparable a la misma carga con barra
-  // libre (contrapeso, fricción...), así que mezclarlas en el mismo "última
-  // vez" confundiría más que ayudar. Cuando una tarea tenía Barra Y
-  // Multipower seleccionadas a la vez (el entrenador dejó elegir), lo que
-  // de verdad se usó ese día es lo que el jugador marcó (subtipo_corporal,
-  // reaprovechado aquí igual que para asistencia/lastre) — no basta con
-  // mirar el material de la tarea, porque ese campo dice qué estaba
-  // disponible, no cuál se usó.
-  const equipoEfectivo = (it) => {
-    const mats = it.materiales || [];
-    const ambos = mats.includes("Barra") && mats.includes("Multipower");
-    if (ambos) return it.subtipoCorporal === "Multipower" ? "mp" : it.subtipoCorporal === "Barra" ? "std" : null;
-    return mats.includes("Multipower") ? "mp" : "std";
-  };
+  // la carga con cada uno de estos no es directamente comparable entre sí
+  // (una Barra, un Multipower, una Mancuerna, una Kettlebell, una Máquina o
+  // un Trineo no cargan igual aunque el número de kg coincida), así que
+  // mezclarlas en el mismo "última vez" confundiría más que ayudar. Cuando
+  // una tarea tiene dos o más de estos seleccionados a la vez (el
+  // entrenador dejó elegir), lo que de verdad se usó ese día es lo que el
+  // jugador marcó (subtipo_corporal, reaprovechado aquí igual que para
+  // asistencia/lastre) — no basta con mirar el material de la tarea, porque
+  // ese campo dice qué estaba disponible, no cuál se usó.
   const claveReferencia = (nombre, equipo) => `${(nombre || "").toLowerCase()}::${equipo}`;
+  const equipoEfectivo = (it) => {
+    const mats = (it.materiales || []).filter((m) => EQUIPOS_AMBIGUOS.includes(m));
+    if (mats.length >= 2) return mats.includes(it.subtipoCorporal) ? it.subtipoCorporal : null;
+    return mats[0] || null;
+  };
 
   const lastValueByName = {};
   [...historyItems]
@@ -2481,7 +2478,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   // Última vez que esta misma tarea se hizo con peso corporal, qué eligió el
   // jugador (corporal puro / con asistencia / con lastre) — o, si la tarea
-  // dejaba elegir entre Barra y Multipower, cuál usó — para preseleccionarlo
+  // dejaba elegir entre varios equipos, cuál usó — para preseleccionarlo
   // solo y que no tenga que volver a elegirlo cada vez que se repita.
   const lastSubtipoByName = {};
   [...historyItems]
@@ -2501,15 +2498,16 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const formatearReferencia = (lv) =>
     lv
       ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} ${lv.unidad || "reps"} · ` : ""}${
-          lv.subtipoCorporal === "asistencia" ? `banda ${lv.cargaReal || "—"}` : `${lv.cargaReal || "—"}kg${lv.subtipoCorporal && lv.subtipoCorporal !== "Barra" && lv.subtipoCorporal !== "Multipower" ? ` (${lv.subtipoCorporal})` : ""}`
+          lv.subtipoCorporal === "asistencia" ? `banda ${lv.cargaReal || "—"}` : `${lv.cargaReal || "—"}kg${lv.subtipoCorporal && !EQUIPOS_AMBIGUOS.includes(lv.subtipoCorporal) ? ` (${lv.subtipoCorporal})` : ""}`
         }${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
       : null;
 
   const construirTareaVisual = (t) => {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
     const materiales = parseMateriales(t.material);
-    const esMultipower = materiales.includes("Multipower");
-    const eligeEquipo = materiales.includes("Barra") && materiales.includes("Multipower");
+    const equiposEnTarea = materiales.filter((m) => EQUIPOS_AMBIGUOS.includes(m));
+    const equipoUnico = equiposEnTarea.length === 1 ? equiposEnTarea[0] : null;
+    const eligeEquipo = equiposEnTarea.length >= 2;
     const esCorporal = (t.tipo_resistencia || "") === "Peso corporal";
     const nombre = e.nombre || "";
     return {
@@ -2517,20 +2515,22 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       nombre: e.nombre || "(ejercicio eliminado)",
       series: t.series,
       cantidad: t.cantidad,
+      rirObjetivo: t.rir !== "" && t.rir != null ? t.rir : null,
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
       gif: e.gif_url || "",
       materiales,
-      esMultipower,
+      equipoUnico,
       esCorporal,
+      unilateral: t.lateralidad === "unilateral",
       eligeEquipo,
+      equiposElegibles: eligeEquipo ? equiposEnTarea : null,
       subtipoDefault: esCorporal || eligeEquipo ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
-      // Si la tarea deja elegir entre Barra y Multipower, se llevan las dos
-      // referencias por separado — la que se muestre depende de qué elija
+      // Si la tarea deja elegir entre varios equipos, se lleva una referencia
+      // por cada uno por separado — la que se muestre depende de qué elija
       // el jugador en pantalla, no de una sola fija de antemano.
-      referencia: eligeEquipo ? null : formatearReferencia(lastValueByName[claveReferencia(nombre, esMultipower ? "mp" : "std")]),
-      referenciaBarra: eligeEquipo ? formatearReferencia(lastValueByName[claveReferencia(nombre, "std")]) : null,
-      referenciaMultipower: eligeEquipo ? formatearReferencia(lastValueByName[claveReferencia(nombre, "mp")]) : null,
+      referencia: eligeEquipo ? null : formatearReferencia(lastValueByName[claveReferencia(nombre, equipoUnico || "std")]),
+      referenciasPorEquipo: eligeEquipo ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, formatearReferencia(lastValueByName[claveReferencia(nombre, eq)])])) : null,
     };
   };
 
@@ -2753,6 +2753,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 // se mostraba siempre "reps" tanto en la pantalla del jugador como en el
 // historial del entrenador, sin mirar este campo, aunque la tarea fuera de
 // tiempo o de distancia.
+// Equipos cuya carga no es comparable entre sí aunque el número de kg
+// coincida (una Barra, un Multipower, una Mancuerna, una Kettlebell, una
+// Máquina y un Trineo cargan de forma distinta) — cuando una tarea tiene dos
+// o más de estos seleccionados a la vez, se le pregunta al jugador cuál usó
+// de verdad, en vez de asumir uno.
+const EQUIPOS_AMBIGUOS = ["Barra", "Multipower", "Kettlebell", "Mancuerna", "Máquina", "Trineo"];
+
 const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "m" };
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
@@ -3384,6 +3391,26 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             {etiquetaModo[tarea.modo]}
           </button>
         </CampoEtiquetadoDiseno>
+        <CampoEtiquetadoDiseno etiqueta="LADO" w={66}>
+          <button
+            onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })}
+            style={{
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontSize: 10.5,
+              color: tarea.lateralidad === "unilateral" ? "#F5C518" : "#8BA4C0",
+              background: tarea.lateralidad === "unilateral" ? "#F5C51822" : "#1A3050",
+              border: `1px solid ${tarea.lateralidad === "unilateral" ? "#F5C518" : "#1A3050"}`,
+              borderRadius: 5,
+              padding: "5px 4px",
+              width: "100%",
+              textAlign: "center",
+              cursor: "pointer",
+            }}
+            title="Bilateral: a la vez con las dos piernas/brazos. Unilateral: se repite cada lado por separado."
+          >
+            {tarea.lateralidad === "unilateral" ? "Unilat." : "Bilat."}
+          </button>
+        </CampoEtiquetadoDiseno>
         <CampoEtiquetadoDiseno etiqueta="SERIES" w={44}>
           <input value={tarea.series} onChange={(e) => onCambiar({ ...tarea, series: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
         </CampoEtiquetadoDiseno>
@@ -3538,7 +3565,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     const base =
       bloque === "Resistencia"
         ? { key: Date.now() + Math.random(), nombre, ejercicioId, intervalos: "", trabajo: "", descanso: "", nota: "" }
-        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], nota: "" };
+        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
     onCambiarTareas([...tareas, base]);
   };
 
@@ -3589,6 +3616,7 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
     rir: "",
     tipoResistencia: "Peso libre",
     materiales: [],
+    lateralidad: "bilateral",
     nota: "",
   };
 }
@@ -3719,6 +3747,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
           rir: t.rir ?? "",
           tipoResistencia: t.tipo_resistencia || "Peso libre",
           materiales,
+          lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           intervalos: t.series ?? "",
           trabajo: t.cantidad ?? "",
@@ -3836,6 +3865,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
           rir: bloqueNombre === "Resistencia" ? t.descanso : t.rir,
           tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
           material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
+          lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           circuito_id: "",
           orden_en_circuito: "",
@@ -3859,6 +3889,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
               rir: bloqueNombre === "Resistencia" ? t.descanso : t.rir,
               tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
               material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
+              lateralidad: t.lateralidad || "bilateral",
               nota: t.nota || "",
               circuito_id: savedCircuito.id,
               orden_en_circuito: i + 1,
@@ -4402,6 +4433,7 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
           rir: t.rir ?? "",
           tipoResistencia: t.tipo_resistencia || "Peso libre",
           materiales,
+          lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           circuito_id: t.circuito_id || "",
           orden_en_circuito: t.orden_en_circuito || "",
@@ -4494,6 +4526,7 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
           rir: t.rir,
           tipo_resistencia: t.tipoResistencia || "",
           material: JSON.stringify(t.materiales || []),
+          lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           circuito_id: "",
           orden_en_circuito: "",
@@ -4517,6 +4550,7 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
               rir: t.rir,
               tipo_resistencia: t.tipoResistencia || "",
               material: JSON.stringify(t.materiales || []),
+              lateralidad: t.lateralidad || "bilateral",
               nota: t.nota || "",
               circuito_id: savedCircuito.id,
               orden_en_circuito: i + 1,
