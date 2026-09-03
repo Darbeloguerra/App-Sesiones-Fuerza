@@ -2284,7 +2284,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               ].map((op) => (
                 <button
                   key={op.v || "corporal"}
-                  onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v })}
+                  onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v, carga: "" })}
                   style={{
                     fontSize: 10.5,
                     padding: "5px 9px",
@@ -2333,7 +2333,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   ))}
                 </div>
               </label>
-            ) : (
+            ) : tarea.esCorporal && registro.subtipo === "" ? null : (
               <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>
                   {registro.subtipo === "lastre"
