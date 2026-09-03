@@ -2191,7 +2191,23 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+            <span
+              style={{
+                fontFamily: "'IBM Plex Mono', monospace",
+                fontSize: 9,
+                padding: "2px 6px",
+                borderRadius: 5,
+                border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
+                color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
+                background: tarea.unilateral ? "#F5C51818" : "transparent",
+                flexShrink: 0,
+              }}
+            >
+              {tarea.unilateral ? "Unilateral" : "Bilateral"}
+            </span>
+          </div>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
             {tarea.series ? `${tarea.series} × ` : ""}
             {tarea.cantidad} {tarea.unidad}
