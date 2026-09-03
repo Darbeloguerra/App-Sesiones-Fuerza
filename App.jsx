@@ -811,6 +811,8 @@ function usePlayerHistory(playerId) {
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
+      materiales: parseMateriales(t.material),
+      subtipoCorporal: r.subtipo_corporal || "",
     };
   });
 
@@ -1638,7 +1640,14 @@ function FilaTareaHistorialReal({ tarea: t }) {
         {t.done && (
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", textAlign: "right" }}>
             {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} {t.unidad || "reps"}
-            {t.cargaReal !== "" && t.cargaReal != null ? ` · ${t.cargaReal}kg` : ""}
+            {t.cargaReal !== "" && t.cargaReal != null ? (t.subtipoCorporal === "asistencia" ? ` · banda ${t.cargaReal}` : ` · ${t.cargaReal}kg`) : ""}
+            {t.subtipoCorporal === "lastre"
+              ? " (lastre)"
+              : t.subtipoCorporal === "Barra" || t.subtipoCorporal === "Multipower"
+              ? ` (${t.subtipoCorporal})`
+              : !t.subtipoCorporal && (t.materiales || []).includes("Multipower")
+              ? " (Multipower)"
+              : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
           </span>
         )}
@@ -2186,7 +2195,21 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             {tarea.series ? `${tarea.series} × ` : ""}
             {tarea.cantidad} {tarea.unidad}
           </div>
-          <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>{tarea.referencia ? `Última vez: ${tarea.referencia}` : "Sin registro previo"}</div>
+          <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
+            {tarea.eligeEquipo
+              ? registro.subtipo === "Multipower"
+                ? tarea.referenciaMultipower
+                  ? `Última vez (Multipower): ${tarea.referenciaMultipower}`
+                  : "Sin registro previo en Multipower"
+                : registro.subtipo === "Barra"
+                ? tarea.referenciaBarra
+                  ? `Última vez (Barra): ${tarea.referenciaBarra}`
+                  : "Sin registro previo con Barra"
+                : "Elige con qué material lo has hecho"
+              : tarea.referencia
+              ? `Última vez: ${tarea.referencia}`
+              : "Sin registro previo"}
+          </div>
         </div>
         <button
           onClick={onToggle}
@@ -2228,6 +2251,55 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
       )}
       {mostrarRegistro && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
+          {tarea.eligeEquipo && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518" }}>¿CON QUÉ LO HAS HECHO?</span>
+              <div style={{ display: "flex", gap: 6 }}>
+                {["Barra", "Multipower"].map((op) => (
+                  <button
+                    key={op}
+                    onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}
+                    style={{
+                      fontSize: 10.5,
+                      padding: "5px 9px",
+                      borderRadius: 6,
+                      border: `1px solid ${registro.subtipo === op ? "#F5C518" : "#1A3050"}`,
+                      background: registro.subtipo === op ? "#F5C51822" : "transparent",
+                      color: registro.subtipo === op ? "#F5C518" : "#8BA4C0",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {op}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+          {tarea.esCorporal && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {[
+                { v: "", label: "Corporal" },
+                { v: "asistencia", label: "Con asistencia" },
+                { v: "lastre", label: "Con lastre" },
+              ].map((op) => (
+                <button
+                  key={op.v || "corporal"}
+                  onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v })}
+                  style={{
+                    fontSize: 10.5,
+                    padding: "5px 9px",
+                    borderRadius: 6,
+                    border: `1px solid ${(registro.subtipo || "") === op.v ? "#F5C518" : "#1A3050"}`,
+                    background: (registro.subtipo || "") === op.v ? "#F5C51822" : "transparent",
+                    color: (registro.subtipo || "") === op.v ? "#F5C518" : "#8BA4C0",
+                    cursor: "pointer",
+                  }}
+                >
+                  {op.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>{(tarea.unidad || "reps").toUpperCase()}</span>
@@ -2238,15 +2310,52 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>CARGA KG</span>
-              <input
-                value={registro.carga}
-                onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
-                placeholder="—"
-                style={{ width: 60, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-              />
-            </label>
+            {registro.subtipo === "asistencia" ? (
+              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>BANDA</span>
+                <div style={{ display: "flex", gap: 5 }}>
+                  {["Ligera", "Media", "Dura"].map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => onCambiarRegistro({ ...registro, carga: r })}
+                      style={{
+                        fontSize: 10.5,
+                        padding: "6px 8px",
+                        borderRadius: 6,
+                        border: `1px solid ${registro.carga === r ? "#F5C518" : "#1A3050"}`,
+                        background: registro.carga === r ? "#F5C51822" : "#122440",
+                        color: registro.carga === r ? "#F5C518" : "#8BA4C0",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </label>
+            ) : (
+              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>
+                  {registro.subtipo === "lastre"
+                    ? "KG LASTRE"
+                    : tarea.eligeEquipo
+                    ? registro.subtipo === "Multipower"
+                      ? "KG (MULTIPOWER)"
+                      : registro.subtipo === "Barra"
+                      ? "KG (BARRA)"
+                      : "CARGA KG"
+                    : tarea.esMultipower
+                    ? "KG (MULTIPOWER)"
+                    : "CARGA KG"}
+                </span>
+                <input
+                  value={registro.carga}
+                  onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
+                  placeholder="—"
+                  style={{ width: 60, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+                />
+              </label>
+            )}
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>RIR</span>
               <input
@@ -2344,12 +2453,42 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // como ya enviada, sin dejar reabrirla.
   const yaEnviadaAntes = loaded && tareaIds.length > 0 && tareaIds.some((id) => registrosByTarea.has(id));
 
+  // La referencia de "última vez" se guarda por ejercicio + equipo usado —
+  // la carga en un Multipower no es comparable a la misma carga con barra
+  // libre (contrapeso, fricción...), así que mezclarlas en el mismo "última
+  // vez" confundiría más que ayudar. Cuando una tarea tenía Barra Y
+  // Multipower seleccionadas a la vez (el entrenador dejó elegir), lo que
+  // de verdad se usó ese día es lo que el jugador marcó (subtipo_corporal,
+  // reaprovechado aquí igual que para asistencia/lastre) — no basta con
+  // mirar el material de la tarea, porque ese campo dice qué estaba
+  // disponible, no cuál se usó.
+  const equipoEfectivo = (it) => {
+    const mats = it.materiales || [];
+    const ambos = mats.includes("Barra") && mats.includes("Multipower");
+    if (ambos) return it.subtipoCorporal === "Multipower" ? "mp" : it.subtipoCorporal === "Barra" ? "std" : null;
+    return mats.includes("Multipower") ? "mp" : "std";
+  };
+  const claveReferencia = (nombre, equipo) => `${(nombre || "").toLowerCase()}::${equipo}`;
+
   const lastValueByName = {};
   [...historyItems]
     .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== "" || it.repsReal !== ""))
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .forEach((it) => {
-      lastValueByName[it.name.toLowerCase()] = it;
+      const eq = equipoEfectivo(it);
+      if (eq) lastValueByName[claveReferencia(it.name, eq)] = it;
+    });
+
+  // Última vez que esta misma tarea se hizo con peso corporal, qué eligió el
+  // jugador (corporal puro / con asistencia / con lastre) — o, si la tarea
+  // dejaba elegir entre Barra y Multipower, cuál usó — para preseleccionarlo
+  // solo y que no tenga que volver a elegirlo cada vez que se repita.
+  const lastSubtipoByName = {};
+  [...historyItems]
+    .filter((it) => it.date < date && it.subtipoCorporal)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .forEach((it) => {
+      lastSubtipoByName[(it.name || "").toLowerCase()] = it.subtipoCorporal;
     });
 
   // Cada elemento de un bloque es { tipo: "suelta", tarea } o
@@ -2359,9 +2498,20 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const circuitosById = new Map(circuitos.map((c) => [c.id, c]));
   const circuitoBuffer = {}; // circuito_id -> { nombreBloque, tareas: [...] }
 
+  const formatearReferencia = (lv) =>
+    lv
+      ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} ${lv.unidad || "reps"} · ` : ""}${
+          lv.subtipoCorporal === "asistencia" ? `banda ${lv.cargaReal || "—"}` : `${lv.cargaReal || "—"}kg${lv.subtipoCorporal && lv.subtipoCorporal !== "Barra" && lv.subtipoCorporal !== "Multipower" ? ` (${lv.subtipoCorporal})` : ""}`
+        }${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
+      : null;
+
   const construirTareaVisual = (t) => {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
-    const lv = lastValueByName[(e.nombre || "").toLowerCase()];
+    const materiales = parseMateriales(t.material);
+    const esMultipower = materiales.includes("Multipower");
+    const eligeEquipo = materiales.includes("Barra") && materiales.includes("Multipower");
+    const esCorporal = (t.tipo_resistencia || "") === "Peso corporal";
+    const nombre = e.nombre || "";
     return {
       id: t.id,
       nombre: e.nombre || "(ejercicio eliminado)",
@@ -2370,10 +2520,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
       gif: e.gif_url || "",
-      materiales: parseMateriales(t.material),
-      referencia: lv
-        ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} ${lv.unidad || "reps"} · ` : ""}${lv.cargaReal || "—"}kg${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
-        : null,
+      materiales,
+      esMultipower,
+      esCorporal,
+      eligeEquipo,
+      subtipoDefault: esCorporal || eligeEquipo ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
+      // Si la tarea deja elegir entre Barra y Multipower, se llevan las dos
+      // referencias por separado — la que se muestre depende de qué elija
+      // el jugador en pantalla, no de una sola fija de antemano.
+      referencia: eligeEquipo ? null : formatearReferencia(lastValueByName[claveReferencia(nombre, esMultipower ? "mp" : "std")]),
+      referenciaBarra: eligeEquipo ? formatearReferencia(lastValueByName[claveReferencia(nombre, "std")]) : null,
+      referenciaMultipower: eligeEquipo ? formatearReferencia(lastValueByName[claveReferencia(nombre, "mp")]) : null,
     };
   };
 
@@ -2406,7 +2563,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const totalTareas = todasLasTareas.length;
   const totalHechas = todasLasTareas.filter((t) => !!hechoDraft[t.id]).length;
 
-  const getRegistro = (id) => registrosDraft[id] || { reps: "", carga: "", rir: "" };
+  const tareasVisualesById = new Map(todasLasTareas.map((t) => [t.id, t]));
+  const getRegistro = (id) => {
+    if (registrosDraft[id]) return registrosDraft[id];
+    const t = tareasVisualesById.get(id);
+    return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "" };
+  };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
   // Marcar/desmarcar hecho es SOLO local mientras no se confirme el envío —
@@ -2432,7 +2594,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             reps_hechas: draft.reps,
             carga_kg: draft.carga,
             rir: draft.rir,
-            subtipo_corporal: "",
+            subtipo_corporal: draft.subtipo || "",
           };
         });
       if (nuevos.length) {
