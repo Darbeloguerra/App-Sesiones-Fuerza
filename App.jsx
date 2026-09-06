@@ -393,6 +393,56 @@ function parseMateriales(material) {
   }
 }
 
+// Todo lo propio de una tarea de Resistencia (tipo continuo/HIIT/RSA y sus
+// campos) se guarda como JSON en la columna `resistencia_data`. Este par de
+// helpers lo interpreta de forma segura y construye el texto legible que ve
+// tanto el entrenador (Programación) como el jugador — un solo sitio para
+// los dos, así no se desincronizan.
+function parseResistenciaData(json) {
+  if (!json) return null;
+  try {
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function formatearObjetivoResistencia(r) {
+  if (!r || !r.tipo) return "Sin configurar";
+  const conUnidad = (v, u) => (v !== "" && v != null ? `${v} ${u === "min" ? "min" : "seg"}` : null);
+  if (r.tipo === "continuo") {
+    return [
+      r.series && `${r.series} series`,
+      conUnidad(r.tiempo, r.tiempoUnidad),
+      r.intensidad && `${r.intensidad}% FCmáx`,
+      conUnidad(r.recuperacion, r.recuperacionUnidad) && `${conUnidad(r.recuperacion, r.recuperacionUnidad)} recuperación`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (r.tipo === "hiit") {
+    return [
+      r.bloques && `${r.bloques} bloques`,
+      r.intervalos && `${r.intervalos} intervalos`,
+      conUnidad(r.tiempo, r.tiempoUnidad),
+      conUnidad(r.recuperacion, r.recuperacionUnidad) && `${conUnidad(r.recuperacion, r.recuperacionUnidad)} recuperación`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  if (r.tipo === "rsa") {
+    return [
+      r.bloques && `${r.bloques} bloques`,
+      r.series && `${r.series} series`,
+      r.distancia && `${r.distancia} m`,
+      conUnidad(r.recuperacion, r.recuperacionUnidad) && `${conUnidad(r.recuperacion, r.recuperacionUnidad)} recuperación`,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  return "";
+}
+
 // Reproductor incrustado. Tres casos:
 // - YouTube: iframe embebido (16:9, sin marca ni vídeos relacionados de más).
 // - Vídeo directo (R2 u otro bucket): <video> nativo, con su propio estado
@@ -814,6 +864,8 @@ function usePlayerHistory(playerId) {
       materiales: parseMateriales(t.material),
       subtipoCorporal: r.subtipo_corporal || "",
       unilateral: t.lateralidad === "unilateral",
+      esResistencia: t.bloque_sesion === "Resistencia",
+      objetivoResistencia: t.bloque_sesion === "Resistencia" ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data)) : null,
     };
   });
 
@@ -1638,7 +1690,12 @@ function FilaTareaHistorialReal({ tarea: t }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <PuntoEstadoReal hecho={t.done} />
         <span style={{ fontSize: 12, color: t.done ? "#F0F4FF" : "#4A6680", flex: 1 }}>{t.name}</span>
-        {t.done && (
+        {t.done && t.esResistencia && (
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: t.subtipoCorporal === "parcial" ? "#F5C518" : "#22C55E", textAlign: "right" }}>
+            {t.subtipoCorporal === "parcial" ? `Hizo menos: ${t.cargaReal || "sin detalle"}` : "Cumplido completo"}
+          </span>
+        )}
+        {t.done && !t.esResistencia && (
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", textAlign: "right" }}>
             {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} {t.unidad || "reps"}
             {t.cargaReal !== "" && t.cargaReal != null ? (t.subtipoCorporal === "asistencia" ? ` · banda ${t.cargaReal}` : ` · ${t.cargaReal}kg`) : ""}
@@ -2010,14 +2067,32 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar }) {
                       {item.tareas.map((t, i) => (
                         <TareaVisualReal
                           key={t.id}
-                          tarea={{ nombre: `${i + 1}. ${t.nombreEjercicio}`, detalle: `${t.series} × ${t.cantidad} · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`, gif: t.gif_url, nota: t.nota, materiales: parseMateriales(t.material) }}
+                          tarea={{
+                            nombre: `${i + 1}. ${t.nombreEjercicio}`,
+                            detalle:
+                              t.bloque_sesion === "Resistencia"
+                                ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data))
+                                : `${t.series} × ${t.cantidad} · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`,
+                            gif: t.gif_url,
+                            nota: t.nota,
+                            materiales: parseMateriales(t.material),
+                          }}
                         />
                       ))}
                     </div>
                   ) : (
                     <TareaVisualReal
                       key={item.tarea.id}
-                      tarea={{ nombre: item.tarea.nombreEjercicio, detalle: `${item.tarea.series} × ${item.tarea.cantidad} · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`, gif: item.tarea.gif_url, nota: item.tarea.nota, materiales: parseMateriales(item.tarea.material) }}
+                      tarea={{
+                        nombre: item.tarea.nombreEjercicio,
+                        detalle:
+                          item.tarea.bloque_sesion === "Resistencia"
+                            ? formatearObjetivoResistencia(parseResistenciaData(item.tarea.resistencia_data))
+                            : `${item.tarea.series} × ${item.tarea.cantidad} · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`,
+                        gif: item.tarea.gif_url,
+                        nota: item.tarea.nota,
+                        materiales: parseMateriales(item.tarea.material),
+                      }}
                     />
                   )
                 )}
@@ -2191,40 +2266,49 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-            <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
-            <span
-              style={{
-                fontFamily: "'IBM Plex Mono', monospace",
-                fontSize: 9,
-                padding: "2px 6px",
-                borderRadius: 5,
-                border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
-                color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
-                background: tarea.unilateral ? "#F5C51818" : "transparent",
-                flexShrink: 0,
-              }}
-            >
-              {tarea.unilateral ? "Unilateral" : "Bilateral"}
-            </span>
-          </div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
-            {tarea.series ? `${tarea.series} × ` : ""}
-            {tarea.cantidad} {tarea.unidad}
-            {tarea.unilateral ? " · cada lado" : ""}
-            {tarea.rirObjetivo != null && <span style={{ color: "#F5C518", fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
-          </div>
-          <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
-            {tarea.eligeEquipo
-              ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
-                ? tarea.referenciasPorEquipo?.[registro.subtipo]
-                  ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
-                  : `Sin registro previo con ${registro.subtipo}`
-                : "Elige con qué material lo has hecho"
-              : tarea.referencia
-              ? `Última vez: ${tarea.referencia}`
-              : "Sin registro previo"}
-          </div>
+          {tarea.esResistencia ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>{tarea.objetivoResistencia}</div>
+            </>
+          ) : (
+            <>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+                <span
+                  style={{
+                    fontFamily: "'IBM Plex Mono', monospace",
+                    fontSize: 9,
+                    padding: "2px 6px",
+                    borderRadius: 5,
+                    border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
+                    color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
+                    background: tarea.unilateral ? "#F5C51818" : "transparent",
+                    flexShrink: 0,
+                  }}
+                >
+                  {tarea.unilateral ? "Unilateral" : "Bilateral"}
+                </span>
+              </div>
+              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
+                {tarea.series ? `${tarea.series} × ` : ""}
+                {tarea.cantidad} {tarea.unidad}
+                {tarea.unilateral ? " · cada lado" : ""}
+                {tarea.rirObjetivo != null && <span style={{ color: "#F5C518", fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
+              </div>
+              <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
+                {tarea.eligeEquipo
+                  ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
+                    ? tarea.referenciasPorEquipo?.[registro.subtipo]
+                      ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
+                      : `Sin registro previo con ${registro.subtipo}`
+                    : "Elige con qué material lo has hecho"
+                  : tarea.referencia
+                  ? `Última vez: ${tarea.referencia}`
+                  : "Sin registro previo"}
+              </div>
+            </>
+          )}
         </div>
         <button
           onClick={onToggle}
@@ -2264,7 +2348,44 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           <span style={{ fontSize: 11.5, color: "#8BA4C0", lineHeight: 1.35 }}>{tarea.nota}</span>
         </div>
       )}
-      {mostrarRegistro && (
+      {mostrarRegistro && tarea.esResistencia && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
+          <div style={{ display: "flex", gap: 6 }}>
+            {[
+              { v: "completo", label: "Cumplido completo" },
+              { v: "parcial", label: "Hice menos" },
+            ].map((op) => (
+              <button
+                key={op.v}
+                onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v })}
+                style={{
+                  fontSize: 11,
+                  padding: "7px 10px",
+                  borderRadius: 6,
+                  border: `1px solid ${(registro.subtipo || "completo") === op.v ? "#F5C518" : "#1A3050"}`,
+                  background: (registro.subtipo || "completo") === op.v ? "#F5C51822" : "transparent",
+                  color: (registro.subtipo || "completo") === op.v ? "#F5C518" : "#8BA4C0",
+                  cursor: "pointer",
+                }}
+              >
+                {op.label}
+              </button>
+            ))}
+          </div>
+          {registro.subtipo === "parcial" && (
+            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>¿CUÁNTO HAS HECHO?</span>
+              <input
+                value={registro.carga}
+                onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
+                placeholder="ej. 2 de 3 series, 8 min..."
+                style={{ background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px", width: "100%", boxSizing: "border-box" }}
+              />
+            </label>
+          )}
+        </div>
+      )}
+      {mostrarRegistro && !tarea.esResistencia && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
           {tarea.eligeEquipo && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -2525,6 +2646,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const equipoUnico = equiposEnTarea.length === 1 ? equiposEnTarea[0] : null;
     const eligeEquipo = equiposEnTarea.length >= 2;
     const esCorporal = (t.tipo_resistencia || "") === "Peso corporal";
+    const esResistencia = t.bloque_sesion === "Resistencia";
+    const resistencia = esResistencia ? parseResistenciaData(t.resistencia_data) : null;
     const nombre = e.nombre || "";
     return {
       id: t.id,
@@ -2538,6 +2661,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       materiales,
       equipoUnico,
       esCorporal,
+      esResistencia,
+      objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
       unilateral: t.lateralidad === "unilateral",
       eligeEquipo,
       equiposElegibles: eligeEquipo ? equiposEnTarea : null,
@@ -3452,7 +3577,32 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   );
 }
 
+const TIPOS_RESISTENCIA_CARDIO = [
+  { id: "continuo", label: "Continuo" },
+  { id: "hiit", label: "HIIT" },
+  { id: "rsa", label: "RSA" },
+];
+
+// Un número + un selector de MIN/SEG al lado — se repite para tiempo y para
+// recuperación en los tres tipos de trabajo de Resistencia.
+function CampoTiempoConUnidadDiseno({ etiqueta, valor, unidad, onCambiarValor, onCambiarUnidad, w }) {
+  return (
+    <CampoEtiquetadoDiseno etiqueta={etiqueta} w={w}>
+      <div style={{ display: "flex", gap: 4 }}>
+        <input value={valor} onChange={(e) => onCambiarValor(e.target.value)} placeholder="—" style={{ ...campoStyleDiseno("100%"), flex: 1, minWidth: 0 }} />
+        <select value={unidad || "seg"} onChange={(e) => onCambiarUnidad(e.target.value)} style={{ background: "#1A3050", border: "1px solid #1A3050", borderRadius: 6, color: "#8BA4C0", fontSize: 10.5, padding: "0 3px" }}>
+          <option value="min">min</option>
+          <option value="seg">seg</option>
+        </select>
+      </div>
+    </CampoEtiquetadoDiseno>
+  );
+}
+
 function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar }) {
+  const tipo = tarea.tipoResistenciaCardio || "";
+  const set = (campo) => (valor) => onCambiar({ ...tarea, [campo]: valor });
+
   return (
     <div style={{ padding: "10px 12px", background: "#122440", borderRadius: 8, border: "1px solid #1A3050", display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -3476,17 +3626,72 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
           ×
         </button>
       </div>
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <CampoEtiquetadoDiseno etiqueta="INTERVALOS" w={72}>
-          <input value={tarea.intervalos} onChange={(e) => onCambiar({ ...tarea, intervalos: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
-        </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="TIEMPO (SEG)" w={92}>
-          <input value={tarea.trabajo} onChange={(e) => onCambiar({ ...tarea, trabajo: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
-        </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="RECUPERACIÓN (SEG)" w={128}>
-          <input value={tarea.descanso} onChange={(e) => onCambiar({ ...tarea, descanso: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
-        </CampoEtiquetadoDiseno>
+
+      <div style={{ display: "flex", gap: 6 }}>
+        {TIPOS_RESISTENCIA_CARDIO.map((op) => (
+          <button
+            key={op.id}
+            onClick={() => onCambiar({ ...tarea, tipoResistenciaCardio: op.id })}
+            style={{
+              flex: 1,
+              fontSize: 12.5,
+              fontWeight: 600,
+              padding: "8px 0",
+              borderRadius: 7,
+              border: `1px solid ${tipo === op.id ? "#F5C518" : "#1A3050"}`,
+              background: tipo === op.id ? "#F5C51822" : "transparent",
+              color: tipo === op.id ? "#F5C518" : "#8BA4C0",
+              cursor: "pointer",
+            }}
+          >
+            {op.label}
+          </button>
+        ))}
       </div>
+
+      {!tipo && <div style={{ fontSize: 11.5, color: "#4A6680" }}>Elige el tipo de trabajo para configurar los campos.</div>}
+
+      {tipo === "continuo" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <CampoEtiquetadoDiseno etiqueta="SERIES" w={60}>
+            <input value={tarea.series} onChange={(e) => set("series")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} w={100} />
+          <CampoEtiquetadoDiseno etiqueta="INTENSIDAD (% FCMÁX)" w={148}>
+            <input value={tarea.intensidad} onChange={(e) => set("intensidad")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
+        </div>
+      )}
+
+      {tipo === "hiit" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <CampoEtiquetadoDiseno etiqueta="BLOQUES" w={60}>
+            <input value={tarea.bloques} onChange={(e) => set("bloques")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoEtiquetadoDiseno etiqueta="INTERVALOS" w={72}>
+            <input value={tarea.intervalos} onChange={(e) => set("intervalos")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} w={100} />
+          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
+        </div>
+      )}
+
+      {tipo === "rsa" && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <CampoEtiquetadoDiseno etiqueta="BLOQUES" w={60}>
+            <input value={tarea.bloques} onChange={(e) => set("bloques")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoEtiquetadoDiseno etiqueta="SERIES" w={60}>
+            <input value={tarea.series} onChange={(e) => set("series")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoEtiquetadoDiseno etiqueta="DISTANCIA (M)" w={104}>
+            <input value={tarea.distancia} onChange={(e) => set("distancia")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+          </CampoEtiquetadoDiseno>
+          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
+        </div>
+      )}
+
       <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
     </div>
   );
@@ -3581,7 +3786,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     }
     const base =
       bloque === "Resistencia"
-        ? { key: Date.now() + Math.random(), nombre, ejercicioId, intervalos: "", trabajo: "", descanso: "", nota: "" }
+        ? { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
         : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
     onCambiarTareas([...tareas, base]);
   };
@@ -3752,6 +3957,20 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
         } catch {
           materiales = [];
         }
+        // Sesiones diseñadas antes de este cambio guardaban Resistencia como
+        // "intervalos/trabajo/descanso" en las columnas genéricas de series/
+        // cantidad/rir — se leen igual si no hay resistencia_data, para no
+        // perder lo ya diseñado.
+        let resistencia = { tipo: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg" };
+        if (t.resistencia_data) {
+          try {
+            resistencia = { ...resistencia, ...JSON.parse(t.resistencia_data) };
+          } catch {
+            /* se queda el valor por defecto */
+          }
+        } else if (t.bloque_sesion === "Resistencia" && (t.series || t.cantidad || t.rir)) {
+          resistencia = { ...resistencia, tipo: "hiit", intervalos: t.series ?? "", tiempo: t.cantidad ?? "", recuperacion: t.rir ?? "" };
+        }
         const e = ejerciciosById.get(t.ejercicio_id) || {};
         return {
           key: t.id,
@@ -3766,9 +3985,15 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
           materiales,
           lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
-          intervalos: t.series ?? "",
-          trabajo: t.cantidad ?? "",
-          descanso: t.rir ?? "",
+          tipoResistenciaCardio: resistencia.tipo,
+          bloques: resistencia.bloques,
+          intervalos: resistencia.intervalos,
+          tiempo: resistencia.tiempo,
+          tiempoUnidad: resistencia.tiempoUnidad,
+          intensidad: resistencia.intensidad,
+          distancia: resistencia.distancia,
+          recuperacion: resistencia.recuperacion,
+          recuperacionUnidad: resistencia.recuperacionUnidad,
           circuito_id: t.circuito_id || "",
           orden_en_circuito: t.orden_en_circuito || "",
         };
@@ -3869,17 +4094,36 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
       const keepTareaIds = new Set();
       const keepCircuitoIds = new Set();
 
+      // Todo lo propio de Resistencia (tipo continuo/HIIT/RSA y sus campos)
+      // va en una sola columna JSON — los campos genéricos de series/cantidad/
+      // rir se dejan vacíos para estas tareas, ya no se reaprovechan como antes.
+      const serializarResistencia = (t) =>
+        JSON.stringify({
+          tipo: t.tipoResistenciaCardio || "",
+          bloques: t.bloques || "",
+          series: t.series || "",
+          intervalos: t.intervalos || "",
+          tiempo: t.tiempo || "",
+          tiempoUnidad: t.tiempoUnidad || "",
+          intensidad: t.intensidad || "",
+          distancia: t.distancia || "",
+          recuperacion: t.recuperacion || "",
+          recuperacionUnidad: t.recuperacionUnidad || "",
+        });
+
       const guardarTareaSuelta = async (t, bloqueNombre, mostrarCarga) => {
         const ejercicioId = t.ejercicioId;
+        const esResistencia = bloqueNombre === "Resistencia";
         const saved = await api.save("tareas", {
           id: t.tareaId,
           sesion_id: savedSesion.id,
           bloque_sesion: bloqueNombre,
           ejercicio_id: ejercicioId,
-          modo: bloqueNombre === "Resistencia" ? "intervalos" : t.modo,
-          series: bloqueNombre === "Resistencia" ? t.intervalos : t.series,
-          cantidad: bloqueNombre === "Resistencia" ? t.trabajo : t.cantidad,
-          rir: bloqueNombre === "Resistencia" ? t.descanso : t.rir,
+          modo: esResistencia ? "" : t.modo,
+          series: esResistencia ? "" : t.series,
+          cantidad: esResistencia ? "" : t.cantidad,
+          rir: esResistencia ? "" : t.rir,
+          resistencia_data: esResistencia ? serializarResistencia(t) : "",
           tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
           material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
           lateralidad: t.lateralidad || "bilateral",
@@ -3891,6 +4135,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
       };
 
       const guardarCircuito = async (c, bloqueNombre, mostrarCarga) => {
+        const esResistencia = bloqueNombre === "Resistencia";
         const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
@@ -3900,10 +4145,11 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
               sesion_id: savedSesion.id,
               bloque_sesion: bloqueNombre,
               ejercicio_id: t.ejercicioId,
-              modo: bloqueNombre === "Resistencia" ? "intervalos" : t.modo,
-              series: bloqueNombre === "Resistencia" ? t.intervalos : t.series,
-              cantidad: bloqueNombre === "Resistencia" ? t.trabajo : t.cantidad,
-              rir: bloqueNombre === "Resistencia" ? t.descanso : t.rir,
+              modo: esResistencia ? "" : t.modo,
+              series: esResistencia ? "" : t.series,
+              cantidad: esResistencia ? "" : t.cantidad,
+              rir: esResistencia ? "" : t.rir,
+              resistencia_data: esResistencia ? serializarResistencia(t) : "",
               tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
               material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
               lateralidad: t.lateralidad || "bilateral",
@@ -4310,7 +4556,7 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
                             ejercicioId = creado.id;
                             retryEjercicios();
                           }
-                          setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, intervalos: "", trabajo: "", descanso: "", nota: "" }]);
+                          setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                         }}
                       />
                       <button
