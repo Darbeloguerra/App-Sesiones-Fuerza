@@ -407,6 +407,83 @@ function parseResistenciaData(json) {
   }
 }
 
+// Convierte un registro de "tareas" del backend en el objeto de trabajo
+// (draft) que usan los editores de sesión — un solo mapeo compartido para
+// tres casos: editar una sesión existente, reutilizar una pasada como
+// plantilla, y (más adelante) cualquier otro sitio que necesite lo mismo.
+// Con opts.nuevo=true se genera una key local nueva y se borra tareaId/
+// circuito_id/orden — así, al guardar, se crea una fila nueva en vez de
+// sobreescribir la tarea original (que sigue intacta en su sesión de origen).
+function tareaADraft(t, ejerciciosById, opts = {}) {
+  const nuevo = !!opts.nuevo;
+  let materiales = [];
+  try {
+    materiales = t.material ? JSON.parse(t.material) : [];
+  } catch {
+    materiales = [];
+  }
+  let resistencia = { tipo: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg" };
+  if (t.resistencia_data) {
+    try {
+      resistencia = { ...resistencia, ...JSON.parse(t.resistencia_data) };
+    } catch {
+      /* se queda el valor por defecto */
+    }
+  } else if (t.bloque_sesion === "Resistencia" && (t.series || t.cantidad || t.rir)) {
+    resistencia = { ...resistencia, tipo: "hiit", intervalos: t.series ?? "", tiempo: t.cantidad ?? "", recuperacion: t.rir ?? "" };
+  }
+  const e = ejerciciosById.get(t.ejercicio_id) || {};
+  return {
+    key: nuevo ? Date.now() + Math.random() : t.id,
+    tareaId: nuevo ? undefined : t.id,
+    nombre: e.nombre || "(ejercicio eliminado)",
+    ejercicioId: t.ejercicio_id,
+    modo: t.modo || "reps",
+    series: t.series ?? "",
+    cantidad: t.cantidad ?? "",
+    rir: t.rir ?? "",
+    tipoResistencia: t.tipo_resistencia || "Peso libre",
+    materiales,
+    lateralidad: t.lateralidad || "bilateral",
+    nota: t.nota || "",
+    tipoResistenciaCardio: resistencia.tipo,
+    bloques: resistencia.bloques,
+    intervalos: resistencia.intervalos,
+    tiempo: resistencia.tiempo,
+    tiempoUnidad: resistencia.tiempoUnidad,
+    intensidad: resistencia.intensidad,
+    distancia: resistencia.distancia,
+    recuperacion: resistencia.recuperacion,
+    recuperacionUnidad: resistencia.recuperacionUnidad,
+    circuito_id: nuevo ? "" : t.circuito_id || "",
+    orden_en_circuito: nuevo ? "" : t.orden_en_circuito || "",
+  };
+}
+
+// Agrupa las tareas de un bloque que comparten circuito_id, a partir
+// únicamente de la lista de tareas (no hace falta la entidad "circuitos"
+// aparte: cada tarea ya sabe a qué circuito y bloque pertenece). Se usa para
+// reconstruir el borrador de "reutilizar sesión" sin tener que pedir los
+// circuitos al backend sesión por sesión.
+function agruparCircuitosDeTareas(tareas, ejerciciosById, nombreBloque, opts = {}) {
+  const nuevo = !!opts.nuevo;
+  const porCircuito = new Map();
+  tareas
+    .filter((t) => t.circuito_id && t.bloque_sesion === nombreBloque)
+    .forEach((t) => {
+      if (!porCircuito.has(t.circuito_id)) porCircuito.set(t.circuito_id, []);
+      porCircuito.get(t.circuito_id).push(t);
+    });
+  return [...porCircuito.entries()].map(([circuitoId, tareasDelCircuito]) => ({
+    key: nuevo ? Date.now() + Math.random() : circuitoId,
+    circuitoId: nuevo ? undefined : circuitoId,
+    tareas: tareasDelCircuito
+      .slice()
+      .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
+      .map((t) => tareaADraft(t, ejerciciosById, opts)),
+  }));
+}
+
 function formatearObjetivoResistencia(r) {
   if (!r || !r.tipo) return "Sin configurar";
   const conUnidad = (v, u) => (v !== "" && v != null ? `${v} ${u === "min" ? "min" : "seg"}` : null);
@@ -1990,7 +2067,7 @@ function TareaVisualReal({ tarea }) {
   );
 }
 
-function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar }) {
+function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }) {
   const [abierta, setAbierta] = useState(esHoy);
   const [confirmando, setConfirmando] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -2105,6 +2182,14 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar }) {
           >
             Editar esta sesión
           </button>
+          {onReutilizar && (
+            <button
+              onClick={() => onReutilizar(sesion)}
+              style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #F5C51855", background: "transparent", color: "#F5C518", cursor: "pointer", fontWeight: 600 }}
+            >
+              Reutilizar como nueva
+            </button>
+          )}
           {confirmando ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, color: "#EF4444" }}>
@@ -2142,19 +2227,29 @@ function ProgramacionReal({ players, onBack }) {
   const [sesiones, , sesionesLoaded, , retry] = useEntityList("sesiones");
   const [ejercicios, , ejerciciosLoaded] = useEntityList("ejercicios");
   const [editingSesion, setEditingSesion] = useState(null);
+  const [plantillaSesion, setPlantillaSesion] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
+  const [verHistorial, setVerHistorial] = useState(false);
+  const [historialVisible, setHistorialVisible] = useState(15);
   const sesionIds = sesiones.map((s) => s.id);
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
 
   if (showEditor) {
-    const EditorComponent = editingSesion?.tipo === "complementaria" ? DinamicaComplementariaReal : DisenoSesionReal;
+    const esComplementaria = (editingSesion || plantillaSesion)?.tipo === "complementaria";
+    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const cerrar = () => {
+      setShowEditor(false);
+      setEditingSesion(null);
+      setPlantillaSesion(null);
+    };
     return (
       <EditorComponent
-        sesionExistente={editingSesion}
-        onBack={() => setShowEditor(false)}
+        sesionExistente={editingSesion || undefined}
+        plantilla={plantillaSesion || undefined}
+        onBack={cerrar}
         onGuardado={() => {
           retry();
-          setShowEditor(false);
+          cerrar();
         }}
       />
     );
@@ -2177,9 +2272,31 @@ function ProgramacionReal({ players, onBack }) {
   const futuras = conTareas
     .filter((s) => !(s.fechas || []).includes(today) && (s.fechas || []).some((f) => f > today))
     .sort((a, b) => ((a.fechas || [])[0] < (b.fechas || [])[0] ? -1 : 1));
+  // Historial: todas las fechas de la sesión ya pasaron (ni hoy ni futuras).
+  // Se ordena de la más reciente a la más antigua, que es como interesa
+  // revisarlo — y es también lo que hace más útil "Reutilizar", al tener las
+  // sesiones más parecidas a lo que se necesita ahora arriba del todo.
+  const pasadas = conTareas
+    .filter((s) => !(s.fechas || []).includes(today) && !(s.fechas || []).some((f) => f > today) && (s.fechas || []).length)
+    .sort((a, b) => {
+      const maxA = (a.fechas || []).reduce((m, f) => (f > m ? f : m), "");
+      const maxB = (b.fechas || []).reduce((m, f) => (f > m ? f : m), "");
+      return maxA < maxB ? 1 : -1;
+    });
 
   const editar = (s) => {
     setEditingSesion(s);
+    setShowEditor(true);
+  };
+
+  // Reutilizar: abre el editor con el mismo contenido (bloques, tareas,
+  // circuitos, destinatarios, objetivo...) pero como sesión NUEVA — sin id,
+  // sin fechas heredadas (las elige de nuevo el entrenador) y sin arrastrar
+  // los ids de tarea/circuito originales, así guardar no toca ni borra nada
+  // de la sesión de la que se partió.
+  const reutilizar = (s) => {
+    setPlantillaSesion(s);
+    setEditingSesion(null);
     setShowEditor(true);
   };
 
@@ -2217,7 +2334,7 @@ function ProgramacionReal({ players, onBack }) {
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>HOY</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {hoy.map((s) => (
-                <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} onEliminar={eliminarSesion} />
+                <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
               ))}
             </div>
           </div>
@@ -2226,10 +2343,37 @@ function ProgramacionReal({ players, onBack }) {
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>PRÓXIMAS</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {futuras.map((s) => (
-              <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} />
+              <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
             ))}
             {futuras.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>No hay más sesiones programadas</div>}
           </div>
+        </div>
+
+        <div style={{ marginTop: 24 }}>
+          <button
+            onClick={() => setVerHistorial((v) => !v)}
+            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "1px solid #1A3050", borderRadius: 8, padding: "10px 14px", cursor: "pointer", color: "#F0F4FF", fontSize: 13, fontWeight: 600 }}
+          >
+            <History size={14} color="#8BA4C0" />
+            Historial de sesiones{pasadas.length ? ` (${pasadas.length})` : ""}
+            <span style={{ marginLeft: "auto", color: "#4A6680", fontSize: 12, transform: verHistorial ? "rotate(90deg)" : "none" }}>›</span>
+          </button>
+          {verHistorial && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+              {pasadas.slice(0, historialVisible).map((s) => (
+                <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+              ))}
+              {pasadas.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>Todavía no hay sesiones pasadas</div>}
+              {pasadas.length > historialVisible && (
+                <button
+                  onClick={() => setHistorialVisible((v) => v + 15)}
+                  style={{ alignSelf: "center", fontSize: 12.5, padding: "8px 16px", borderRadius: 8, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer" }}
+                >
+                  Mostrar más
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </PantallaBase>
@@ -3884,19 +4028,24 @@ function categoriaComunEntreJugadores(targetPlayerIds, allPlayers) {
   return interseccion.length === 1 ? interseccion[0] : null;
 }
 
-function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
+function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
+  // Reutilizar: misma configuración base que editar (destinatarios, objetivo,
+  // activación, preventivo...), pero SIN heredar id ni fechas — es una sesión
+  // nueva de arriba a abajo, solo "inspirada" en la anterior.
+  const esReutilizacion = !!plantilla;
+  const base = sesionExistente || plantilla;
   const [players, , playersLoaded] = usePlayers();
   const [categoriasPreventivas, categoriasLoaded] = useCategoriasPreventivas();
   const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
 
-  const [md, setMd] = useState(sesionExistente?.md || "");
-  const [objetivo, setObjetivo] = useState(sesionExistente?.objetivo || "");
+  const [md, setMd] = useState(isEditing ? base?.md || "" : "");
+  const [objetivo, setObjetivo] = useState(base?.objetivo || "");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
   const [nuevaFecha, setNuevaFecha] = useState("");
-  const [targetPlayerIds, setTargetPlayerIds] = useState(sesionExistente?.jugadores_destino ?? null);
-  const [activacionActiva, setActivacionActiva] = useState(sesionExistente ? !!sesionExistente.activacion_activa : true);
+  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
+  const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
   const [duracionBici, setDuracionBici] = useState("8");
   // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
   // categoría se aplican ese día, 0 = no se aplica) sin cambiar el nombre de
@@ -3904,8 +4053,8 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   // (true/false), así que se convierten a 1/0 la primera vez que se leen;
   // las nuevas guardan directamente el número elegido.
   const [preventivoCantidad, setPreventivoCantidad] = useState(() => {
-    if (!sesionExistente) return 1;
-    const v = sesionExistente.preventivo_activo;
+    if (!base) return 1;
+    const v = base.preventivo_activo;
     if (typeof v === "boolean") return v ? 1 : 0;
     return Number(v) || 0;
   });
@@ -3922,11 +4071,33 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
   const [movilidadTareaIdsPorFecha, setMovilidadTareaIdsPorFecha] = useState({});
   const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({}); // fecha -> [id, id, ...]
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
-  const [cargandoExistente, setCargandoExistente] = useState(isEditing);
+  const [cargandoExistente, setCargandoExistente] = useState(isEditing || esReutilizacion);
   const [hasData, setHasData] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
+
+  // Reutilizar una sesión pasada: reparte sus tareas/circuitos en los mismos
+  // bloques, pero generados como registros NUEVOS (sin tareaId/circuitoId
+  // heredado) — al guardar se crean filas nuevas, la sesión original de la
+  // que se partió no se toca. No hay llamada al backend: todo sale de las
+  // tareas que Programación ya tenía cargadas para esa sesión.
+  useEffect(() => {
+    if (!esReutilizacion || !ejerciciosLoaded) return;
+    const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+    const tareas = plantilla.tareas || [];
+    const porBloque = (nombreBloque) => tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true }));
+    setTareasCore(porBloque("Core"));
+    setCircuitosCore(agruparCircuitosDeTareas(tareas, ejerciciosById, "Core", { nuevo: true }));
+    setTareasResistencia(porBloque("Resistencia"));
+    setCircuitosResistencia(agruparCircuitosDeTareas(tareas, ejerciciosById, "Resistencia", { nuevo: true }));
+    setTareasFuerza(porBloque("Fuerza"));
+    setCircuitosFuerza(agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true }));
+    const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
+    if (activacionTarea) setDuracionBici(String(activacionTarea.cantidad || "8"));
+    setCargandoExistente(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esReutilizacion, ejerciciosLoaded]);
 
   // Carga de sesión existente (edición): reparte tareas/circuitos en su bloque real.
   useEffect(() => {
@@ -4639,8 +4810,10 @@ function DisenoSesionReal({ sesionExistente, onBack, onGuardado }) {
 // junto a lo que tenga programado ese día (o la muestra sola si no hay nada
 // más), sin ningún cambio en PantallaJugadorReal — ya agrupa por bloque_sesion
 // cualquier sesión que coincida con la fecha y el jugador.
-function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
+function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
+  const esReutilizacion = !!plantilla;
+  const base = sesionExistente || plantilla;
   const [players, , playersLoaded] = usePlayers();
   const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
@@ -4648,17 +4821,31 @@ function DinamicaComplementariaReal({ sesionExistente, onBack, onGuardado }) {
   const [nombreBloque, setNombreBloque] = useState("");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
   const [nuevaFecha, setNuevaFecha] = useState("");
-  const [targetPlayerIds, setTargetPlayerIds] = useState(sesionExistente?.jugadores_destino ?? null);
+  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
   const [tareasBloque, setTareasBloque] = useState([]);
   const [circuitosBloque, setCircuitosBloque] = useState([]);
 
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
-  const [cargandoExistente, setCargandoExistente] = useState(isEditing);
+  const [cargandoExistente, setCargandoExistente] = useState(isEditing || esReutilizacion);
   const [hasData, setHasData] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
+
+  // Reutilizar: mismo nombre de dinámica y tareas, generadas como registros
+  // nuevos — la sesión original no se toca al guardar.
+  useEffect(() => {
+    if (!esReutilizacion || !ejerciciosLoaded) return;
+    const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+    const tareas = plantilla.tareas || [];
+    const nombreDetectado = tareas[0]?.bloque_sesion || "";
+    setNombreBloque(nombreDetectado);
+    setTareasBloque(tareas.filter((t) => !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true })));
+    setCircuitosBloque(nombreDetectado ? agruparCircuitosDeTareas(tareas, ejerciciosById, nombreDetectado, { nuevo: true }) : []);
+    setCargandoExistente(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [esReutilizacion, ejerciciosLoaded]);
 
   useEffect(() => {
     if (!isEditing || !ejerciciosLoaded) return;
