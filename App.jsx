@@ -716,6 +716,7 @@ async function resolveEjercicio(ejercicios, def) {
     categoria_preventiva_id: match?.categoria_preventiva_id || "",
     tags_descriptivos: def.tags_descriptivos || [],
     gif_url: def.gif_url !== undefined ? def.gif_url : match?.gif_url || "",
+    videos_variantes: def.videos_variantes !== undefined ? def.videos_variantes : match?.videos_variantes || {},
     orden_rotacion: match?.orden_rotacion || "",
   };
   const saved = await api.save("ejercicios", record);
@@ -2567,6 +2568,7 @@ function ProgramacionReal({ players, onBack }) {
 // ---------- PANTALLA DEL JUGADOR (calcado de pantalla-jugador.jsx) ----------
 
 function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
+  const videoEfectivo = videoEfectivoTarea(tarea, registro);
   return (
     <div style={{ background: "#0E1E35", border: `1px solid ${hecho ? "#22C55E55" : "#1A3050"}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -2575,16 +2577,20 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             {orden}
           </span>
         )}
-        {tarea.gif ? (
+        {videoEfectivo ? (
           <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: "pointer", background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            {miniaturaTarea(tarea.gif) && (
-              <img src={miniaturaTarea(tarea.gif)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            {miniaturaTarea(videoEfectivo) && (
+              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
-            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 8 }}>
-                <Play size={16} color={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} fill={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} />
+            {(extractYouTubeId(videoEfectivo) || esVideoDirecto(videoEfectivo)) && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 8 }}>
+                <Play size={16} color={miniaturaTarea(videoEfectivo) ? "#fff" : "#F5C518"} fill={miniaturaTarea(videoEfectivo) ? "#fff" : "#F5C518"} />
               </div>
             )}
+          </div>
+        ) : tarea.eligeEquipo ? (
+          <div style={{ width: 46, height: 46, borderRadius: 8, background: "#122440", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#4A6680", fontSize: 8, fontFamily: "'IBM Plex Mono', monospace", textAlign: "center", lineHeight: 1.2, padding: 3 }}>
+            ELIGE MATERIAL
           </div>
         ) : (
           <div style={{ width: 46, height: 46, borderRadius: 8, background: "#122440", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
@@ -2849,7 +2855,10 @@ function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCamb
             onToggle={() => onToggle(t)}
             registro={getRegistro(t.id)}
             onCambiarRegistro={(val) => onCambiarRegistro(t.id, val)}
-            onAmpliarGif={() => t.gif && onAmpliarGif(t.gif)}
+            onAmpliarGif={() => {
+              const v = videoEfectivoTarea(t, getRegistro(t.id));
+              if (v) onAmpliarGif(v);
+            }}
             mostrarRegistro={mostrarRegistro}
           />
         ))}
@@ -2976,7 +2985,15 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       rirObjetivo: t.rir !== "" && t.rir != null ? t.rir : null,
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
-      gif: e.gif_url || "",
+      // Vídeo por variante (material + modo): si hay uno grabado para la
+      // combinación exacta, se usa; si no, cae al vídeo genérico del
+      // ejercicio. Cuando la tarea deja elegir material, no se fija un solo
+      // "gif" — se calcula uno por cada equipo posible y se revela al elegir
+      // (ver videoEfectivoTarea).
+      gif: eligeEquipo ? e.gif_url || "" : e.videos_variantes?.[claveVideoVariante(equipoUnico || "std", t.lateralidad === "unilateral")] || e.gif_url || "",
+      videosPorEquipo: eligeEquipo
+        ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, e.videos_variantes?.[claveVideoVariante(eq, t.lateralidad === "unilateral")] || e.gif_url || ""]))
+        : null,
       materiales,
       equipoUnico,
       esCorporal,
@@ -3148,7 +3165,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                           onToggle={() => toggle(item.tarea)}
                           registro={getRegistro(item.tarea.id)}
                           onCambiarRegistro={(val) => setRegistroDraft(item.tarea.id, val)}
-                          onAmpliarGif={() => item.tarea.gif && setGifAmpliado(item.tarea.gif)}
+                          onAmpliarGif={() => {
+                            const v = videoEfectivoTarea(item.tarea, getRegistro(item.tarea.id));
+                            if (v) setGifAmpliado(v);
+                          }}
                           mostrarRegistro={nombreBloque === "Fuerza"}
                         />
                       )
@@ -3246,6 +3266,26 @@ function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo)
   return [(nombre || "").toLowerCase(), equipo || "std", unilateral ? "uni" : "bi", repsObjetivo ?? "", rirObjetivo ?? ""].join("::");
 }
 
+// Clave para el vídeo de demostración de una variante concreta. Más simple
+// que claveDisenoTarea a propósito: el gesto no cambia con el RIR ni con las
+// reps objetivo, solo con el material usado y si es uni o bilateral.
+function claveVideoVariante(material, unilateral) {
+  return `${material || "std"}::${unilateral ? "uni" : "bi"}`;
+}
+
+// Resuelve qué vídeo debe verse para una tarea ya construida (ver
+// construirTareaVisual) según el registro en curso del jugador. Si la tarea
+// deja elegir material y el jugador todavía no ha elegido, no hay vídeo que
+// mostrar todavía — se revela justo al elegir.
+function videoEfectivoTarea(tarea, registro) {
+  if (tarea.eligeEquipo) {
+    const elegido = registro?.subtipo;
+    if (!elegido || !tarea.equiposElegibles?.includes(elegido)) return null;
+    return tarea.videosPorEquipo?.[elegido] || tarea.gif || null;
+  }
+  return tarea.gif || null;
+}
+
 const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "m" };
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
@@ -3329,6 +3369,13 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
   const [categoriaId, setCategoriaId] = useState(ejercicioEditar?.categoria_preventiva_id || categorias[0]?.id || "");
   const [tagsSel, setTagsSel] = useState(ejercicioEditar?.tags_descriptivos || []);
   const [videoUrl, setVideoUrl] = useState(ejercicioEditar?.gif_url || "");
+  const [materialesDisponibles] = useMaterialesDisponibles();
+  const [filasVariantes, setFilasVariantes] = useState(() =>
+    Object.entries(ejercicioEditar?.videos_variantes || {}).map(([clave, url]) => {
+      const [material, modo] = clave.split("::");
+      return { key: Math.random().toString(36).slice(2), material: material === "std" ? "" : material, unilateral: modo === "uni", url };
+    })
+  );
   const [guardando, setGuardando] = useState(false);
 
   const esPreventivo = bloque === "Preventivo";
@@ -3337,6 +3384,10 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
   const esDirectoValido = esVideoDirecto(videoUrl);
   const enlaceReconocido = !!videoIdValido || esDirectoValido;
   const enlaceNoReconocido = videoUrl.trim().length > 0 && !enlaceReconocido;
+
+  const actualizarFila = (key, cambios) => setFilasVariantes((prev) => prev.map((f) => (f.key === key ? { ...f, ...cambios } : f)));
+  const quitarFila = (key) => setFilasVariantes((prev) => prev.filter((f) => f.key !== key));
+  const anadirFila = () => setFilasVariantes((prev) => [...prev, { key: Math.random().toString(36).slice(2), material: materialesDisponibles[0] || "", unilateral: false, url: "" }]);
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
@@ -3383,7 +3434,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
           </div>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>ENLACE DE VÍDEO (YouTube, o enlace directo .mp4/.webm/.mov)</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>VÍDEO GENÉRICO (respaldo si una variante no tiene el suyo propio)</span>
           <input
             value={videoUrl}
             onChange={(e) => setVideoUrl(e.target.value)}
@@ -3395,6 +3446,63 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
           )}
           {enlaceReconocido && <VideoEmbed url={videoUrl} />}
         </label>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+            VÍDEOS POR VARIANTE (opcional — para cuando el gesto cambia según el material)
+          </span>
+          {filasVariantes.map((f) => {
+            const idValido = extractYouTubeId(f.url);
+            const directoValido = esVideoDirecto(f.url);
+            const reconocido = !!idValido || directoValido;
+            const noReconocido = f.url.trim().length > 0 && !reconocido;
+            return (
+              <div key={f.key} style={{ border: "1px solid #1A3050", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <select value={f.material} onChange={(e) => actualizarFila(f.key, { material: e.target.value })} style={{ ...campoSelectReal(), flex: 1 }}>
+                    <option value="">— Material —</option>
+                    {materialesDisponibles.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={() => actualizarFila(f.key, { unilateral: !f.unilateral })}
+                    style={{
+                      fontSize: 11,
+                      padding: "0 10px",
+                      borderRadius: 6,
+                      border: `1px solid ${f.unilateral ? "#F5C518" : "#1A3050"}`,
+                      background: f.unilateral ? "#F5C51822" : "transparent",
+                      color: f.unilateral ? "#F5C518" : "#8BA4C0",
+                      cursor: "pointer",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {f.unilateral ? "Unilateral" : "Bilateral"}
+                  </button>
+                  <button onClick={() => quitarFila(f.key)} style={{ background: "transparent", border: "1px solid #1A3050", color: "#EF4444", borderRadius: 6, padding: "0 10px", cursor: "pointer" }}>
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <input
+                  value={f.url}
+                  onChange={(e) => actualizarFila(f.key, { url: e.target.value })}
+                  placeholder="https://youtu.be/... de esta variante"
+                  style={{ ...campoSelectReal(), borderColor: noReconocido ? "#EF4444" : undefined }}
+                />
+                {noReconocido && <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace.</span>}
+                {reconocido && <VideoEmbed url={f.url} />}
+              </div>
+            );
+          })}
+          <button
+            onClick={anadirFila}
+            style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", background: "transparent", border: "1px dashed #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
+          >
+            <Plus size={13} /> Añadir variante
+          </button>
+        </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
             Cancelar
@@ -3411,6 +3519,9 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
                 tags_descriptivos: tagsSel,
                 gif_url: videoUrl,
+                videos_variantes: Object.fromEntries(
+                  filasVariantes.filter((f) => f.material && f.url.trim()).map((f) => [claveVideoVariante(f.material, f.unilateral), f.url.trim()])
+                ),
                 orden_rotacion: ejercicioEditar?.orden_rotacion || "",
               });
               setGuardando(false);
