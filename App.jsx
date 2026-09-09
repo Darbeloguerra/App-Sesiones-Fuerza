@@ -2332,7 +2332,9 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                             detalle:
                               t.bloque_sesion === "Resistencia"
                                 ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data))
-                                : `${t.series} × ${t.cantidad} · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""}`,
+                                : `${t.series} × ${t.cantidad}${t.bloque_sesion === "Activación" ? "" : ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`}${
+                                    t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""
+                                  }`,
                             gif: t.gif_url,
                             nota: t.nota,
                             materiales: parseMateriales(t.material),
@@ -2348,7 +2350,9 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                         detalle:
                           item.tarea.bloque_sesion === "Resistencia"
                             ? formatearObjetivoResistencia(parseResistenciaData(item.tarea.resistencia_data))
-                            : `${item.tarea.series} × ${item.tarea.cantidad} · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`,
+                            : `${item.tarea.series} × ${item.tarea.cantidad}${
+                                item.tarea.bloque_sesion === "Activación" ? "" : ` · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`
+                              }${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`,
                         gif: item.tarea.gif_url,
                         nota: item.tarea.nota,
                         materiales: parseMateriales(item.tarea.material),
@@ -2607,20 +2611,22 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
-                <span
-                  style={{
-                    fontFamily: "'IBM Plex Mono', monospace",
-                    fontSize: 9,
-                    padding: "2px 6px",
-                    borderRadius: 5,
-                    border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
-                    color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
-                    background: tarea.unilateral ? "#F5C51818" : "transparent",
-                    flexShrink: 0,
-                  }}
-                >
-                  {tarea.unilateral ? "Unilateral" : "Bilateral"}
-                </span>
+                {tarea.mostrarLateralidad !== false && (
+                  <span
+                    style={{
+                      fontFamily: "'IBM Plex Mono', monospace",
+                      fontSize: 9,
+                      padding: "2px 6px",
+                      borderRadius: 5,
+                      border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
+                      color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
+                      background: tarea.unilateral ? "#F5C51818" : "transparent",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {tarea.unilateral ? "Unilateral" : "Bilateral"}
+                  </span>
+                )}
               </div>
               <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
                 {tarea.series ? `${tarea.series} × ` : ""}
@@ -3001,6 +3007,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       esResistencia,
       objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
       unilateral: t.lateralidad === "unilateral",
+      // La bici estática (bloque Activación) no tiene un concepto de
+      // lateralidad — no tiene sentido etiquetarla como "Bilateral".
+      mostrarLateralidad: t.bloque_sesion !== "Activación",
       eligeEquipo,
       equiposElegibles: eligeEquipo ? equiposEnTarea : null,
       subtipoDefault: esCorporal || eligeEquipo ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
