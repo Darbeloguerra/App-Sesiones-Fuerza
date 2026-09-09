@@ -717,6 +717,7 @@ async function resolveEjercicio(ejercicios, def) {
     tags_descriptivos: def.tags_descriptivos || [],
     gif_url: def.gif_url !== undefined ? def.gif_url : match?.gif_url || "",
     videos_variantes: def.videos_variantes !== undefined ? def.videos_variantes : match?.videos_variantes || {},
+    sin_lateralidad: def.sin_lateralidad !== undefined ? def.sin_lateralidad : match?.sin_lateralidad || "",
     orden_rotacion: match?.orden_rotacion || "",
   };
   const saved = await api.save("ejercicios", record);
@@ -2332,7 +2333,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                             detalle:
                               t.bloque_sesion === "Resistencia"
                                 ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data))
-                                : `${t.series} × ${t.cantidad}${t.bloque_sesion === "Activación" ? "" : ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`}${
+                                : `${t.series} × ${t.cantidad}${t.sin_lateralidad === "si" ? "" : ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`}${
                                     t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""
                                   }`,
                             gif: t.gif_url,
@@ -2351,7 +2352,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                           item.tarea.bloque_sesion === "Resistencia"
                             ? formatearObjetivoResistencia(parseResistenciaData(item.tarea.resistencia_data))
                             : `${item.tarea.series} × ${item.tarea.cantidad}${
-                                item.tarea.bloque_sesion === "Activación" ? "" : ` · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`
+                                item.tarea.sin_lateralidad === "si" ? "" : ` · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`
                               }${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`,
                         gif: item.tarea.gif_url,
                         nota: item.tarea.nota,
@@ -2450,7 +2451,7 @@ function ProgramacionReal({ players, onBack }) {
   tareas.forEach((t) => {
     if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
     const e = ejerciciosById.get(t.ejercicio_id) || {};
-    tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url });
+    tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
   });
 
   const today = todayStr();
@@ -3007,9 +3008,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       esResistencia,
       objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
       unilateral: t.lateralidad === "unilateral",
-      // La bici estática (bloque Activación) no tiene un concepto de
-      // lateralidad — no tiene sentido etiquetarla como "Bilateral".
-      mostrarLateralidad: t.bloque_sesion !== "Activación",
+      // Ahora que Activación admite cualquier ejercicio de la biblioteca (no
+      // solo la bici estática), ya no se asume automáticamente por bloque —
+      // depende solo de si el propio ejercicio se marcó como "sin lateralidad".
+      mostrarLateralidad: e.sin_lateralidad !== "si",
       eligeEquipo,
       equiposElegibles: eligeEquipo ? equiposEnTarea : null,
       subtipoDefault: esCorporal || eligeEquipo ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
@@ -3379,6 +3381,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
   const [categoriaId, setCategoriaId] = useState(ejercicioEditar?.categoria_preventiva_id || categorias[0]?.id || "");
   const [tagsSel, setTagsSel] = useState(ejercicioEditar?.tags_descriptivos || []);
   const [videoUrl, setVideoUrl] = useState(ejercicioEditar?.gif_url || "");
+  const [sinLateralidad, setSinLateralidad] = useState(ejercicioEditar?.sin_lateralidad === "si");
   const [materialesDisponibles] = useMaterialesDisponibles();
   const [filasVariantes, setFilasVariantes] = useState(() =>
     Object.entries(ejercicioEditar?.videos_variantes || {}).map(([clave, url]) => {
@@ -3442,6 +3445,26 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
               <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => toggleTag(t)} />
             ))}
           </div>
+        </div>
+        <div onClick={() => setSinLateralidad((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+          <span
+            style={{
+              width: 18,
+              height: 18,
+              borderRadius: 5,
+              border: `1.5px solid ${sinLateralidad ? "#F5C518" : "#1A3050"}`,
+              background: sinLateralidad ? "#F5C518" : "transparent",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              color: "#060D1A",
+              fontSize: 12,
+            }}
+          >
+            {sinLateralidad ? "✓" : ""}
+          </span>
+          <span style={{ fontSize: 12.5, color: "#8BA4C0" }}>Sin lateralidad (ej. bici estática — no mostrar etiqueta Bilateral/Unilateral)</span>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>VÍDEO GENÉRICO (respaldo si una variante no tiene el suyo propio)</span>
@@ -3528,6 +3551,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
                 bloque,
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
                 tags_descriptivos: tagsSel,
+                sin_lateralidad: sinLateralidad ? "si" : "",
                 gif_url: videoUrl,
                 videos_variantes: Object.fromEntries(
                   filasVariantes.filter((f) => f.material && f.url.trim()).map((f) => [claveVideoVariante(f.material, f.unilateral), f.url.trim()])
@@ -3644,10 +3668,37 @@ function BibliotecaEjerciciosReal({ onBack }) {
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>BIBLIOTECA</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Ejercicios</h1>
-          <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>{ejercicios.length} ejercicios creados</div>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>BIBLIOTECA</div>
+            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Ejercicios</h1>
+            <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>{ejercicios.length} ejercicios creados</div>
+          </div>
+          <button
+            onClick={() => {
+              setEjercicioEditando(null);
+              setPanelAbierto(true);
+            }}
+            title="Nuevo ejercicio"
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: "50%",
+              background: "#F5C518",
+              border: "none",
+              color: "#060D1A",
+              fontSize: 22,
+              fontWeight: 700,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              flexShrink: 0,
+              boxShadow: "0 4px 14px rgba(245,197,24,0.35)",
+            }}
+          >
+            +
+          </button>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
           {[
@@ -3722,15 +3773,6 @@ function BibliotecaEjerciciosReal({ onBack }) {
               ))}
               {visibles.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>}
             </div>
-            <button
-              onClick={() => {
-                setEjercicioEditando(null);
-                setPanelAbierto(true);
-              }}
-              style={{ width: "100%", marginTop: 16, background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 10, padding: "12px 16px", fontSize: 13.5, fontWeight: 500, cursor: "pointer" }}
-            >
-              + Nuevo ejercicio
-            </button>
           </>
         ) : (
           <VistaOrdenRotacionReal ejercicios={ejercicios} categorias={categorias} onReordenar={reordenarCategoria} />
@@ -4368,7 +4410,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
   const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
-  const [duracionBici, setDuracionBici] = useState("8");
+  const [activacionEjercicioId, setActivacionEjercicioId] = useState("");
+  const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("Bici estática");
+  const [duracionActivacion, setDuracionActivacion] = useState("8");
+  const [unidadActivacion, setUnidadActivacion] = useState("minutos");
   // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
   // categoría se aplican ese día, 0 = no se aplica) sin cambiar el nombre de
   // la columna en la Sheet — las sesiones antiguas guardaron ahí un booleano
@@ -4416,7 +4461,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     setTareasFuerza(porBloque("Fuerza"));
     setCircuitosFuerza(agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true }));
     const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
-    if (activacionTarea) setDuracionBici(String(activacionTarea.cantidad || "8"));
+    if (activacionTarea) {
+      setDuracionActivacion(String(activacionTarea.cantidad || "8"));
+      setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
+      const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
+      if (eAct) {
+        setActivacionEjercicioId(eAct.id);
+        setActivacionEjercicioNombre(eAct.nombre || "Bici estática");
+      }
+    }
     setCargandoExistente(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esReutilizacion, ejerciciosLoaded]);
@@ -4513,8 +4566,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       setCircuitosFuerza(circuitosDelBloque("Fuerza"));
       const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
       if (activacionTarea) {
-        setDuracionBici(String(activacionTarea.cantidad || "8"));
+        setDuracionActivacion(String(activacionTarea.cantidad || "8"));
+        setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
         setActivacionTareaId(activacionTarea.id);
+        const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
+        if (eAct) {
+          setActivacionEjercicioId(eAct.id);
+          setActivacionEjercicioNombre(eAct.nombre || "Bici estática");
+        }
       }
       const mapaPorFecha = (nombreBloque) => {
         const mapa = {};
@@ -4544,6 +4603,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing, ejerciciosLoaded]);
 
+  // Sesión nueva (no edición, no reutilización de una pasada): valor por
+  // defecto para Activación, igual que antes de dejar elegir el ejercicio.
+  // El entrenador puede cambiarlo desde el selector antes de guardar.
+  useEffect(() => {
+    if (isEditing || esReutilizacion || !ejerciciosLoaded || activacionEjercicioId) return;
+    let cancelled = false;
+    resolveEjercicio(ejercicios, { nombre: "Bici estática", bloque: "" }).then((ej) => {
+      if (!cancelled) setActivacionEjercicioId(ej.id);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEditing, esReutilizacion, ejerciciosLoaded]);
+
   const addFecha = () => {
     if (!nuevaFecha) return;
     if (!fechas.includes(nuevaFecha)) setFechas((prev) => [...prev, nuevaFecha].sort());
@@ -4560,6 +4634,18 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       retryEjercicios();
     }
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
+  };
+
+  const elegirEjercicioActivacion = async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    if (!ejercicioId) {
+      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+      ejercicioId = creado.id;
+      retryEjercicios();
+    }
+    setActivacionEjercicioId(ejercicioId);
+    setActivacionEjercicioNombre(nombre);
   };
 
   const guardar = async () => {
@@ -4655,17 +4741,17 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         );
       };
 
-      // Activación: una única tarea auto-generada si está activa.
-      if (activacionActiva) {
-        const ej = await resolveEjercicio(ejercicios, { nombre: "Bici estática", bloque: "" });
+      // Activación: una única tarea con el ejercicio que el entrenador elija
+      // de la biblioteca (ya no fijo a "Bici estática").
+      if (activacionActiva && activacionEjercicioId) {
         const saved = await api.save("tareas", {
           id: activacionTareaId || undefined,
           sesion_id: savedSesion.id,
           bloque_sesion: "Activación",
-          ejercicio_id: ej.id,
-          modo: "minutos",
+          ejercicio_id: activacionEjercicioId,
+          modo: unidadActivacion === "segundos" ? "tiempo" : "minutos",
           series: "",
-          cantidad: duracionBici,
+          cantidad: duracionActivacion,
           rir: "",
           tipo_resistencia: "",
           material: "",
@@ -4903,13 +4989,33 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       <span style={{ width: 34, height: 20, borderRadius: 10, background: activacionActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
                         <span style={{ position: "absolute", top: 2, left: activacionActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
                       </span>
-                      <span style={{ fontSize: 13, color: activacionActiva ? "#F0F4FF" : "#4A6680" }}>{activacionActiva ? "Activada para esta sesión" : "Sin acceso a bici — sesión empieza en Movilidad"}</span>
+                      <span style={{ fontSize: 13, color: activacionActiva ? "#F0F4FF" : "#4A6680" }}>{activacionActiva ? "Activada para esta sesión" : "Sin acceso a activación — sesión empieza en Movilidad"}</span>
                     </div>
                     {activacionActiva && (
-                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                        <span style={{ fontSize: 13, color: "#8BA4C0" }}>Duración</span>
-                        <input value={duracionBici} onChange={(e) => setDuracionBici(e.target.value)} style={campoStyleDiseno(50)} />
-                        <span style={{ fontSize: 12, color: "#4A6680" }}>min</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicio</span>
+                          <span style={{ fontSize: 13, color: "#F0F4FF", fontWeight: 600 }}>{activacionEjercicioNombre}</span>
+                        </div>
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} />
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Duración</span>
+                          <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
+                          <button
+                            onClick={() => setUnidadActivacion((u) => (u === "minutos" ? "segundos" : "minutos"))}
+                            style={{
+                              fontSize: 11,
+                              padding: "6px 10px",
+                              borderRadius: 6,
+                              border: "1px solid #1A3050",
+                              background: "#1A3050",
+                              color: "#F5C518",
+                              cursor: "pointer",
+                            }}
+                          >
+                            {unidadActivacion === "minutos" ? "min" : "seg"}
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
