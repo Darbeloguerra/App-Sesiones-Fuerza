@@ -1980,6 +1980,179 @@ function HistorialPorSesion({ players }) {
   );
 }
 
+// ---------- Historial por tarea (para el entrenador) ----------
+// Progresión de carga de UN diseño de tarea concreto para un jugador — no
+// solo el ejercicio en general, sino la combinación exacta de ejercicio +
+// material + modo + reps objetivo + RIR objetivo.
+function HistorialPorTarea({ players }) {
+  const [jugadorSel, setJugadorSel] = useState(players[0]?.id || "");
+  const [ejercicioSel, setEjercicioSel] = useState("");
+  const [disenoSel, setDisenoSel] = useState("");
+  const { loaded, items } = usePlayerHistory(jugadorSel || null);
+
+  if (!players.length) {
+    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay jugadores en el roster.</div>;
+  }
+
+  const ejerciciosDisponibles = [...new Set(items.map((it) => it.name))].sort();
+
+  const itemsDelEjercicio = ejercicioSel ? items.filter((it) => it.name === ejercicioSel) : [];
+  const disenosPorClave = new Map();
+  itemsDelEjercicio.forEach((it) => {
+    const eq = materialEfectivo(it);
+    const clave = claveDisenoTarea(it.name, eq, it.unilateral, it.reps, it.rir);
+    if (!disenosPorClave.has(clave)) {
+      disenosPorClave.set(clave, { clave, equipo: eq, unilateral: it.unilateral, reps: it.reps, rir: it.rir, registros: [] });
+    }
+    disenosPorClave.get(clave).registros.push(it);
+  });
+  const disenos = [...disenosPorClave.values()].sort((a, b) => b.registros.length - a.registros.length);
+
+  const disenoActivo = disenoSel ? disenosPorClave.get(disenoSel) : null;
+  const puntos = disenoActivo
+    ? disenoActivo.registros
+        .filter((it) => it.cargaReal !== "" && it.cargaReal != null)
+        .sort((a, b) => (a.date < b.date ? -1 : 1))
+        .map((it) => ({ fecha: it.date, carga: Number(it.cargaReal), rir: it.rirReal, reps: it.repsReal }))
+    : [];
+
+  const etiquetaDiseno = (d) =>
+    `${d.equipo === "std" ? "Sin material" : d.equipo} · ${d.unilateral ? "Unilateral" : "Bilateral"} · ${d.reps || "—"} reps · RIR ${
+      d.rir !== "" && d.rir != null ? d.rir : "—"
+    }`;
+
+  return (
+    <>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>JUGADOR</span>
+        <select
+          value={jugadorSel}
+          onChange={(e) => {
+            setJugadorSel(e.target.value);
+            setEjercicioSel("");
+            setDisenoSel("");
+          }}
+          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 240 }}
+        >
+          {players.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {!loaded ? (
+        <LoadingBlock />
+      ) : (
+        <>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>EJERCICIO</span>
+            <select
+              value={ejercicioSel}
+              onChange={(e) => {
+                setEjercicioSel(e.target.value);
+                setDisenoSel("");
+              }}
+              style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 280 }}
+            >
+              <option value="">— Elige un ejercicio —</option>
+              {ejerciciosDisponibles.map((nombre) => (
+                <option key={nombre} value={nombre}>
+                  {nombre}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          {ejercicioSel && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+              {disenos.map((d) => (
+                <button
+                  key={d.clave}
+                  onClick={() => setDisenoSel(d.clave)}
+                  style={{
+                    fontSize: 12,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: `1px solid ${disenoSel === d.clave ? "#F5C518" : "#1A3050"}`,
+                    background: disenoSel === d.clave ? "#F5C51822" : "transparent",
+                    color: disenoSel === d.clave ? "#F5C518" : "#8BA4C0",
+                    cursor: "pointer",
+                  }}
+                >
+                  {etiquetaDiseno(d)} ({d.registros.length})
+                </button>
+              ))}
+            </div>
+          )}
+
+          {disenoActivo &&
+            (puntos.length ? (
+              <GraficoProgresionCarga puntos={puntos} />
+            ) : (
+              <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
+            ))}
+        </>
+      )}
+    </>
+  );
+}
+
+// Gráfico de progresión de carga con SVG plano — sin añadir ninguna
+// librería nueva al proyecto (ni recharts, ni chart.js).
+function GraficoProgresionCarga({ puntos }) {
+  const ancho = 560,
+    alto = 220;
+  const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+  const cargas = puntos.map((p) => p.carga);
+  const min = Math.min(...cargas);
+  const max = Math.max(...cargas);
+  const rango = max - min || 1;
+  const anchoUtil = ancho - padding.left - padding.right;
+  const altoUtil = alto - padding.top - padding.bottom;
+  const x = (i) => padding.left + (puntos.length > 1 ? (i / (puntos.length - 1)) * anchoUtil : anchoUtil / 2);
+  const y = (v) => padding.top + altoUtil - ((v - min) / rango) * altoUtil;
+  const puntosSvg = puntos.map((p, i) => `${x(i)},${y(p.carga)}`).join(" ");
+
+  return (
+    <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, padding: 12 }}>
+      <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: "auto", display: "block" }}>
+        <polyline points={puntosSvg} fill="none" stroke="#F5C518" strokeWidth="2" />
+        {puntos.map((p, i) => (
+          <circle key={i} cx={x(i)} cy={y(p.carga)} r="3.5" fill="#F5C518" />
+        ))}
+        <text x={padding.left} y={alto - 8} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace">
+          {puntos[0].fecha}
+        </text>
+        <text x={ancho - padding.right} y={alto - 8} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+          {puntos[puntos.length - 1].fecha}
+        </text>
+        <text x={padding.left - 6} y={y(max) + 4} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+          {max}kg
+        </text>
+        <text x={padding.left - 6} y={y(min) + 4} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+          {min}kg
+        </text>
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+        {puntos
+          .slice()
+          .reverse()
+          .map((p, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8BA4C0" }}>
+              <span>{p.fecha}</span>
+              <span>
+                {p.carga}kg{p.reps !== "" && p.reps != null ? ` · ${p.reps} reps` : ""}
+                {p.rir !== "" && p.rir != null ? ` · RIR ${p.rir}` : ""}
+              </span>
+            </div>
+          ))}
+      </div>
+    </div>
+  );
+}
+
 function HistorialReal({ onBack }) {
   const [players, , playersLoaded] = usePlayers();
   const [vista, setVista] = useState("jugador");
@@ -1998,6 +2171,7 @@ function HistorialReal({ onBack }) {
           {[
             { id: "jugador", label: "Por jugador" },
             { id: "sesion", label: "Por sesión" },
+            { id: "tarea", label: "Por tarea" },
           ].map((v) => (
             <button
               key={v.id}
@@ -2016,7 +2190,15 @@ function HistorialReal({ onBack }) {
             </button>
           ))}
         </div>
-        {!playersLoaded ? <LoadingBlock /> : vista === "jugador" ? <HistorialPorJugador players={players} /> : <HistorialPorSesion players={players} />}
+        {!playersLoaded ? (
+          <LoadingBlock />
+        ) : vista === "jugador" ? (
+          <HistorialPorJugador players={players} />
+        ) : vista === "sesion" ? (
+          <HistorialPorSesion players={players} />
+        ) : (
+          <HistorialPorTarea players={players} />
+        )}
       </div>
     </PantallaBase>
   );
@@ -2741,20 +2923,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // jugador marcó (subtipo_corporal, reaprovechado aquí igual que para
   // asistencia/lastre) — no basta con mirar el material de la tarea, porque
   // ese campo dice qué estaba disponible, no cuál se usó.
-  const claveReferencia = (nombre, equipo) => `${(nombre || "").toLowerCase()}::${equipo}`;
-  const equipoEfectivo = (it) => {
-    const mats = (it.materiales || []).filter((m) => EQUIPOS_AMBIGUOS.includes(m));
-    if (mats.length >= 2) return mats.includes(it.subtipoCorporal) ? it.subtipoCorporal : null;
-    return mats[0] || null;
-  };
-
   const lastValueByName = {};
   [...historyItems]
     .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== "" || it.repsReal !== ""))
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .forEach((it) => {
-      const eq = equipoEfectivo(it);
-      if (eq) lastValueByName[claveReferencia(it.name, eq)] = it;
+      const eq = materialEfectivo(it);
+      lastValueByName[claveDisenoTarea(it.name, eq, it.unilateral, it.reps, it.rir)] = it;
     });
 
   // Última vez que esta misma tarea se hizo con peso corporal, qué eligió el
@@ -2814,8 +2989,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // Si la tarea deja elegir entre varios equipos, se lleva una referencia
       // por cada uno por separado — la que se muestre depende de qué elija
       // el jugador en pantalla, no de una sola fija de antemano.
-      referencia: eligeEquipo ? null : formatearReferencia(lastValueByName[claveReferencia(nombre, equipoUnico || "std")]),
-      referenciasPorEquipo: eligeEquipo ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, formatearReferencia(lastValueByName[claveReferencia(nombre, eq)])])) : null,
+      // La clave incluye también modo, reps y RIR objetivo: cambiar el RIR o
+      // pasar de bilateral a unilateral cuenta como una tarea distinta, con
+      // su propia referencia — solo el número de series (volumen) no la cambia.
+      referencia: eligeEquipo
+        ? null
+        : formatearReferencia(lastValueByName[claveDisenoTarea(nombre, equipoUnico || "std", t.lateralidad === "unilateral", t.cantidad, t.rir)]),
+      referenciasPorEquipo: eligeEquipo
+        ? Object.fromEntries(
+            equiposEnTarea.map((eq) => [eq, formatearReferencia(lastValueByName[claveDisenoTarea(nombre, eq, t.lateralidad === "unilateral", t.cantidad, t.rir)])])
+          )
+        : null,
     };
   };
 
@@ -3044,6 +3228,23 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 // o más de estos seleccionados a la vez, se le pregunta al jugador cuál usó
 // de verdad, en vez de asumir uno.
 const EQUIPOS_AMBIGUOS = ["Barra", "Multipower", "Kettlebell", "Mancuerna", "Máquina", "Trineo"];
+
+// Define qué hace que dos tareas sean "la misma" a efectos de comparar
+// carga entre sesiones: mismo ejercicio, mismo equipo efectivamente usado,
+// mismo modo (uni/bilateral) y mismo objetivo de reps + RIR. Las series NO
+// entran en la clave — cambiar el número de series es solo volumen, no un
+// diseño de tarea distinto.
+function materialEfectivo(it) {
+  const mats = it.materiales || [];
+  const ambiguos = mats.filter((m) => EQUIPOS_AMBIGUOS.includes(m));
+  if (ambiguos.length >= 2) return it.subtipoCorporal || ambiguos[0];
+  if (ambiguos.length === 1) return ambiguos[0];
+  return mats[0] || "std";
+}
+
+function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo) {
+  return [(nombre || "").toLowerCase(), equipo || "std", unilateral ? "uni" : "bi", repsObjetivo ?? "", rirObjetivo ?? ""].join("::");
+}
 
 const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "m" };
 
