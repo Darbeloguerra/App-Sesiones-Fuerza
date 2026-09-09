@@ -2634,7 +2634,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                     ? tarea.referenciasPorEquipo?.[registro.subtipo]
                       ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
                       : `Sin registro previo con ${registro.subtipo}`
-                    : "Elige con qué material lo has hecho"
+                    : "Elige qué material vas a utilizar"
                   : tarea.referencia
                   ? `Última vez: ${tarea.referencia}`
                   : "Sin registro previo"}
@@ -2721,7 +2721,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
           {tarea.eligeEquipo && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518" }}>¿CON QUÉ LO HAS HECHO?</span>
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518" }}>¿QUÉ MATERIAL VAS A UTILIZAR?</span>
               <div style={{ display: "flex", gap: 6 }}>
                 {(tarea.equiposElegibles || []).map((op) => (
                   <button
@@ -2768,6 +2768,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               ))}
             </div>
           )}
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>Registra tu carga máxima del día</div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>{(tarea.unidad || "reps").toUpperCase()}</span>
@@ -4653,7 +4654,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           sesion_id: savedSesion.id,
           bloque_sesion: "Activación",
           ejercicio_id: ej.id,
-          modo: "tiempo",
+          modo: "minutos",
           series: "",
           cantidad: duracionBici,
           rir: "",
