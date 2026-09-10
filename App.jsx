@@ -841,26 +841,6 @@ function useTareasForSesiones(sesionIds) {
   return [tareas, loaded];
 }
 
-// ¿Algún jugador ya registró algo de esta sesión? Si es así, se bloquea la edición
-// para no invalidar un historial que el jugador ya vio y completó.
-async function sesionHasRegistros(sesionId) {
-  try {
-    // Igual que en todos los demás sitios: nunca fiarse de que el backend
-    // filtre de verdad — se ha confirmado que devuelve la tabla entera sin
-    // filtrar. Se filtra siempre aquí, o esto bloquearía CUALQUIER sesión en
-    // cuanto existiera un solo registro en toda la aplicación.
-    const todasLasTareas = await api.list("tareas", { sesion_id: sesionId });
-    const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionId);
-    if (!tareas.length) return false;
-    const tareaIds = new Set(tareas.map((t) => t.id));
-    const todosLosRegistros = await api.list("registros", {});
-    return todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
-  } catch {
-    return false;
-  }
-}
-
-
 // Trae varias filas de una entidad por id en una sola llamada (usa el filtro "IN" del backend).
 function useEntityByIds(entity, ids) {
   const key = [...new Set(ids)].sort().join(",");
@@ -1003,15 +983,21 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   const validar = () => {
     const valor = codigo.trim();
     if (!valor) return;
-    if (coachPin != null && valor === String(coachPin).trim()) {
-      setError(false);
-      setResultado({ tipo: "entrenador" });
-      return;
-    }
     const jugador = players.find((p) => String(p.pin).trim() === valor);
+    const esCoach = coachPin != null && valor === String(coachPin).trim();
+    // Si el código coincide a la vez con el del entrenador y con el PIN de
+    // un jugador (colisión ya guardada en la Sheet, de antes de este
+    // cambio), nunca se concede acceso de entrenador por esa vía — se entra
+    // como jugador, el privilegio mínimo, y hay que corregir cuanto antes el
+    // PIN de ese jugador desde Roster.
     if (jugador) {
       setError(false);
       setResultado({ tipo: "jugador", nombre: jugador.name, id: jugador.id });
+      return;
+    }
+    if (esCoach) {
+      setError(false);
+      setResultado({ tipo: "entrenador" });
       return;
     }
     setError(true);
@@ -1497,10 +1483,10 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
                   letterSpacing: "0.15em",
                 }}
               />
-              {pinManualDuplicado && <div style={{ fontSize: 11, color: "#EF4444", marginTop: 5 }}>Ese PIN ya lo usa otro jugador — elige otro.</div>}
+              {pinManualDuplicado && <div style={{ fontSize: 11, color: "#EF4444", marginTop: 5 }}>Ese código ya está en uso (por otro jugador o por el entrenador) — elige otro.</div>}
             </div>
           )}
-          {modoPin === "auto" && <div style={{ fontSize: 11, color: "#4A6680" }}>Se generará un PIN de 4 dígitos que no coincide con ningún otro del roster.</div>}
+          {modoPin === "auto" && <div style={{ fontSize: 11, color: "#4A6680" }}>Se generará un PIN de 4 dígitos que no coincide con ningún otro del roster ni con el código de entrenador.</div>}
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
@@ -1537,11 +1523,19 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
 function GestionRosterReal({ onBack, onOpenHistory }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
+  const [coachPin, , coachPinLoaded] = useConfigValue("coach_pin");
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
 
-  if (!playersLoaded || !categoriasLoaded) return <LoadingBlock />;
+  if (!playersLoaded || !categoriasLoaded || !coachPinLoaded) return <LoadingBlock />;
+
+  // El código de entrenador nunca puede coincidir con el PIN de un jugador
+  // (si coinciden, quien entra con ese número accede como entrenador a todo
+  // el sistema de gestión) — se incluye siempre en el conjunto de PINs
+  // "ocupados" al generar o comprobar duplicados.
+  const pinsOcupados = (excluirId) =>
+    players.filter((p) => p.id !== excluirId).map((p) => p.pin).concat(coachPin != null ? [coachPin] : []);
 
   const manejarAccion = async (id, accion) => {
     if (accion === "suspender") {
@@ -1551,8 +1545,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
     } else if (accion === "eliminar") {
       await savePlayers(players.filter((p) => p.id !== id));
     } else if (accion === "reset") {
-      const otherPins = players.filter((p) => p.id !== id).map((p) => p.pin);
-      await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: genUniquePin(otherPins) } : p)));
+      await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: genUniquePin(pinsOcupados(id)) } : p)));
     } else if (accion === "historial") {
       const jugador = players.find((p) => p.id === id);
       onOpenHistory?.(jugador);
@@ -1633,7 +1626,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
           + Añadir jugador
         </button>
       </div>
-      {panelAltaAbierto && <PanelAltaReal pinsExistentes={players.map((j) => j.pin)} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
+      {panelAltaAbierto && <PanelAltaReal pinsExistentes={pinsOcupados()} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
     </PantallaBase>
   );
 }
@@ -4439,10 +4432,22 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({}); // fecha -> [id, id, ...]
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
   const [cargandoExistente, setCargandoExistente] = useState(isEditing || esReutilizacion);
-  const [hasData, setHasData] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
+  // Solo se bloquea si algún jugador ya registró datos reales sobre esta
+  // sesión (no basta con que esté "enviada" — ese campo solo indica que tú
+  // la publicaste, se pone a true en cuanto guardas). Se determina de forma
+  // asíncrona en el efecto de carga de abajo, mirando la tabla de registros.
+  const [readOnly, setReadOnly] = useState(false);
+  // Los dos efectos de abajo (reutilizar / cargar sesión existente) reparten
+  // el borrador SOLO la primera vez que hay ejercicios cargados. Sin este
+  // guard, cualquier cosa que refresque la lista de ejercicios más tarde
+  // (p. ej. crear un ejercicio nuevo desde el propio editor) hace que
+  // `ejerciciosLoaded` pase a false y vuelva a true, y el efecto se repetía
+  // — reconstruyendo el borrador desde cero y borrando lo que ya se hubiera
+  // añadido en esta sesión de edición, incluida la tarea recién creada.
+  const borradorCargadoRef = useRef(false);
 
   // Reutilizar una sesión pasada: reparte sus tareas/circuitos en los mismos
   // bloques, pero generados como registros NUEVOS (sin tareaId/circuitoId
@@ -4450,7 +4455,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   // que se partió no se toca. No hay llamada al backend: todo sale de las
   // tareas que Programación ya tenía cargadas para esa sesión.
   useEffect(() => {
-    if (!esReutilizacion || !ejerciciosLoaded) return;
+    if (!esReutilizacion || !ejerciciosLoaded || borradorCargadoRef.current) return;
+    borradorCargadoRef.current = true;
     const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
     const tareas = plantilla.tareas || [];
     const porBloque = (nombreBloque) => tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true }));
@@ -4476,16 +4482,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
   // Carga de sesión existente (edición): reparte tareas/circuitos en su bloque real.
   useEffect(() => {
-    if (!isEditing || !ejerciciosLoaded) return;
+    if (!isEditing || !ejerciciosLoaded || borradorCargadoRef.current) return;
+    borradorCargadoRef.current = true;
     let cancelled = false;
     (async () => {
-      const found = sesionExistente.enviada ? await sesionHasRegistros(sesionExistente.id) : false;
-      if (cancelled) return;
-      setHasData(found);
-      if (found) {
-        setCargandoExistente(false);
-        return;
-      }
       // Nunca fiarse del filtro del backend — se ha confirmado que no
       // filtra de verdad. Se filtra siempre aquí también, o al editar
       // cualquier sesión aparecerían mezcladas tareas y circuitos de todas
@@ -4494,7 +4494,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
       const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
       const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
+      // Se bloquea la sesión entera solo si ALGÚN jugador ya registró datos
+      // reales para alguna de sus tareas — mientras nadie la haya rellenado,
+      // se edita con normalidad, esté "enviada" o no.
+      const tareaIds = new Set(tareas.map((t) => t.id));
+      const todosLosRegistros = tareaIds.size ? await api.list("registros", {}) : [];
+      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
       if (cancelled) return;
+      setReadOnly(hayRegistro);
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
       const toDraft = (t) => {
         let materiales = [];
@@ -4867,29 +4874,20 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const loaded = playersLoaded && categoriasLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
   if (!loaded) return <LoadingBlock />;
 
-  if (hasData) {
-    return (
-      <PantallaBase rol="entrenador" maxWidth={640}>
-        <div>
-          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-            ← Volver a Dashboard
-          </button>
-          <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center" }}>
-            <div style={{ fontSize: 13, color: "#8BA4C0" }}>Ya hay datos registrados por jugadores para esta sesión — queda bloqueada para proteger ese historial.</div>
-          </div>
-        </div>
-      </PantallaBase>
-    );
-  }
-
   return (
     <PantallaBase rol="entrenador" maxWidth={640}>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? "EDITAR SESIÓN" : "NUEVA SESIÓN"}</div>
+        {readOnly && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F5C51818", border: "1px solid #F5C51850", borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: "#F5C518" }}>
+            <Lock size={13} style={{ flexShrink: 0 }} />
+            Un jugador ya registró datos de esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
+          </div>
+        )}
+        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>OBJETIVO (OPCIONAL)</span>
@@ -4968,7 +4966,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, pointerEvents: readOnly ? "none" : undefined }}>
           {BLOQUES_DISENO.map((b) => (
             <div key={b.id} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #1A3050" }}>
@@ -5210,19 +5208,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           ))}
         </div>
 
-        {error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
+        {!readOnly && error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
+        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
           <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
-            Cancelar
+            {readOnly ? "Volver" : "Cancelar"}
           </button>
-          <button
-            onClick={guardar}
-            disabled={guardando}
-            style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
-          >
-            {guardando ? "Guardando..." : "Guardar y enviar"}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={guardar}
+              disabled={guardando}
+              style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+            >
+              {guardando ? "Guardando..." : "Guardar y enviar"}
+            </button>
+          )}
         </div>
       </div>
     </PantallaBase>
@@ -5256,15 +5256,22 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
   const [cargandoExistente, setCargandoExistente] = useState(isEditing || esReutilizacion);
-  const [hasData, setHasData] = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
   const [ok, setOk] = useState(false);
+  // Solo se bloquea si algún jugador ya registró datos reales sobre esta
+  // dinámica — se determina de forma asíncrona en el efecto de carga.
+  const [readOnly, setReadOnly] = useState(false);
+  // Mismo guard que en Diseñar sesión: reparte el borrador una sola vez,
+  // para que crear un ejercicio nuevo durante la edición (que refresca la
+  // lista de ejercicios) no vuelva a machacar lo ya añadido.
+  const borradorCargadoRef = useRef(false);
 
   // Reutilizar: mismo nombre de dinámica y tareas, generadas como registros
   // nuevos — la sesión original no se toca al guardar.
   useEffect(() => {
-    if (!esReutilizacion || !ejerciciosLoaded) return;
+    if (!esReutilizacion || !ejerciciosLoaded || borradorCargadoRef.current) return;
+    borradorCargadoRef.current = true;
     const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
     const tareas = plantilla.tareas || [];
     const nombreDetectado = tareas[0]?.bloque_sesion || "";
@@ -5276,21 +5283,19 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   }, [esReutilizacion, ejerciciosLoaded]);
 
   useEffect(() => {
-    if (!isEditing || !ejerciciosLoaded) return;
+    if (!isEditing || !ejerciciosLoaded || borradorCargadoRef.current) return;
+    borradorCargadoRef.current = true;
     let cancelled = false;
     (async () => {
-      const found = sesionExistente.enviada ? await sesionHasRegistros(sesionExistente.id) : false;
-      if (cancelled) return;
-      setHasData(found);
-      if (found) {
-        setCargandoExistente(false);
-        return;
-      }
       const todasLasTareas = await api.list("tareas", { sesion_id: sesionExistente.id });
       const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
       const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
       const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
+      const tareaIds = new Set(tareas.map((t) => t.id));
+      const todosLosRegistros = tareaIds.size ? await api.list("registros", {}) : [];
+      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
       if (cancelled) return;
+      setReadOnly(hayRegistro);
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
       const toDraft = (t) => {
         let materiales = [];
@@ -5462,29 +5467,20 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const loaded = playersLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
   if (!loaded) return <LoadingBlock />;
 
-  if (hasData) {
-    return (
-      <PantallaBase rol="entrenador" maxWidth={640}>
-        <div>
-          <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-            ← Volver a Dashboard
-          </button>
-          <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center" }}>
-            <div style={{ fontSize: 13, color: "#8BA4C0" }}>Ya hay datos registrados por jugadores para esta dinámica — queda bloqueada para proteger ese historial.</div>
-          </div>
-        </div>
-      </PantallaBase>
-    );
-  }
-
   return (
     <PantallaBase rol="entrenador" maxWidth={640}>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? "EDITAR DINÁMICA" : "NUEVA DINÁMICA"}</div>
+        {readOnly && (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F5C51818", border: "1px solid #F5C51850", borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: "#F5C518" }}>
+            <Lock size={13} style={{ flexShrink: 0 }} />
+            Un jugador ya registró datos de esta dinámica — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
+          </div>
+        )}
+        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE DE LA DINÁMICA</span>
@@ -5553,7 +5549,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </div>
         </div>
 
-        <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 14 }}>
+        <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 14, pointerEvents: readOnly ? "none" : undefined }}>
           <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 10 }}>Tareas</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {tareasBloque.map((t) => (
@@ -5593,19 +5589,21 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </div>
         </div>
 
-        {error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
+        {!readOnly && error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
+        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
           <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
-            Cancelar
+            {readOnly ? "Volver" : "Cancelar"}
           </button>
-          <button
-            onClick={guardar}
-            disabled={guardando}
-            style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
-          >
-            {guardando ? "Guardando..." : "Guardar y enviar"}
-          </button>
+          {!readOnly && (
+            <button
+              onClick={guardar}
+              disabled={guardando}
+              style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+            >
+              {guardando ? "Guardando..." : "Guardar y enviar"}
+            </button>
+          )}
         </div>
       </div>
     </PantallaBase>
