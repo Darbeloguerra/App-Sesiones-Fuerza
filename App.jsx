@@ -235,7 +235,21 @@ function useEntityList(entity, filters) {
 
   const retry = useCallback(() => setTick((t) => t + 1), []);
 
-  return [items, save, loaded, error, retry];
+  // Añade un registro ya guardado (con id real) directamente al estado local
+  // y a la caché compartida, sin pasar por la red ni tocar `loaded` — a
+  // diferencia de retry(), no provoca ningún parpadeo de carga. Se usa
+  // cuando algo ya se guardó por su cuenta (p. ej. resolveEjercicio) y solo
+  // hace falta que esta lista en memoria se entere.
+  const addLocal = useCallback(
+    (item) => {
+      itemsRef.current = [...itemsRef.current, item];
+      setItems(itemsRef.current);
+      sharedDataCache.set(cacheKey, itemsRef.current);
+    },
+    [cacheKey]
+  );
+
+  return [items, save, loaded, error, retry, addLocal];
 }
 
 // Sustituye a usePersistentValue, para la pestaña Config (clave/valor).
@@ -4283,7 +4297,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     if (!ejercicioId) {
       const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
       ejercicioId = creado.id;
-      onEjercicioCreado?.();
+      onEjercicioCreado?.(creado);
     }
     const base =
       bloque === "Resistencia"
@@ -4394,7 +4408,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const base = sesionExistente || plantilla;
   const [players, , playersLoaded] = usePlayers();
   const [categoriasPreventivas, categoriasLoaded] = useCategoriasPreventivas();
-  const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
+  const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
@@ -4638,7 +4652,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     if (!ejercicioId) {
       const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
       ejercicioId = creado.id;
-      retryEjercicios();
+      addEjercicioLocal(creado);
     }
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
   };
@@ -4649,7 +4663,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     if (!ejercicioId) {
       const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
       ejercicioId = creado.id;
-      retryEjercicios();
+      addEjercicioLocal(creado);
     }
     setActivacionEjercicioId(ejercicioId);
     setActivacionEjercicioNombre(nombre);
@@ -5100,7 +5114,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         bloque="Core"
                         mostrarCarga={false}
                         ejercicios={ejercicios}
-                        onEjercicioCreado={retryEjercicios}
+                        onEjercicioCreado={addEjercicioLocal}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5134,7 +5148,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         circuito={c}
                         bloque="Resistencia"
                         ejercicios={ejercicios}
-                        onEjercicioCreado={retryEjercicios}
+                        onEjercicioCreado={addEjercicioLocal}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5151,7 +5165,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                           if (!ejercicioId) {
                             const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
                             ejercicioId = creado.id;
-                            retryEjercicios();
+                            addEjercicioLocal(creado);
                           }
                           setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                         }}
@@ -5185,7 +5199,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         bloque="Fuerza"
                         mostrarCarga={true}
                         ejercicios={ejercicios}
-                        onEjercicioCreado={retryEjercicios}
+                        onEjercicioCreado={addEjercicioLocal}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5243,7 +5257,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const esReutilizacion = !!plantilla;
   const base = sesionExistente || plantilla;
   const [players, , playersLoaded] = usePlayers();
-  const [ejercicios, , ejerciciosLoaded, , retryEjercicios] = useEntityList("ejercicios");
+  const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
 
   const [nombreBloque, setNombreBloque] = useState("");
@@ -5361,7 +5375,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
     if (!ejercicioId) {
       const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
       ejercicioId = creado.id;
-      retryEjercicios();
+      addEjercicioLocal(creado);
     }
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
   };
@@ -5570,7 +5584,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 bloque={nombreBloque || "Complementaria"}
                 mostrarCarga={true}
                 ejercicios={ejercicios}
-                        onEjercicioCreado={retryEjercicios}
+                        onEjercicioCreado={addEjercicioLocal}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
