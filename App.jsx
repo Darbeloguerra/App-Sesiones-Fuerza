@@ -10,7 +10,7 @@ import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxOacDckJsPpSkd2A0i8hRoHgP2xUh0BmqUUyr3uTZUqzg7YJM_cCcboDQJ9rosuBt6NA/exec";
 const SHARED_TOKEN = "7f3a9c2e5b8d1f4a6c0e2b9d7a5f3c1e";
 
-const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion"]);
+const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion", "bootstrapJugador"]);
 
 // Sin esto, un fetch que Apps Script deja colgado (cuota agotada, un bloqueo
 // interno atascado, lo que sea) se queda esperando para siempre — y como
@@ -76,10 +76,25 @@ const api = {
   setRotacion: (categoriaId, punteroActual) =>
     apiCall("setRotacion", { categoria_id: categoriaId, puntero_actual: punteroActual }).then(unwrapApi),
   uploadGif: (dataUri) => apiCall("uploadGif", { dataUri }).then(unwrapApi),
+  // Junta en una sola petición lo que antes eran 3 peticiones en cadena
+  // (sesiones -> tareas -> ejercicios/circuitos) para la pantalla del
+  // jugador — ver bootstrapJugador_ en Code.gs.
+  bootstrapJugador: (jugadorId, fecha) => apiCall("bootstrapJugador", { jugador_id: jugadorId, fecha }).then(unwrapApi),
 };
 // ====== Fin backend remoto ======
 
-const todayStr = () => new Date().toISOString().slice(0, 10);
+// "Hoy" en la fecha local del dispositivo — NUNCA en UTC. España está por
+// delante de UTC (+1 invierno, +2 verano), así que usar
+// `new Date().toISOString()` devolvía el día de ayer durante las primeras
+// horas de la madrugada (medianoche a 1-2 de la mañana): una sesión de hoy
+// se guardaba fechada ayer.
+const todayStr = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const da = String(d.getDate()).padStart(2, "0");
+  return `${y}-${mo}-${da}`;
+};
 
 // A veces Google Sheets convierte por su cuenta un texto de fecha
 // ("2026-08-31") en un valor de fecha real de la hoja, sin que nadie se lo
@@ -87,9 +102,11 @@ const todayStr = () => new Date().toISOString().slice(0, 10);
 // vuelta, Apps Script lo devuelve como fecha completa con hora ("2026-08-30
 // T22:00:00.000Z"), no como el texto plano "YYYY-MM-DD" que el resto de la
 // app espera — y eso es lo que producía "Fecha inválida" en el Historial.
-// Esto recupera el día tal como Apps Script lo serializa (en UTC, que es
-// como lo hace `JSON.stringify` de un Date), sea cual sea el formato en que
-// haya llegado.
+// Ese "T22:00:00.000Z" es la medianoche del 31 en la zona horaria de la
+// hoja (Madrid, UTC+1/+2) expresada en UTC — por eso tomar el día en UTC
+// (getUTCDate) daba sistemáticamente el día anterior. Al estar la app y la
+// hoja en la misma zona horaria, hay que leer el día en hora LOCAL del
+// dispositivo, no en UTC, para recuperar la fecha que de verdad se guardó.
 const normalizarFecha = (d) => {
   if (!d) return "";
   const s = String(d);
@@ -97,9 +114,9 @@ const normalizarFecha = (d) => {
   if (m) return m[1];
   const dt = new Date(s);
   if (!isNaN(dt.getTime())) {
-    const y = dt.getUTCFullYear();
-    const mo = String(dt.getUTCMonth() + 1).padStart(2, "0");
-    const da = String(dt.getUTCDate()).padStart(2, "0");
+    const y = dt.getFullYear();
+    const mo = String(dt.getMonth() + 1).padStart(2, "0");
+    const da = String(dt.getDate()).padStart(2, "0");
     return `${y}-${mo}-${da}`;
   }
   return s;
@@ -909,8 +926,13 @@ function useEntityByIds(entity, ids) {
       .list(entity, { id: key })
       .then((res) => {
         if (!cancelled) {
-          sharedDataCache.set(cacheKey, res || []);
-          setItems(res || []);
+          // Igual que en el resto de hooks: no fiarse de que el filtro "IN"
+          // del backend haga de verdad solo lo que pide — se re-filtra aquí
+          // por si acaso devuelve más filas de las pedidas.
+          const idsSet = new Set(ids);
+          const filtrado = (res || []).filter((r) => idsSet.has(r.id));
+          sharedDataCache.set(cacheKey, filtrado);
+          setItems(filtrado);
         }
       })
       .catch(() => {
@@ -950,6 +972,7 @@ function usePlayerHistory(playerId) {
     return {
       id: r.id,
       date: normalizarFecha(r.fecha),
+      sesionId: t.sesion_id || "",
       name: e.nombre || "(tarea eliminada)",
       sets: t.series,
       reps: t.cantidad,
@@ -971,6 +994,57 @@ function usePlayerHistory(playerId) {
   });
 
   return { loaded: true, items };
+}
+
+// Junta en una sola petición lo que antes eran 3 en cadena para la pantalla
+// del jugador (sesiones -> tareas -> ejercicios/circuitos, cada una
+// esperando a que resolviera la anterior). Apps Script tiene un coste fijo
+// de 1-3 segundos por petición solo de arranque, pase lo que pase con el
+// tamaño de las tablas — con 3 peticiones en cadena eso son varios segundos
+// de espera SIEMPRE, tenga el equipo 10 filas o 10.000. Ver
+// bootstrapJugador_ en Code.gs.
+function useBootstrapJugador(jugadorId, fecha) {
+  const cacheKey = jugadorId ? `bootstrap:${jugadorId}:${fecha}` : null;
+  const [data, setData] = useState(() => (cacheKey && sharedDataCache.get(cacheKey)) || null);
+  const [loaded, setLoaded] = useState(() => !jugadorId || (cacheKey && sharedDataCache.has(cacheKey)));
+  useEffect(() => {
+    let cancelled = false;
+    if (!jugadorId) {
+      setData(null);
+      setLoaded(true);
+      return;
+    }
+    if (sharedDataCache.has(cacheKey)) {
+      setData(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    api
+      .bootstrapJugador(jugadorId, fecha)
+      .then((res) => {
+        if (!cancelled) {
+          sharedDataCache.set(cacheKey, res);
+          setData(res);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setData({ sesiones: [], tareas: [], ejercicios: [], circuitos: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [jugadorId, fecha, cacheKey]);
+  return {
+    loaded,
+    sesiones: data?.sesiones || [],
+    tareas: data?.tareas || [],
+    ejercicios: data?.ejercicios || [],
+    circuitos: data?.circuitos || [],
+  };
 }
 
 // Pantalla dedicada solo al portal de acceso — independiente de PantallaBase
@@ -1039,6 +1113,13 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
     // como jugador, el privilegio mínimo, y hay que corregir cuanto antes el
     // PIN de ese jugador desde Roster.
     if (jugador) {
+      // Un jugador suspendido no debe poder entrar y ver nada — el PIN
+      // seguía siendo válido y esto no se comprobaba nunca.
+      if (jugador.estado === "suspendido") {
+        setError("Tu acceso está desactivado. Habla con tu entrenador.");
+        setResultado(null);
+        return;
+      }
       setError(false);
       setResultado({ tipo: "jugador", nombre: jugador.name, id: jugador.id });
       return;
@@ -1048,7 +1129,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
       setResultado({ tipo: "entrenador" });
       return;
     }
-    setError(true);
+    setError("Código no reconocido. Revisa e inténtalo de nuevo.");
     setResultado(null);
   };
 
@@ -1226,7 +1307,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
 
       {error && (
         <div style={{ color: "#EF4444", fontSize: 12, textAlign: "center", marginBottom: 10 }}>
-          Código no reconocido. Revisa e inténtalo de nuevo.
+          {error === true ? "Código no reconocido. Revisa e inténtalo de nuevo." : error}
         </div>
       )}
 
@@ -1637,7 +1718,9 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
   };
 
   const cambiarCategorias = async (id, nuevas) => {
-    await savePlayers(players.map((p) => (p.id === id ? { ...p, groupIds: nuevas } : p)));
+    setErrorAccion("");
+    const ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, groupIds: nuevas } : p)));
+    if (!ok) setErrorAccion("No se pudo guardar el cambio de categoría. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
   const visibles = players
@@ -1872,7 +1955,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
   );
 }
 
-function TarjetaDiaReal({ fecha, tareasDelDia }) {
+function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
   const [abierto, setAbierto] = useState(false);
   const total = tareasDelDia.length;
   const hechas = tareasDelDia.filter((t) => t.done).length;
@@ -1886,7 +1969,10 @@ function TarjetaDiaReal({ fecha, tareasDelDia }) {
     <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, overflow: "hidden" }}>
       <div onClick={() => setAbierto((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", cursor: "pointer" }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF", textTransform: "capitalize" }}>{fmtDateLabel(fecha)}</div>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF", textTransform: "capitalize" }}>
+            {fmtDateLabel(fecha)}
+            {etiqueta && <span style={{ textTransform: "none", color: "#8BA4C0", fontWeight: 400 }}> · {etiqueta}</span>}
+          </div>
           <div style={{ fontSize: 11, color: "#4A6680", marginTop: 2 }}>
             {hechas}/{total} tareas completadas
           </div>
@@ -1921,15 +2007,25 @@ function HistorialPorJugador({ players, jugadorInicial }) {
     return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay jugadores en el roster.</div>;
   }
 
-  const porFecha = {};
+  // Se agrupa por fecha + sesión de origen, no solo por fecha — dos sesiones
+  // distintas mandadas el mismo día (una al equipo, otra puntual a este
+  // jugador, por ejemplo) antes se mezclaban en una sola tarjeta con un
+  // total conjunto que no correspondía a ninguna de las dos sesiones reales.
+  const porGrupo = {};
   items
     .filter((it) => (!desde || it.date >= desde) && (!hasta || it.date <= hasta))
     .forEach((it) => {
       const f = normalizarFecha(it.date);
-      if (!porFecha[f]) porFecha[f] = [];
-      porFecha[f].push(it);
+      const clave = `${f}::${it.sesionId || ""}`;
+      if (!porGrupo[clave]) porGrupo[clave] = { fecha: f, tareas: [] };
+      porGrupo[clave].tareas.push(it);
     });
-  const fechas = Object.keys(porFecha).sort().reverse();
+  const gruposPorFecha = {};
+  Object.values(porGrupo).forEach((g) => {
+    if (!gruposPorFecha[g.fecha]) gruposPorFecha[g.fecha] = [];
+    gruposPorFecha[g.fecha].push(g);
+  });
+  const fechas = Object.keys(gruposPorFecha).sort().reverse();
 
   return (
     <>
@@ -1961,9 +2057,11 @@ function HistorialPorJugador({ players, jugadorInicial }) {
         <LoadingBlock />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {fechas.map((f) => (
-            <TarjetaDiaReal key={f} fecha={f} tareasDelDia={porFecha[f]} />
-          ))}
+          {fechas.map((f) =>
+            gruposPorFecha[f].map((g, i) => (
+              <TarjetaDiaReal key={`${f}::${i}`} fecha={g.fecha} tareasDelDia={g.tareas} etiqueta={gruposPorFecha[f].length > 1 ? `sesión ${i + 1} de ${gruposPorFecha[f].length}` : null} />
+            ))
+          )}
           {fechas.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin sesiones registradas en este rango</div>}
         </div>
       )}
@@ -2965,16 +3063,20 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const player = players.find((p) => p.id === presetPlayerId) || null;
   const date = todayStr();
 
-  const [sesiones, , sesionesLoaded] = useEntityList("sesiones");
+  // Antes: 3 peticiones en cadena (sesiones -> tareas -> ejercicios/
+  // circuitos), cada una esperando a que resolviera la anterior. Ahora: 1
+  // sola petición que ya trae las 4 cosas juntas, resueltas dentro de la
+  // misma ejecución de Apps Script.
+  const { loaded: bootstrapLoaded, sesiones: sesionesBootstrap, tareas: tareasBootstrap, ejercicios, circuitos } = useBootstrapJugador(player?.id, date);
+  // Defensa igual que en el resto de la app: no fiarse de que el filtrado
+  // del backend sea correcto, se re-aplica aquí siempre.
   const todaySesiones = player
-    ? sesiones.filter((s) => s.enviada && (s.fechas || []).includes(date) && (!s.jugadores_destino || !s.jugadores_destino.length || s.jugadores_destino.includes(player.id)))
+    ? sesionesBootstrap.filter((s) => s.enviada && (s.fechas || []).includes(date) && (!s.jugadores_destino || !s.jugadores_destino.length || s.jugadores_destino.includes(player.id)))
     : [];
   const sesionIds = todaySesiones.map((s) => s.id);
-  const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
+  const sesionIdsSet = new Set(sesionIds);
+  const tareas = tareasBootstrap.filter((t) => sesionIdsSet.has(t.sesion_id));
   const tareaIds = tareas.map((t) => t.id);
-  const [ejercicios, ejerciciosLoaded] = useEntityByIds("ejercicios", tareas.map((t) => t.ejercicio_id));
-  const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
-  const [circuitos, circuitosLoaded] = useEntityByIds("circuitos", circuitoIds);
   // Filtrado en el propio backend por jugador — mucho más rápido que traer
   // toda la tabla de Registros del equipo entero cada vez que se abre esta
   // pantalla.
@@ -2984,7 +3086,21 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // siempre, sea cual sea el comportamiento real del backend en cada momento.
   const registros =
     player && tareaIds.length ? registrosJugador.filter((r) => r.jugador_id === player.id && tareaIds.includes(r.tarea_id)) : [];
+  const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
+
+  // Cuando hoy hay más de una sesión distinta enviada a este jugador, se
+  // tratan como unidades independientes — cada una con su propio progreso y
+  // su propio envío — en vez de mezclar sus tareas en una sola lista donde
+  // enviar una bloqueaba también la otra sin haberse tocado.
+  const [sesionSeleccionadaId, setSesionSeleccionadaId] = useState(null);
+  const sesionActual = todaySesiones.length === 1 ? todaySesiones[0] : todaySesiones.find((s) => s.id === sesionSeleccionadaId) || null;
+  const necesitaElegirSesion = todaySesiones.length > 1 && !sesionActual;
+  const estadoPorSesion = todaySesiones.map((s) => {
+    const idsS = tareas.filter((t) => t.sesion_id === s.id).map((t) => t.id);
+    const hechas = idsS.filter((id) => registrosByTarea.has(id)).length;
+    return { sesion: s, total: idsS.length, hechas, completa: idsS.length > 0 && hechas === idsS.length };
+  });
 
   const [registrosDraft, setRegistrosDraft] = useState({});
   const [hechoDraft, setHechoDraft] = useState({}); // solo local hasta confirmar envío
@@ -3007,14 +3123,67 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       </PantallaBase>
     );
   }
+  // Comprobación de refuerzo: si te suspenden mientras ya tenías la app
+  // abierta, esto te saca en cuanto los datos del roster se refresquen —
+  // no hace falta esperar a un cierre y una nueva entrada por el portal.
+  if (player.estado === "suspendido") {
+    return (
+      <PantallaBase rol="jugador" centrarContenido>
+        <div style={{ textAlign: "center", maxWidth: 260 }}>
+          <div style={{ marginBottom: 12 }}>Tu acceso está desactivado. Habla con tu entrenador.</div>
+          <button onClick={onExit} style={{ background: "#F5C518", border: "none", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontWeight: 700, cursor: "pointer" }}>
+            Volver al portal
+          </button>
+        </div>
+      </PantallaBase>
+    );
+  }
 
-  const loaded = sesionesLoaded && tareasLoaded && ejerciciosLoaded && circuitosLoaded && registrosLoaded && historyLoaded;
+  const loaded = bootstrapLoaded && registrosLoaded && historyLoaded;
+
+  if (loaded && necesitaElegirSesion) {
+    return (
+      <PantallaBase rol="jugador" maxWidth={480}>
+        <div>
+          <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+            ← Cambiar de jugador
+          </button>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>SESIONES DE HOY</div>
+            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
+            <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{fmtDateLabel(date)} · elige cuál trabajar ahora</div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {estadoPorSesion.map(({ sesion, total, hechas, completa }) => (
+              <button
+                key={sesion.id}
+                onClick={() => setSesionSeleccionadaId(sesion.id)}
+                style={{ textAlign: "left", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: "14px 16px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 6 }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                  <span style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>{sesion.objetivo || sesion.md || "Sesión"}</span>
+                  {completa && <span style={{ color: "#22C55E", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }}>✓ ENVIADA</span>}
+                </div>
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#8BA4C0" }}>
+                  {total} tarea{total === 1 ? "" : "s"}
+                  {hechas > 0 && !completa ? ` · ${hechas}/${total} en progreso` : ""}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </PantallaBase>
+    );
+  }
+
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-  const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
-  // Si ya hay registros guardados de hoy para estas tareas, es que esta
-  // sesión ya se confirmó y envió antes (en una visita anterior) — se trata
-  // como ya enviada, sin dejar reabrirla.
-  const yaEnviadaAntes = loaded && tareaIds.length > 0 && tareaIds.some((id) => registrosByTarea.has(id));
+  // Si ya hay registros guardados de hoy para las tareas de ESTA sesión en
+  // concreto, es que esta sesión ya se confirmó y envió antes — se trata
+  // como ya enviada, sin dejar reabrirla. Antes esto miraba las tareas de
+  // TODAS las sesiones de hoy juntas, así que enviar una bloqueaba también
+  // la otra sin haberse tocado.
+  const tareaIdsSesionActual = sesionActual ? tareas.filter((t) => t.sesion_id === sesionActual.id).map((t) => t.id) : [];
+  const yaEnviadaAntes = loaded && tareaIdsSesionActual.length > 0 && tareaIdsSesionActual.some((id) => registrosByTarea.has(id));
 
   // La referencia de "última vez" se guarda por ejercicio + equipo usado —
   // la carga con cada uno de estos no es directamente comparable entre sí
@@ -3119,7 +3288,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   };
 
   tareas
-    .filter((t) => !t.fecha || t.fecha === date)
+    .filter((t) => (!t.fecha || t.fecha === date) && sesionActual && t.sesion_id === sesionActual.id)
     .forEach((t) => {
       const nombreBloque = t.bloque_sesion || "General";
       const tareaVisual = construirTareaVisual(t);
@@ -3201,12 +3370,28 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   };
 
   if (enviado || yaEnviadaAntes) {
+    const otrasPendientes = todaySesiones.length > 1 && estadoPorSesion.some((e) => e.sesion.id !== sesionActual?.id && !e.completa);
     return (
       <PantallaBase rol="jugador" centrarContenido>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
           <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#0E1E35", border: "2px solid #22C55E", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#22C55E" }}>✓</div>
           <div style={{ fontSize: 17, fontWeight: 700, color: "#F0F4FF" }}>Sesión enviada</div>
-          <div style={{ fontSize: 13, color: "#8BA4C0", maxWidth: 260, lineHeight: 1.5 }}>Tu próxima sesión estará disponible aquí cuando toque.</div>
+          <div style={{ fontSize: 13, color: "#8BA4C0", maxWidth: 260, lineHeight: 1.5 }}>
+            {otrasPendientes ? "Todavía te queda otra sesión de hoy por hacer." : "Tu próxima sesión estará disponible aquí cuando toque."}
+          </div>
+          {otrasPendientes && (
+            <button
+              onClick={() => {
+                setSesionSeleccionadaId(null);
+                setEnviado(false);
+                setHechoDraft({});
+                setRegistrosDraft({});
+              }}
+              style={{ marginTop: 4, background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+            >
+              Ver la otra sesión de hoy
+            </button>
+          )}
           <button onClick={onExit} style={{ marginTop: 8, background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
             ← Volver al portal
           </button>
@@ -3218,8 +3403,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   return (
     <PantallaBase rol="jugador" maxWidth={480}>
       <div>
-        <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Cambiar de jugador
+        <button
+          onClick={() => (todaySesiones.length > 1 ? setSesionSeleccionadaId(null) : onExit())}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+        >
+          {todaySesiones.length > 1 ? "← Elegir otra sesión de hoy" : "← Cambiar de jugador"}
         </button>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>SESIÓN DE HOY</div>
@@ -3473,7 +3661,7 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
   );
 }
 
-function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEditar }) {
+function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEditar, error }) {
   const [nombre, setNombre] = useState(ejercicioEditar?.nombre || "");
   const [bloque, setBloque] = useState(ejercicioEditar?.bloque || "Fuerza");
   const [categoriaId, setCategoriaId] = useState(ejercicioEditar?.categoria_preventiva_id || categorias[0]?.id || "");
@@ -3635,6 +3823,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
           </button>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
+          {error && <div style={{ color: "#EF4444", fontSize: 12, flex: 1, alignSelf: "center" }}>{error}</div>}
           <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
             Cancelar
           </button>
@@ -3733,6 +3922,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
   const [ejercicioEditando, setEjercicioEditando] = useState(null);
   const [vista, setVista] = useState("lista");
   const [errorBorrado, setErrorBorrado] = useState("");
+  const [errorGuardado, setErrorGuardado] = useState("");
 
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
@@ -3742,9 +3932,20 @@ function BibliotecaEjerciciosReal({ onBack }) {
     .filter((e) => (e.nombre || "").toLowerCase().includes(busqueda.toLowerCase()));
 
   const guardarEjercicio = async (datos) => {
-    await saveEjercicios(datos.id ? ejercicios.map((e) => (e.id === datos.id ? { ...e, ...datos } : e)) : [...ejercicios, datos]);
-    setPanelAbierto(false);
-    setEjercicioEditando(null);
+    setErrorGuardado("");
+    // CRÍTICO: si esto fallaba (por lo que fuera — el cuelgue de Apps
+    // Script que ya vimos, o cualquier otro fallo de conexión) y no se
+    // comprobaba, el panel se cerraba igualmente dando la sensación de que
+    // el cambio se había guardado, cuando en realidad no había llegado a la
+    // Sheet. Es exactamente lo que probablemente pasó con el cambio de
+    // "Sentadilla" hace unos días.
+    const ok = await saveEjercicios(datos.id ? ejercicios.map((e) => (e.id === datos.id ? { ...e, ...datos } : e)) : [...ejercicios, datos]);
+    if (ok) {
+      setPanelAbierto(false);
+      setEjercicioEditando(null);
+    } else {
+      setErrorGuardado("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo — el panel sigue abierto para que no pierdas lo escrito.");
+    }
   };
 
   const eliminarEjercicio = async (id) => {
@@ -3762,13 +3963,15 @@ function BibliotecaEjerciciosReal({ onBack }) {
   };
 
   const reordenarCategoria = async (listaOrdenada) => {
+    setErrorBorrado("");
     const idsOrdenados = new Set(listaOrdenada.map((e) => e.id));
     const actualizados = ejercicios.map((e) => {
       if (!idsOrdenados.has(e.id)) return e;
       const nuevoOrden = listaOrdenada.findIndex((x) => x.id === e.id) + 1;
       return { ...e, orden_rotacion: nuevoOrden };
     });
-    await saveEjercicios(actualizados);
+    const ok = await saveEjercicios(actualizados);
+    if (!ok) setErrorBorrado("No se pudo guardar el nuevo orden. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
   return (
@@ -3893,6 +4096,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
           categorias={categorias}
           ejercicioEditar={ejercicioEditando}
           onGuardar={guardarEjercicio}
+          error={errorGuardado}
           onCerrar={() => {
             setPanelAbierto(false);
             setEjercicioEditando(null);
@@ -4377,7 +4581,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onEliminarCircuito }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onEliminarCircuito }) {
   const tareas = circuito.tareas;
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
   const eliminarTarea = (key) => onCambiarTareas(tareas.filter((t) => t.key !== key));
@@ -4398,9 +4602,18 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
-      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-      ejercicioId = creado.id;
-      onEjercicioCreado?.(creado);
+      // Si crear el ejercicio falla (sin conexión, backend atascado...) hay
+      // que avisar y parar aquí — si no, se seguía intentando añadir la
+      // tarea con un ejercicioId vacío, sin decir nada, y quedaba con el
+      // nombre perdido para siempre.
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        ejercicioId = creado.id;
+        onEjercicioCreado?.(creado);
+      } catch (e) {
+        onError?.("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
     }
     const base =
       bloque === "Resistencia"
@@ -4738,9 +4951,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
-      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-      ejercicioId = creado.id;
-      addEjercicioLocal(creado);
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        ejercicioId = creado.id;
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
     }
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
   };
@@ -4749,9 +4967,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
-      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-      ejercicioId = creado.id;
-      addEjercicioLocal(creado);
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        ejercicioId = creado.id;
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
     }
     setActivacionEjercicioId(ejercicioId);
     setActivacionEjercicioNombre(nombre);
@@ -5205,6 +5428,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         mostrarCarga={false}
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5239,6 +5463,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         bloque="Resistencia"
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5253,9 +5478,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                           let ejercicioId = eOClic.id;
                           let nombre = eOClic.nombre;
                           if (!ejercicioId) {
-                            const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-                            ejercicioId = creado.id;
-                            addEjercicioLocal(creado);
+                            try {
+                              const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+                              ejercicioId = creado.id;
+                              addEjercicioLocal(creado);
+                            } catch (e) {
+                              setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+                              return;
+                            }
                           }
                           setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                         }}
@@ -5290,6 +5520,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         mostrarCarga={true}
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
@@ -5463,9 +5694,14 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
-      const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-      ejercicioId = creado.id;
-      addEjercicioLocal(creado);
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        ejercicioId = creado.id;
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
     }
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
   };
@@ -5675,6 +5911,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 mostrarCarga={true}
                 ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onError={setError}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
