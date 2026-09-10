@@ -2324,6 +2324,21 @@ function TareaVisualReal({ tarea }) {
   );
 }
 
+// Línea de detalle de una tarea en el resumen del entrenador (Programación).
+// Antes daba por hecho que toda tarea era "series × cantidad" tipo Fuerza —
+// una tarea por tiempo (Activación, modo "minutos"/"tiempo", sin series) se
+// quedaba en "× 8" sin unidad, porque el molde no sabía que ese modo existe.
+// Aquí sí se usa el modo real de la tarea para elegir el formato y la
+// unidad — igual que ya hace la pantalla del jugador con UNIDAD_POR_MODO.
+function formatearDetalleTareaCoach(t) {
+  if (t.bloque_sesion === "Resistencia") return formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data));
+  const porTiempo = t.modo === "minutos" || t.modo === "tiempo";
+  const cantidad = porTiempo ? `${t.cantidad} ${UNIDAD_POR_MODO[t.modo] || ""}`.trim() : t.series ? `${t.series} × ${t.cantidad}` : `${t.cantidad}`;
+  const lateralidad = !porTiempo && t.sin_lateralidad !== "si" ? ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}` : "";
+  const rir = t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : "";
+  return `${cantidad}${lateralidad}${rir}`;
+}
+
 function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }) {
   const [abierta, setAbierta] = useState(esHoy);
   const [confirmando, setConfirmando] = useState(false);
@@ -2403,12 +2418,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                           key={t.id}
                           tarea={{
                             nombre: `${i + 1}. ${t.nombreEjercicio}`,
-                            detalle:
-                              t.bloque_sesion === "Resistencia"
-                                ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data))
-                                : `${t.series} × ${t.cantidad}${t.sin_lateralidad === "si" ? "" : ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`}${
-                                    t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : ""
-                                  }`,
+                            detalle: formatearDetalleTareaCoach(t),
                             gif: t.gif_url,
                             nota: t.nota,
                             materiales: parseMateriales(t.material),
@@ -2421,12 +2431,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                       key={item.tarea.id}
                       tarea={{
                         nombre: item.tarea.nombreEjercicio,
-                        detalle:
-                          item.tarea.bloque_sesion === "Resistencia"
-                            ? formatearObjetivoResistencia(parseResistenciaData(item.tarea.resistencia_data))
-                            : `${item.tarea.series} × ${item.tarea.cantidad}${
-                                item.tarea.sin_lateralidad === "si" ? "" : ` · ${item.tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}`
-                              }${item.tarea.rir !== "" && item.tarea.rir != null ? ` · RIR ${item.tarea.rir}` : ""}`,
+                        detalle: formatearDetalleTareaCoach(item.tarea),
                         gif: item.tarea.gif_url,
                         nota: item.tarea.nota,
                         materiales: parseMateriales(item.tarea.material),
@@ -2987,6 +2992,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [pidiendoConfirmacion, setPidiendoConfirmacion] = useState(false);
   const [enviado, setEnviado] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [errorEnvio, setErrorEnvio] = useState("");
 
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
@@ -3159,6 +3165,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   const confirmarEnvio = async () => {
     setEnviando(true);
+    setErrorEnvio("");
     try {
       const nuevos = todasLasTareas
         .filter((t) => hechoDraft[t.id])
@@ -3175,10 +3182,18 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             subtipo_corporal: draft.subtipo || "",
           };
         });
-      if (nuevos.length) {
-        await saveRegistrosJugador([...registrosJugador, ...nuevos]);
+      // CRÍTICO: si esto falla o se queda a medias (Apps Script atascado,
+      // sin conexión...) y no se comprueba, el jugador ve "Sesión enviada"
+      // sin que se haya guardado nada de verdad — y el entrenador se queda
+      // sin ningún registro sin ninguna pista de qué pasó. Por eso, aquí SÍ
+      // se exige que el guardado haya confirmado éxito antes de dar el envío
+      // por bueno.
+      const ok = nuevos.length ? await saveRegistrosJugador([...registrosJugador, ...nuevos]) : true;
+      if (ok) {
+        setEnviado(true);
+      } else {
+        setErrorEnvio("No se pudo enviar. Sigues aquí con tu progreso guardado en pantalla — comprueba tu conexión y vuelve a intentarlo.");
       }
-      setEnviado(true);
     } finally {
       setEnviando(false);
       setPidiendoConfirmacion(false);
@@ -3270,6 +3285,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               ))}
             </div>
 
+            {errorEnvio && (
+              <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
+            )}
             {pidiendoConfirmacion ? (
               <div style={{ display: "flex", gap: 8, marginTop: 22 }}>
                 <button
