@@ -12,6 +12,30 @@ const SHARED_TOKEN = "7f3a9c2e5b8d1f4a6c0e2b9d7a5f3c1e";
 
 const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion"]);
 
+// Sin esto, un fetch que Apps Script deja colgado (cuota agotada, un bloqueo
+// interno atascado, lo que sea) se queda esperando para siempre — y como
+// TODOS los hooks de datos hacen `loading` hasta que el fetch resuelve
+// (éxito o error), la app entera se queda en "cargando" sin fin y sin forma
+// de recuperarse salvo cerrar y reabrir. Con el timeout, pasado este tiempo
+// se da por fallida la petición y cada hook cae en su rama de error normal
+// (loaded=true, items vacíos) en vez de colgarse.
+const API_TIMEOUT_MS = 20000;
+
+async function fetchConTimeout(url, options) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (e) {
+    if (e.name === "AbortError") {
+      throw new Error("El servidor no respondió a tiempo. Comprueba tu conexión e inténtalo de nuevo.");
+    }
+    throw e;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 async function apiCall(action, params = {}) {
   if (API_GET_ACTIONS.has(action)) {
     const cleanParams = {};
@@ -19,10 +43,10 @@ async function apiCall(action, params = {}) {
       if (params[k] !== undefined && params[k] !== null) cleanParams[k] = params[k];
     });
     const qs = new URLSearchParams({ action, token: SHARED_TOKEN, ...cleanParams }).toString();
-    const res = await fetch(`${APPS_SCRIPT_URL}?${qs}`);
+    const res = await fetchConTimeout(`${APPS_SCRIPT_URL}?${qs}`);
     return res.json();
   }
-  const res = await fetch(APPS_SCRIPT_URL, {
+  const res = await fetchConTimeout(APPS_SCRIPT_URL, {
     method: "POST",
     headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS en Apps Script
     body: JSON.stringify({ action, token: SHARED_TOKEN, ...params }),
@@ -168,9 +192,11 @@ function useEntityList(entity, filters) {
         if (cancelled) return;
         sharedDataCache.set(cacheKey, res || []);
         setItems(res || []);
+        setError(null);
       } catch (e) {
         if (cancelled) return;
         setItems([]);
+        setError(e?.message || "No se pudo cargar. Comprueba tu conexión.");
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -267,9 +293,11 @@ function useConfigValue(clave) {
         const res = await api.config(clave);
         if (cancelled) return;
         setValue(res);
+        setError(null);
       } catch (e) {
         if (cancelled) return;
         setValue(null);
+        setError(e?.message || "No se pudo cargar. Comprueba tu conexión.");
       } finally {
         if (!cancelled) setLoaded(true);
       }
@@ -981,8 +1009,8 @@ function PantallaPortal({ children, maxWidth = 320 }) {
 // entrada que dirige según coincida con el PIN de un jugador o con el
 // código de entrenador (creándolo la primera vez si no existe).
 function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
-  const [players, , playersLoaded] = usePlayers();
-  const [coachPin, saveCoachPin, coachPinLoaded] = useConfigValue("coach_pin");
+  const [players, , playersLoaded, playersError, retryPlayers] = usePlayers();
+  const [coachPin, saveCoachPin, coachPinLoaded, coachPinError, retryCoachPin] = useConfigValue("coach_pin");
   const [codigo, setCodigo] = useState("");
   const [error, setError] = useState(false);
   const [resultado, setResultado] = useState(null); // { tipo: "entrenador" } | { tipo: "jugador", nombre, id }
@@ -993,6 +1021,12 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   const [saving, setSaving] = useState(false);
 
   const loaded = playersLoaded && coachPinLoaded;
+  // Distingue "todavía no existe código de entrenador" (coachPin === null,
+  // sin error) de "no se ha podido comprobar" (fallo real de conexión,
+  // p. ej. Apps Script atascado o sin responder a tiempo). Sin esta
+  // distinción, un simple fallo de red parecía "primer acceso" y ofrecía
+  // crear un código nuevo, arriesgando pisar el que ya existe.
+  const fallosDeConexion = !!playersError || !!coachPinError;
 
   const validar = () => {
     const valor = codigo.trim();
@@ -1035,6 +1069,33 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   const screenWrap = (content) => <PantallaPortal>{content}</PantallaPortal>;
 
   if (!loaded) return screenWrap(<LoadingBlock />);
+
+  // Fallo real de conexión (no "todavía no hay código") — nunca se ofrece
+  // "crear código de entrenador" aquí, para no arriesgarse a pisar uno que
+  // sí existe pero que ahora mismo no se ha podido leer.
+  if (fallosDeConexion && coachPin == null && !resultado) {
+    return screenWrap(
+      <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.1em", color: "#F5C518", marginBottom: 6 }}>
+          ENTRENAMIENTO DE FUERZA
+        </div>
+        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10, color: "#EF4444" }}>No se pudo conectar</div>
+        <div style={{ fontSize: 13, color: "#8BA4C0", marginBottom: 20, lineHeight: 1.5 }}>
+          No se ha podido comprobar tu código — puede ser un problema de conexión o que el servidor esté tardando en
+          responder. No es que falte crear uno nuevo.
+        </div>
+        <button
+          onClick={() => {
+            retryPlayers();
+            retryCoachPin();
+          }}
+          style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
 
   if (coachPin == null && !creatingPin && !resultado) {
     return screenWrap(
