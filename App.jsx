@@ -1541,6 +1541,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
+  const [errorAccion, setErrorAccion] = useState("");
 
   if (!playersLoaded || !categoriasLoaded || !coachPinLoaded) return <LoadingBlock />;
 
@@ -1552,18 +1553,21 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
     players.filter((p) => p.id !== excluirId).map((p) => p.pin).concat(coachPin != null ? [coachPin] : []);
 
   const manejarAccion = async (id, accion) => {
+    setErrorAccion("");
+    let ok = true;
     if (accion === "suspender") {
-      await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "suspendido" } : p)));
+      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "suspendido" } : p)));
     } else if (accion === "activar") {
-      await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "activo" } : p)));
+      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "activo" } : p)));
     } else if (accion === "eliminar") {
-      await savePlayers(players.filter((p) => p.id !== id));
+      ok = await savePlayers(players.filter((p) => p.id !== id));
     } else if (accion === "reset") {
-      await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: genUniquePin(pinsOcupados(id)) } : p)));
+      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: genUniquePin(pinsOcupados(id)) } : p)));
     } else if (accion === "historial") {
       const jugador = players.find((p) => p.id === id);
       onOpenHistory?.(jugador);
     }
+    if (!ok) setErrorAccion("No se pudo completar la acción. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
   const agregarJugador = async ({ nombre, pin }) => {
@@ -1628,6 +1632,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
           ))}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {errorAccion && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorAccion}</div>}
           {visibles.map((j) => (
             <FilaJugadorReal key={j.id} jugador={j} categorias={categorias} onAccion={manejarAccion} onCambiarCategorias={cambiarCategorias} />
           ))}
@@ -2426,6 +2431,7 @@ function ProgramacionReal({ players, onBack }) {
   const [showEditor, setShowEditor] = useState(false);
   const [verHistorial, setVerHistorial] = useState(false);
   const [historialVisible, setHistorialVisible] = useState(15);
+  const [errorBorrado, setErrorBorrado] = useState("");
   const sesionIds = sesiones.map((s) => s.id);
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
 
@@ -2502,15 +2508,20 @@ function ProgramacionReal({ players, onBack }) {
   // de la Biblioteca): dejan de poder resolver el nombre y se muestran como
   // "(tarea eliminada)", pero no se pierde el dato de que se hizo algo ese día.
   const eliminarSesion = async (sesionId) => {
-    const tareasDeSesion = tareas.filter((t) => t.sesion_id === sesionId);
-    const circuitoIds = [...new Set(tareasDeSesion.filter((t) => t.circuito_id).map((t) => t.circuito_id))];
-    await Promise.all(tareasDeSesion.map((t) => api.delete("tareas", t.id)));
-    await Promise.all(circuitoIds.map((id) => api.delete("circuitos", id)));
-    await api.delete("sesiones", sesionId);
-    invalidateEntityCache("sesiones");
-    invalidateEntityCache("tareas");
-    invalidateEntityCache("circuitos");
-    retry();
+    setErrorBorrado("");
+    try {
+      const tareasDeSesion = tareas.filter((t) => t.sesion_id === sesionId);
+      const circuitoIds = [...new Set(tareasDeSesion.filter((t) => t.circuito_id).map((t) => t.circuito_id))];
+      await Promise.all(tareasDeSesion.map((t) => api.delete("tareas", t.id)));
+      await Promise.all(circuitoIds.map((id) => api.delete("circuitos", id)));
+      await api.delete("sesiones", sesionId);
+      invalidateEntityCache("sesiones");
+      invalidateEntityCache("tareas");
+      invalidateEntityCache("circuitos");
+      retry();
+    } catch (e) {
+      setErrorBorrado("No se pudo borrar la sesión. Comprueba tu conexión e inténtalo de nuevo.");
+    }
   };
 
   return (
@@ -2524,6 +2535,7 @@ function ProgramacionReal({ players, onBack }) {
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
         </div>
+        {errorBorrado && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
         {hoy.length > 0 && (
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>HOY</div>
@@ -3633,7 +3645,7 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
 }
 
 function BibliotecaEjerciciosReal({ onBack }) {
-  const [ejercicios, saveEjercicios, ejerciciosLoaded] = useEntityList("ejercicios");
+  const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [bloqueFiltro, setBloqueFiltro] = useState("Todos");
   const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
@@ -3641,6 +3653,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [ejercicioEditando, setEjercicioEditando] = useState(null);
   const [vista, setVista] = useState("lista");
+  const [errorBorrado, setErrorBorrado] = useState("");
 
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
@@ -3656,7 +3669,17 @@ function BibliotecaEjerciciosReal({ onBack }) {
   };
 
   const eliminarEjercicio = async (id) => {
-    await saveEjercicios(ejercicios.filter((e) => e.id !== id));
+    setErrorBorrado("");
+    if (!id) {
+      // Sin id real no hay fila que borrar en la Sheet — normalmente pasa
+      // con filas creadas o tocadas antes de este arreglo, o metidas a mano
+      // directamente en la hoja de cálculo sin id. Quitarlo aquí solo lo
+      // ocultaría un instante: en la próxima carga volvería a aparecer.
+      setErrorBorrado('Este ejercicio no tiene un identificador válido en la hoja de cálculo, así que no se puede borrar desde aquí — bórralo directamente en la pestaña "ejercicios" de la Sheet.');
+      return;
+    }
+    const ok = await saveEjercicios(ejercicios.filter((e) => e.id !== id));
+    if (!ok) setErrorBorrado("No se pudo borrar. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
   const reordenarCategoria = async (listaOrdenada) => {
@@ -3766,6 +3789,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
               </select>
             </label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {errorBorrado && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorBorrado}</div>}
               {visibles.map((e) => (
                 <TarjetaEjercicioReal
                   key={e.id}
@@ -4418,7 +4442,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
   const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
   const [activacionEjercicioId, setActivacionEjercicioId] = useState("");
-  const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("Bici estática");
+  const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("");
   const [duracionActivacion, setDuracionActivacion] = useState("8");
   const [unidadActivacion, setUnidadActivacion] = useState("minutos");
   // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
@@ -4487,7 +4511,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
       if (eAct) {
         setActivacionEjercicioId(eAct.id);
-        setActivacionEjercicioNombre(eAct.nombre || "Bici estática");
+        setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
       }
     }
     setCargandoExistente(false);
@@ -4593,7 +4617,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
         if (eAct) {
           setActivacionEjercicioId(eAct.id);
-          setActivacionEjercicioNombre(eAct.nombre || "Bici estática");
+          setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
         }
       }
       const mapaPorFecha = (nombreBloque) => {
@@ -4623,21 +4647,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEditing, ejerciciosLoaded]);
-
-  // Sesión nueva (no edición, no reutilización de una pasada): valor por
-  // defecto para Activación, igual que antes de dejar elegir el ejercicio.
-  // El entrenador puede cambiarlo desde el selector antes de guardar.
-  useEffect(() => {
-    if (isEditing || esReutilizacion || !ejerciciosLoaded || activacionEjercicioId) return;
-    let cancelled = false;
-    resolveEjercicio(ejercicios, { nombre: "Bici estática", bloque: "" }).then((ej) => {
-      if (!cancelled) setActivacionEjercicioId(ej.id);
-    });
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, esReutilizacion, ejerciciosLoaded]);
 
   const addFecha = () => {
     if (!nuevaFecha) return;
@@ -5007,7 +5016,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicio</span>
-                          <span style={{ fontSize: 13, color: "#F0F4FF", fontWeight: 600 }}>{activacionEjercicioNombre}</span>
+                          <span style={{ fontSize: 13, color: activacionEjercicioNombre ? "#F0F4FF" : "#4A6680", fontWeight: activacionEjercicioNombre ? 600 : 400 }}>
+                            {activacionEjercicioNombre || "Sin elegir todavía"}
+                          </span>
                         </div>
                         <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} />
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
