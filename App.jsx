@@ -4174,7 +4174,8 @@ const BLOQUES_DISENO = [
   { id: "preventivo", numero: 3, nombre: "Preventivo", modo: "rotativo-categoria", descripcion: "Según categoría común a los jugadores destinatarios" },
   { id: "core", numero: 4, nombre: "Core", modo: "manual", descripcion: "Diseño manual — sin registro de carga" },
   { id: "resistencia", numero: 5, nombre: "Resistencia", modo: "manual", descripcion: "Intervalos, tiempo y recuperación" },
-  { id: "fuerza", numero: 6, nombre: "Fuerza", modo: "manual", descripcion: "Diseño manual — con reps/series y RIR (incluye Específicas)" },
+  { id: "cmj", numero: 6, nombre: "CMJ", modo: "manual", descripcion: "Día de medición de salto — el jugador lo ve señalado en su sesión" },
+  { id: "fuerza", numero: 7, nombre: "Fuerza", modo: "manual", descripcion: "Diseño manual — con reps/series y RIR (incluye Específicas)" },
 ];
 
 function IconoBloqueDiseno({ id }) {
@@ -4213,6 +4214,15 @@ function IconoBloqueDiseno({ id }) {
       return (
         <svg viewBox="0 0 24 24" {...common}>
           <path d="M3 12h3l2-6 4 12 2-6h7" />
+        </svg>
+      );
+    case "cmj":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M12 3v6" />
+          <path d="M8 6l4 3 4-3" />
+          <path d="M6 21c1-5 3-8 6-8s5 3 6 8" />
+          <path d="M4 21h16" />
         </svg>
       );
     case "fuerza":
@@ -4633,8 +4643,9 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onEliminarCircuito }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito }) {
   const tareas = circuito.tareas;
+  const rondas = circuito.rondas || 1;
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
   const eliminarTarea = (key) => onCambiarTareas(tareas.filter((t) => t.key !== key));
   const mover = (index, dir) => {
@@ -4684,6 +4695,27 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
         <button onClick={onEliminarCircuito} style={botonMiniStyleDiseno} title="Eliminar circuito completo">
           ×
         </button>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#122440", border: "1px solid #F5C51840", borderRadius: 8, padding: "8px 10px" }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.06em", color: "#F5C518", fontWeight: 600 }}>RONDAS</span>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => onCambiarRondas(Math.max(1, rondas - 1))}
+            style={{ width: 26, height: 26, borderRadius: 6, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+          >
+            −
+          </button>
+          <span style={{ fontSize: 16, fontWeight: 700, color: "#F0F4FF", minWidth: 22, textAlign: "center" }}>{rondas}</span>
+          <button
+            type="button"
+            onClick={() => onCambiarRondas(rondas + 1)}
+            style={{ width: 26, height: 26, borderRadius: 6, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+          >
+            +
+          </button>
+        </div>
+        <span style={{ fontSize: 11.5, color: "#8BA4C0" }}>{rondas === 1 ? "vuelta al circuito" : "vueltas al circuito"}</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
@@ -4789,6 +4821,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("");
   const [duracionActivacion, setDuracionActivacion] = useState("8");
   const [unidadActivacion, setUnidadActivacion] = useState("minutos");
+  // A diferencia de Activación, CMJ no es rutina de cada sesión — es un día
+  // de medición puntual, así que por defecto va desactivado en una sesión
+  // nueva (nunca se enciende solo).
+  const [cmjActiva, setCmjActiva] = useState(base ? !!base.cmj_activo : false);
+  const [cmjEjercicioId, setCmjEjercicioId] = useState("");
+  const [cmjEjercicioNombre, setCmjEjercicioNombre] = useState("");
   // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
   // categoría se aplican ese día, 0 = no se aplica) sin cambiar el nombre de
   // la columna en la Sheet — las sesiones antiguas guardaron ahí un booleano
@@ -4810,6 +4848,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
   const [activacionTareaId, setActivacionTareaId] = useState(null);
+  const [cmjTareaId, setCmjTareaId] = useState(null);
   const [movilidadTareaIdsPorFecha, setMovilidadTareaIdsPorFecha] = useState({});
   const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({}); // fecha -> [id, id, ...]
   const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
@@ -4856,6 +4895,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       if (eAct) {
         setActivacionEjercicioId(eAct.id);
         setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
+      }
+    }
+    const cmjTarea = tareas.find((t) => t.bloque_sesion === "CMJ");
+    if (cmjTarea) {
+      setCmjActiva(true);
+      const eCmj = ejerciciosById.get(cmjTarea.ejercicio_id);
+      if (eCmj) {
+        setCmjEjercicioId(eCmj.id);
+        setCmjEjercicioNombre(eCmj.nombre || "(ejercicio eliminado)");
       }
     }
     setCargandoExistente(false);
@@ -4941,6 +4989,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           .map((c) => ({
             key: c.id,
             circuitoId: c.id,
+            rondas: c.rondas || 1,
             tareas: tareas
               .filter((t) => t.circuito_id === c.id)
               .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
@@ -4962,6 +5011,16 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         if (eAct) {
           setActivacionEjercicioId(eAct.id);
           setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
+        }
+      }
+      const cmjTarea = tareas.find((t) => t.bloque_sesion === "CMJ");
+      if (cmjTarea) {
+        setCmjActiva(true);
+        setCmjTareaId(cmjTarea.id);
+        const eCmj = ejerciciosById.get(cmjTarea.ejercicio_id);
+        if (eCmj) {
+          setCmjEjercicioId(eCmj.id);
+          setCmjEjercicioNombre(eCmj.nombre || "(ejercicio eliminado)");
         }
       }
       const mapaPorFecha = (nombreBloque) => {
@@ -5032,6 +5091,23 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     setActivacionEjercicioNombre(nombre);
   };
 
+  const elegirEjercicioCmj = async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    if (!ejercicioId) {
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        ejercicioId = creado.id;
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
+    }
+    setCmjEjercicioId(ejercicioId);
+    setCmjEjercicioNombre(nombre);
+  };
+
   const guardar = async () => {
     setError("");
     setOk(false);
@@ -5049,6 +5125,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         jugadores_destino: targetPlayerIds,
         preventivo_activo: preventivoCantidad,
         activacion_activa: activacionActiva,
+        cmj_activo: cmjActiva,
         lote_origen_id: "",
         enviada: true,
       };
@@ -5099,7 +5176,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
       const guardarCircuito = async (c, bloqueNombre, mostrarCarga) => {
         const esResistencia = bloqueNombre === "Resistencia";
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre });
+        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre, rondas: c.rondas || 1 });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
@@ -5136,6 +5213,28 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           modo: unidadActivacion === "segundos" ? "tiempo" : "minutos",
           series: "",
           cantidad: duracionActivacion,
+          rir: "",
+          tipo_resistencia: "",
+          material: "",
+          nota: "",
+          circuito_id: "",
+          orden_en_circuito: "",
+        });
+        keepTareaIds.add(saved.id);
+      }
+
+      // CMJ: día de medición puntual — igual que Activación, una única tarea
+      // con el ejercicio que elija el entrenador, sin series/reps/RIR (no es
+      // una prescripción de carga, es un aviso de que hoy toca test de salto).
+      if (cmjActiva && cmjEjercicioId) {
+        const saved = await api.save("tareas", {
+          id: cmjTareaId || undefined,
+          sesion_id: savedSesion.id,
+          bloque_sesion: "CMJ",
+          ejercicio_id: cmjEjercicioId,
+          modo: "reps",
+          series: "",
+          cantidad: "",
           rir: "",
           tipo_resistencia: "",
           material: "",
@@ -5484,13 +5583,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onEliminarCircuito={() => setCircuitosCore((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} />
                       <button
-                        onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [] }])}
+                        onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
@@ -5519,6 +5619,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
@@ -5543,7 +5644,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         }}
                       />
                       <button
-                        onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [] }])}
+                        onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
@@ -5551,17 +5652,59 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     </div>
                   </div>
                 )}
+                {b.id === "cmj" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                      <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
+                      </span>
+                      <span style={{ fontSize: 13, color: cmjActiva ? "#F0F4FF" : "#4A6680" }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
+                    </div>
+                    {cmjActiva && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicio</span>
+                          <span style={{ fontSize: 13, color: cmjEjercicioNombre ? "#F0F4FF" : "#4A6680", fontWeight: cmjEjercicioNombre ? 600 : 400 }}>
+                            {cmjEjercicioNombre || "Sin elegir todavía"}
+                          </span>
+                        </div>
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioCmj} />
+                      </div>
+                    )}
+                  </div>
+                )}
                 {b.id === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {tareasFuerza.map((t) => (
+                    {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
                         tarea={t}
+                        orden={i + 1}
                         mostrarCarga={true}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiar={(nuevo) => setTareasFuerza((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                         onEliminar={() => setTareasFuerza((prev) => prev.filter((x) => x.key !== t.key))}
+                        onSubir={
+                          i > 0
+                            ? () =>
+                                setTareasFuerza((prev) => {
+                                  const nueva = [...prev];
+                                  [nueva[i - 1], nueva[i]] = [nueva[i], nueva[i - 1]];
+                                  return nueva;
+                                })
+                            : null
+                        }
+                        onBajar={
+                          i < tareasFuerza.length - 1
+                            ? () =>
+                                setTareasFuerza((prev) => {
+                                  const nueva = [...prev];
+                                  [nueva[i], nueva[i + 1]] = [nueva[i + 1], nueva[i]];
+                                  return nueva;
+                                })
+                            : null
+                        }
                       />
                     ))}
                     {circuitosFuerza.map((c) => (
@@ -5576,13 +5719,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} />
                       <button
-                        onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [] }])}
+                        onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
@@ -5719,6 +5863,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
         circuitos.map((c) => ({
           key: c.id,
           circuitoId: c.id,
+          rondas: c.rondas || 1,
           tareas: tareas
             .filter((t) => t.circuito_id === c.id)
             .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
@@ -5810,7 +5955,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
       };
 
       const guardarCircuito = async (c) => {
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre });
+        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1 });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
@@ -5967,13 +6112,14 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                onCambiarRondas={(r) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                 onEliminarCircuito={() => setCircuitosBloque((prev) => prev.filter((x) => x.key !== c.key))}
               />
             ))}
             <div style={{ display: "flex", gap: 8 }}>
               <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} />
               <button
-                onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [] }])}
+                onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                 style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
               >
                 + Añadir circuito
