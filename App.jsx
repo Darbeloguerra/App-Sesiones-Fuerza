@@ -10,7 +10,7 @@ import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, 
 const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxOacDckJsPpSkd2A0i8hRoHgP2xUh0BmqUUyr3uTZUqzg7YJM_cCcboDQJ9rosuBt6NA/exec";
 const SHARED_TOKEN = "7f3a9c2e5b8d1f4a6c0e2b9d7a5f3c1e";
 
-const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion", "bootstrapJugador"]);
+const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion", "bootstrapJugador", "bootstrapProgramacion"]);
 
 // Sin esto, un fetch que Apps Script deja colgado (cuota agotada, un bloqueo
 // interno atascado, lo que sea) se queda esperando para siempre — y como
@@ -80,6 +80,7 @@ const api = {
   // (sesiones -> tareas -> ejercicios/circuitos) para la pantalla del
   // jugador — ver bootstrapJugador_ en Code.gs.
   bootstrapJugador: (jugadorId, fecha) => apiCall("bootstrapJugador", { jugador_id: jugadorId, fecha }).then(unwrapApi),
+  bootstrapProgramacion: () => apiCall("bootstrapProgramacion", {}).then(unwrapApi),
 };
 // ====== Fin backend remoto ======
 
@@ -1044,6 +1045,53 @@ function useBootstrapJugador(jugadorId, fecha) {
     tareas: data?.tareas || [],
     ejercicios: data?.ejercicios || [],
     circuitos: data?.circuitos || [],
+  };
+}
+
+// Mismo tratamiento para Programación (entrenador): antes eran 2 peticiones
+// en cadena (sesiones -> tareas, ejercicios en paralelo) — aquí de nuevo se
+// junta todo en una sola llamada. A diferencia de la del jugador, esta no
+// filtra por fecha ni destinatario: el entrenador ve todas las sesiones
+// (hoy, futuras, historial), así que se traen todas de una vez.
+function useBootstrapProgramacion() {
+  const cacheKey = "bootstrap:programacion";
+  const [data, setData] = useState(() => sharedDataCache.get(cacheKey) || null);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    if (tick === 0 && sharedDataCache.has(cacheKey)) {
+      setData(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return;
+    }
+    setLoaded(false);
+    api
+      .bootstrapProgramacion()
+      .then((res) => {
+        if (!cancelled) {
+          sharedDataCache.set(cacheKey, res);
+          setData(res);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setData({ sesiones: [], tareas: [], ejercicios: [] });
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+  const retry = useCallback(() => setTick((t) => t + 1), []);
+  return {
+    loaded,
+    sesiones: data?.sesiones || [],
+    tareas: data?.tareas || [],
+    ejercicios: data?.ejercicios || [],
+    retry,
   };
 }
 
@@ -2588,16 +2636,15 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
 }
 
 function ProgramacionReal({ players, onBack }) {
-  const [sesiones, , sesionesLoaded, , retry] = useEntityList("sesiones");
-  const [ejercicios, , ejerciciosLoaded] = useEntityList("ejercicios");
+  // Antes: sesiones -> tareas en cadena (ejercicios en paralelo) — 2
+  // peticiones encadenadas. Ahora: 1 sola, con las 3 cosas ya juntas.
+  const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
   const [editingSesion, setEditingSesion] = useState(null);
   const [plantillaSesion, setPlantillaSesion] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
   const [verHistorial, setVerHistorial] = useState(false);
   const [historialVisible, setHistorialVisible] = useState(15);
   const [errorBorrado, setErrorBorrado] = useState("");
-  const sesionIds = sesiones.map((s) => s.id);
-  const [tareas, tareasLoaded] = useTareasForSesiones(sesionIds);
 
   if (showEditor) {
     const esComplementaria = (editingSesion || plantillaSesion)?.tipo === "complementaria";
@@ -2621,15 +2668,20 @@ function ProgramacionReal({ players, onBack }) {
   }
 
 
-  if (!sesionesLoaded || !ejerciciosLoaded || !tareasLoaded) return <LoadingBlock />;
+  if (!bootLoaded) return <LoadingBlock />;
 
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+  // Defensa igual que en el resto de la app: no fiarse de que el backend
+  // haya filtrado de verdad las tareas por sesión.
+  const sesionIdsSet = new Set(sesiones.map((s) => s.id));
   const tareasBySesion = new Map();
-  tareas.forEach((t) => {
-    if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
-    const e = ejerciciosById.get(t.ejercicio_id) || {};
-    tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
-  });
+  tareas
+    .filter((t) => sesionIdsSet.has(t.sesion_id))
+    .forEach((t) => {
+      if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
+      const e = ejerciciosById.get(t.ejercicio_id) || {};
+      tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
+    });
 
   const today = todayStr();
   const conTareas = sesiones.map((s) => ({ ...s, tareas: tareasBySesion.get(s.id) || [] }));
