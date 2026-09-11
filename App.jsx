@@ -3081,12 +3081,27 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   );
 }
 
-function CircuitoJugadorReal({ tareas, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
+function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
   return (
     <div style={{ border: "1.5px solid #F5C51855", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "#0E1E3540" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
         <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.06em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
         <span style={{ fontSize: 11, color: "#4A6680" }}>seguir orden</span>
+        <span
+          style={{
+            marginLeft: "auto",
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#F5C518",
+            background: "#F5C51818",
+            border: "1px solid #F5C51850",
+            borderRadius: 6,
+            padding: "3px 8px",
+          }}
+        >
+          {rondas} {rondas === 1 ? "RONDA" : "RONDAS"}
+        </span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) => (
@@ -3358,6 +3373,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     bloques[datos.nombreBloque].push({
       tipo: "circuito",
       circuitoId,
+      rondas: circuitosById.get(circuitoId)?.rondas || 1,
       tareas: datos.tareas.sort((a, b) => a.orden - b.orden),
     });
   });
@@ -3497,6 +3513,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                         <CircuitoJugadorReal
                           key={item.circuitoId}
                           tareas={item.tareas}
+                          rondas={item.rondas}
                           hechoDraft={hechoDraft}
                           onToggle={toggle}
                           getRegistro={getRegistro}
@@ -4823,10 +4840,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [unidadActivacion, setUnidadActivacion] = useState("minutos");
   // A diferencia de Activación, CMJ no es rutina de cada sesión — es un día
   // de medición puntual, así que por defecto va desactivado en una sesión
-  // nueva (nunca se enciende solo).
+  // nueva (nunca se enciende solo). Tampoco hace falta elegir ejercicio: es
+  // siempre el mismo test, así que se resuelve solo al guardar (más abajo).
   const [cmjActiva, setCmjActiva] = useState(base ? !!base.cmj_activo : false);
-  const [cmjEjercicioId, setCmjEjercicioId] = useState("");
-  const [cmjEjercicioNombre, setCmjEjercicioNombre] = useState("");
   // preventivo_activo pasa de booleano a número (cuántos ejercicios de la
   // categoría se aplican ese día, 0 = no se aplica) sin cambiar el nombre de
   // la columna en la Sheet — las sesiones antiguas guardaron ahí un booleano
@@ -4898,14 +4914,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       }
     }
     const cmjTarea = tareas.find((t) => t.bloque_sesion === "CMJ");
-    if (cmjTarea) {
-      setCmjActiva(true);
-      const eCmj = ejerciciosById.get(cmjTarea.ejercicio_id);
-      if (eCmj) {
-        setCmjEjercicioId(eCmj.id);
-        setCmjEjercicioNombre(eCmj.nombre || "(ejercicio eliminado)");
-      }
-    }
+    if (cmjTarea) setCmjActiva(true);
     setCargandoExistente(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [esReutilizacion, ejerciciosLoaded]);
@@ -5017,11 +5026,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       if (cmjTarea) {
         setCmjActiva(true);
         setCmjTareaId(cmjTarea.id);
-        const eCmj = ejerciciosById.get(cmjTarea.ejercicio_id);
-        if (eCmj) {
-          setCmjEjercicioId(eCmj.id);
-          setCmjEjercicioNombre(eCmj.nombre || "(ejercicio eliminado)");
-        }
       }
       const mapaPorFecha = (nombreBloque) => {
         const mapa = {};
@@ -5089,23 +5093,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     }
     setActivacionEjercicioId(ejercicioId);
     setActivacionEjercicioNombre(nombre);
-  };
-
-  const elegirEjercicioCmj = async (ejercicioOClic) => {
-    let ejercicioId = ejercicioOClic.id;
-    let nombre = ejercicioOClic.nombre;
-    if (!ejercicioId) {
-      try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
-        ejercicioId = creado.id;
-        addEjercicioLocal(creado);
-      } catch (e) {
-        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
-        return;
-      }
-    }
-    setCmjEjercicioId(ejercicioId);
-    setCmjEjercicioNombre(nombre);
   };
 
   const guardar = async () => {
@@ -5223,15 +5210,18 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         keepTareaIds.add(saved.id);
       }
 
-      // CMJ: día de medición puntual — igual que Activación, una única tarea
-      // con el ejercicio que elija el entrenador, sin series/reps/RIR (no es
-      // una prescripción de carga, es un aviso de que hoy toca test de salto).
-      if (cmjActiva && cmjEjercicioId) {
+      // CMJ: día de medición puntual — no es una tarea configurable, es
+      // siempre el mismo test. No hace falta que el entrenador elija nada:
+      // se resuelve aquí solo (se crea la primera vez, luego se reutiliza).
+      // Sin series/reps/RIR — no es una prescripción de carga, es un aviso
+      // de que hoy toca test de salto.
+      if (cmjActiva) {
+        const ejercicioCmj = await resolveEjercicio(ejercicios, { nombre: "CMJ", bloque: "" });
         const saved = await api.save("tareas", {
           id: cmjTareaId || undefined,
           sesion_id: savedSesion.id,
           bloque_sesion: "CMJ",
-          ejercicio_id: cmjEjercicioId,
+          ejercicio_id: ejercicioCmj.id,
           modo: "reps",
           series: "",
           cantidad: "",
@@ -5653,24 +5643,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                   </div>
                 )}
                 {b.id === "cmj" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                      <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
-                        <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
-                      </span>
-                      <span style={{ fontSize: 13, color: cmjActiva ? "#F0F4FF" : "#4A6680" }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
-                    </div>
-                    {cmjActiva && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicio</span>
-                          <span style={{ fontSize: 13, color: cmjEjercicioNombre ? "#F0F4FF" : "#4A6680", fontWeight: cmjEjercicioNombre ? 600 : 400 }}>
-                            {cmjEjercicioNombre || "Sin elegir todavía"}
-                          </span>
-                        </div>
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioCmj} />
-                      </div>
-                    )}
+                  <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
+                    </span>
+                    <span style={{ fontSize: 13, color: cmjActiva ? "#F0F4FF" : "#4A6680" }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
                   </div>
                 )}
                 {b.id === "fuerza" && (
