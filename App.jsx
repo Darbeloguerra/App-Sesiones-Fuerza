@@ -2186,16 +2186,39 @@ function HistorialPorJugador({ players, jugadorInicial }) {
   });
   const fechas = Object.keys(gruposPorFecha).sort().reverse();
 
-  // Para el modo "Progreso por tarea": nombres de tareas con al menos un
-  // registro de carga válido, para poblar el desplegable. Aquí se agrupa
-  // solo por nombre de ejercicio (no por reps/RIR/material exactos como en
-  // el % de arriba) porque el objetivo es ver la tendencia general del
-  // ejercicio a lo largo del tiempo, no comparaciones estrictas sesión a sesión.
-  const nombresTareas = [...new Set(items.filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null).map((it) => it.name))].sort();
-  const tareaActiva = tareaSel || nombresTareas[0] || "";
-  const puntosTarea = tareaActiva
+  // Para el modo "Progreso por tarea": la comparación debe ser entre
+  // registros con EXACTAMENTE las mismas condiciones planificadas ese día
+  // (mismo ejercicio, mismo material, misma lateralidad, mismas reps y
+  // mismo RIR objetivo) — el mismo criterio que ya usa el % de arriba.
+  // Agrupar solo por nombre de ejercicio mezclaba esquemas distintos (ej.
+  // 130kg a RIR2 con 100kg a RIR4) y hacía parecer una caída de rendimiento
+  // que en realidad era un estímulo distinto y más ligero a propósito.
+  const combinacionesPorClave = new Map();
+  items
+    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
+    .forEach((it) => {
+      const equipo = materialEfectivo(it);
+      const clave = claveDisenoTarea(it.name, equipo, it.unilateral, it.reps, it.rir);
+      if (combinacionesPorClave.has(clave)) return;
+      const detalleEquipo = equipo && equipo !== "std" ? ` · ${equipo}` : "";
+      const detalleRir = it.rir !== "" && it.rir != null ? ` · RIR${it.rir}` : "";
+      const detalleLateral = it.unilateral ? " · unilateral" : "";
+      combinacionesPorClave.set(clave, { clave, etiqueta: `${it.name}${detalleEquipo} · ${it.reps} ${it.unidad || "reps"}${detalleRir}${detalleLateral}` });
+    });
+  const combinaciones = [...combinacionesPorClave.values()].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+  const claveActiva = tareaSel || combinaciones[0]?.clave || "";
+  const puntosTarea = claveActiva
     ? items
-        .filter((it) => it.name === tareaActiva && it.done && it.cargaReal !== "" && it.cargaReal != null && (!desde || it.date >= desde) && (!hasta || it.date <= hasta))
+        .filter(
+          (it) =>
+            it.done &&
+            !it.esResistencia &&
+            it.cargaReal !== "" &&
+            it.cargaReal != null &&
+            claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir) === claveActiva &&
+            (!desde || it.date >= desde) &&
+            (!hasta || it.date <= hasta)
+        )
         .sort((a, b) => (a.date < b.date ? -1 : 1))
         .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
     : [];
@@ -2240,16 +2263,16 @@ function HistorialPorJugador({ players, jugadorInicial }) {
       </div>
       {vista === "tarea" && (
         <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
           <select
-            value={tareaActiva}
+            value={claveActiva}
             onChange={(e) => setTareaSel(e.target.value)}
-            style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 240 }}
+            style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 280 }}
           >
-            {nombresTareas.length === 0 && <option value="">Sin tareas con carga registrada</option>}
-            {nombresTareas.map((n) => (
-              <option key={n} value={n}>
-                {n}
+            {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada</option>}
+            {combinaciones.map((c) => (
+              <option key={c.clave} value={c.clave}>
+                {c.etiqueta}
               </option>
             ))}
           </select>
