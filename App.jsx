@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil } from "lucide-react";
+import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search } from "lucide-react";
 
 // ====== Backend remoto (Google Sheets vía Apps Script) ======
 // Lee y escribe directamente sobre las 10 pestañas de la Sheet (ver
@@ -161,6 +161,20 @@ const sharedDataCache = new Map();
 function invalidateEntityCache(entity) {
   for (const k of sharedDataCache.keys()) {
     if (k.startsWith(`list:${entity}:`)) sharedDataCache.delete(k);
+  }
+}
+
+// invalidateEntityCache() solo limpia las listas genéricas (list:entity:...).
+// Las pantallas de "bootstrap" (Programación, pantalla del jugador) usan sus
+// propias claves de caché ("bootstrap:programacion", "bootstrap:<jugadorId>:<fecha>")
+// que NO empiezan por "list:", así que sobrevivían a esa limpieza — por eso
+// una sesión guardada desde el botón directo "Diseñar sesión" del dashboard
+// no aparecía en Programación hasta cerrar y reabrir la app (lo que vacía
+// toda la memoria y fuerza a pedirlo todo de nuevo). Se llama a esto junto a
+// invalidateEntityCache cada vez que se guarda o borra una sesión.
+function invalidateBootstrapCache() {
+  for (const k of sharedDataCache.keys()) {
+    if (k.startsWith("bootstrap:")) sharedDataCache.delete(k);
   }
 }
 
@@ -960,20 +974,27 @@ function usePlayerHistory(playerId) {
   const [tareas, tareasLoaded] = useEntityByIds("tareas", tareaIds);
   const ejercicioIds = tareas.map((t) => t.ejercicio_id);
   const [ejercicios, ejerciciosLoaded] = useEntityByIds("ejercicios", ejercicioIds);
+  // Solo para poder comparar el CMJ de hoy con el de la última vez que hubo
+  // el mismo MD — el resto de tareas no necesita saber de qué sesión vino.
+  const sesionIds = [...new Set(tareas.map((t) => t.sesion_id).filter(Boolean))];
+  const [sesiones, sesionesLoaded] = useEntityByIds("sesiones", sesionIds);
 
-  const loaded = registrosLoaded && tareasLoaded && ejerciciosLoaded;
+  const loaded = registrosLoaded && tareasLoaded && ejerciciosLoaded && sesionesLoaded;
   if (!loaded) return { loaded: false, items: [] };
 
   const tareasById = new Map(tareas.map((t) => [t.id, t]));
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+  const sesionesById = new Map(sesiones.map((s) => [s.id, s]));
 
   const items = registros.map((r) => {
     const t = tareasById.get(r.tarea_id) || {};
     const e = ejerciciosById.get(t.ejercicio_id) || {};
+    const s = sesionesById.get(t.sesion_id) || {};
     return {
       id: r.id,
       date: normalizarFecha(r.fecha),
       sesionId: t.sesion_id || "",
+      md: s.md || "",
       name: e.nombre || "(tarea eliminada)",
       sets: t.series,
       reps: t.cantidad,
@@ -1990,6 +2011,13 @@ function FilaTareaHistorialReal({ tarea: t }) {
               ? ` (${(t.materiales || []).find((m) => EQUIPOS_AMBIGUOS.includes(m))})`
               : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
+            {t.cambioPct != null && (
+              <span style={{ color: t.cambioPct > 0 ? "#22C55E" : t.cambioPct < 0 ? "#F97316" : "#4A6680", fontWeight: 700 }}>
+                {" "}
+                · {t.cambioPct > 0 ? "+" : ""}
+                {t.cambioPct.toFixed(0)}%
+              </span>
+            )}
           </span>
         )}
       </div>
@@ -2045,11 +2073,94 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
   );
 }
 
+// Gráfica simple de progreso de carga en el tiempo para una tarea concreta —
+// SVG a mano, sin librería externa (esta app no tiene ninguna cargada).
+// Cada punto es un registro con carga válida; se traza una línea recta entre
+// ellos en el orden de las fechas.
+function GraficaProgresoCargaReal({ puntos }) {
+  if (puntos.length < 2) {
+    return (
+      <div style={{ color: "#4A6680", fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
+        {puntos.length === 0 ? "Sin registros de carga para esta tarea en este rango." : "Hace falta al menos 2 registros para trazar la evolución."}
+      </div>
+    );
+  }
+  const width = 320;
+  const height = 170;
+  const padX = 34;
+  const padY = 20;
+  const valores = puntos.map((p) => p.valor);
+  const minV = Math.min(...valores);
+  const maxV = Math.max(...valores);
+  const rango = maxV - minV || 1;
+  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const coordX = (i) => padX + i * stepX;
+  const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="#1A3050" strokeWidth={1} />
+        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill="#4A6680">
+          {maxV}
+        </text>
+        <text x={2} y={coordY(minV) + 3} fontSize="9" fill="#4A6680">
+          {minV}
+        </text>
+        <path d={pathD} fill="none" stroke="#F5C518" strokeWidth={2} />
+        {puntos.map((p, i) => (
+          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill="#F5C518" />
+        ))}
+        <text x={padX} y={height - 5} fontSize="9" fill="#4A6680">
+          {fmtDateShort(puntos[0].date)}
+        </text>
+        <text x={width - padX} y={height - 5} fontSize="9" fill="#4A6680" textAnchor="end">
+          {fmtDateShort(puntos[puntos.length - 1].date)}
+        </text>
+      </svg>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+        {[...puntos].reverse().map((p, i) => (
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#8BA4C0", fontFamily: "'IBM Plex Mono', monospace" }}>
+            <span>{fmtDateShort(p.date)}</span>
+            <span style={{ color: "#F0F4FF" }}>
+              {p.valor}kg{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function HistorialPorJugador({ players, jugadorInicial }) {
   const [jugadorSel, setJugadorSel] = useState(jugadorInicial || players[0]?.id || "");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
+  const [vista, setVista] = useState("dia");
+  const [tareaSel, setTareaSel] = useState("");
   const { loaded, items } = usePlayerHistory(jugadorSel || null);
+
+  // % de cambio de carga respecto a la vez anterior que se hizo la MISMA
+  // tarea en las mismas condiciones (mismo ejercicio, mismo equipo, misma
+  // lateralidad, mismas reps y RIR objetivo — igual criterio que la
+  // referencia que ve el jugador al diseñar sesión). Se calcula sobre TODO
+  // el historial, no solo el rango de fechas filtrado, para que el primer
+  // registro visible en un rango corto igualmente pueda compararse con lo
+  // de antes del rango.
+  const cambioPctPorId = {};
+  [...items]
+    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .reduce((ultimoPorClave, it) => {
+      const clave = claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir);
+      const anterior = ultimoPorClave[clave];
+      if (anterior && Number(anterior.cargaReal) > 0) {
+        cambioPctPorId[it.id] = ((Number(it.cargaReal) - Number(anterior.cargaReal)) / Number(anterior.cargaReal)) * 100;
+      }
+      ultimoPorClave[clave] = it;
+      return ultimoPorClave;
+    }, {});
 
   if (!players.length) {
     return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay jugadores en el roster.</div>;
@@ -2066,7 +2177,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
       const f = normalizarFecha(it.date);
       const clave = `${f}::${it.sesionId || ""}`;
       if (!porGrupo[clave]) porGrupo[clave] = { fecha: f, tareas: [] };
-      porGrupo[clave].tareas.push(it);
+      porGrupo[clave].tareas.push(cambioPctPorId[it.id] != null ? { ...it, cambioPct: cambioPctPorId[it.id] } : it);
     });
   const gruposPorFecha = {};
   Object.values(porGrupo).forEach((g) => {
@@ -2074,6 +2185,20 @@ function HistorialPorJugador({ players, jugadorInicial }) {
     gruposPorFecha[g.fecha].push(g);
   });
   const fechas = Object.keys(gruposPorFecha).sort().reverse();
+
+  // Para el modo "Progreso por tarea": nombres de tareas con al menos un
+  // registro de carga válido, para poblar el desplegable. Aquí se agrupa
+  // solo por nombre de ejercicio (no por reps/RIR/material exactos como en
+  // el % de arriba) porque el objetivo es ver la tendencia general del
+  // ejercicio a lo largo del tiempo, no comparaciones estrictas sesión a sesión.
+  const nombresTareas = [...new Set(items.filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null).map((it) => it.name))].sort();
+  const tareaActiva = tareaSel || nombresTareas[0] || "";
+  const puntosTarea = tareaActiva
+    ? items
+        .filter((it) => it.name === tareaActiva && it.done && it.cargaReal !== "" && it.cargaReal != null && (!desde || it.date >= desde) && (!hasta || it.date <= hasta))
+        .sort((a, b) => (a.date < b.date ? -1 : 1))
+        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
+    : [];
 
   return (
     <>
@@ -2091,6 +2216,45 @@ function HistorialPorJugador({ players, jugadorInicial }) {
           ))}
         </select>
       </label>
+      <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+        {[
+          { id: "dia", label: "Por día" },
+          { id: "tarea", label: "Progreso por tarea" },
+        ].map((v) => (
+          <button
+            key={v.id}
+            onClick={() => setVista(v.id)}
+            style={{
+              fontSize: 12.5,
+              padding: "7px 12px",
+              borderRadius: 8,
+              border: `1px solid ${vista === v.id ? "#F5C518" : "#1A3050"}`,
+              background: vista === v.id ? "#F5C51822" : "transparent",
+              color: vista === v.id ? "#F5C518" : "#8BA4C0",
+              cursor: "pointer",
+            }}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      {vista === "tarea" && (
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA</span>
+          <select
+            value={tareaActiva}
+            onChange={(e) => setTareaSel(e.target.value)}
+            style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 240 }}
+          >
+            {nombresTareas.length === 0 && <option value="">Sin tareas con carga registrada</option>}
+            {nombresTareas.map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>DESDE</span>
@@ -2103,6 +2267,8 @@ function HistorialPorJugador({ players, jugadorInicial }) {
       </div>
       {!loaded ? (
         <LoadingBlock />
+      ) : vista === "tarea" ? (
+        <GraficaProgresoCargaReal puntos={puntosTarea} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {fechas.map((f) =>
@@ -2479,8 +2645,15 @@ function TareaVisualReal({ tarea }) {
 function formatearDetalleTareaCoach(t) {
   if (t.bloque_sesion === "Resistencia") return formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data));
   const porTiempo = t.modo === "minutos" || t.modo === "tiempo";
-  const cantidad = porTiempo ? `${t.cantidad} ${UNIDAD_POR_MODO[t.modo] || ""}`.trim() : t.series ? `${t.series} × ${t.cantidad}` : `${t.cantidad}`;
-  const lateralidad = !porTiempo && t.sin_lateralidad !== "si" ? ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}` : "";
+  // Antes, si la tarea era "por tiempo" (isométricos: plancha, puente...),
+  // se descartaba el dato de series aunque estuviera guardado — aquí, igual
+  // que en la pantalla del jugador, las series se muestran siempre que
+  // existan, sea cual sea el modo (reps/tiempo/minutos/metros).
+  const unidad = porTiempo ? ` ${UNIDAD_POR_MODO[t.modo] || ""}`.trimEnd() : "";
+  const cantidad = `${t.series ? `${t.series} × ` : ""}${t.cantidad}${unidad}`;
+  // Igual que en la pantalla del jugador: la lateralidad depende solo de si
+  // el ejercicio la tiene desactivada, no de si la tarea es por tiempo.
+  const lateralidad = t.sin_lateralidad !== "si" ? ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}` : "";
   const rir = t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : "";
   return `${cantidad}${lateralidad}${rir}`;
 }
@@ -2517,6 +2690,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
     <div style={{ background: "#0E1E35", border: `1px solid ${esHoy ? "#F5C51866" : "#1A3050"}`, borderRadius: 12, overflow: "hidden" }}>
       <div onClick={() => setAbierta((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", cursor: "pointer" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
+          {sesion.nombre && <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F5C518", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sesion.nombre}</div>}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {esHoy && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, letterSpacing: "0.05em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 6px" }}>
@@ -2528,11 +2702,14 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                 {fmtDateShort(f)}
               </span>
             ))}
+            {!(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: "#4A6680" }}>Sin fecha todavía</span>}
             {sesion.md && (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#8BA4C0", border: "1px solid #1A3050", borderRadius: 4, padding: "1px 6px" }}>{sesion.md}</span>
             )}
-            {sesion.enviada && (
+            {sesion.enviada ? (
               <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#22C55E", border: "1px solid #22C55E55", borderRadius: 4, padding: "1px 6px" }}>✓ ENVIADA</span>
+            ) : (
+              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F97316", border: "1px solid #F9731655", borderRadius: 4, padding: "1px 6px" }}>BORRADOR</span>
             )}
           </div>
           <div style={{ fontSize: 11.5, color: "#4A6680", marginTop: 3 }}>
@@ -2644,6 +2821,8 @@ function ProgramacionReal({ players, onBack }) {
   const [showEditor, setShowEditor] = useState(false);
   const [verHistorial, setVerHistorial] = useState(false);
   const [historialVisible, setHistorialVisible] = useState(15);
+  const [verBiblioteca, setVerBiblioteca] = useState(false);
+  const [busquedaBiblioteca, setBusquedaBiblioteca] = useState("");
   const [errorBorrado, setErrorBorrado] = useState("");
 
   if (showEditor) {
@@ -2687,8 +2866,11 @@ function ProgramacionReal({ players, onBack }) {
   const conTareas = sesiones.map((s) => ({ ...s, tareas: tareasBySesion.get(s.id) || [] }));
   const hoy = conTareas.filter((s) => (s.fechas || []).includes(today));
   const futuras = conTareas
-    .filter((s) => !(s.fechas || []).includes(today) && (s.fechas || []).some((f) => f > today))
-    .sort((a, b) => ((a.fechas || [])[0] < (b.fechas || [])[0] ? -1 : 1));
+    // Un borrador sin fecha todavía (guardado a medias, para retomar luego)
+    // no encaja en "hoy" ni en "pasadas" — se cuela aquí, en Próximas, que
+    // es donde pediste verlo mezclado con las que sí están listas.
+    .filter((s) => !(s.fechas || []).includes(today) && ((s.fechas || []).some((f) => f > today) || !(s.fechas || []).length))
+    .sort((a, b) => ((a.fechas || [])[0] || "") < ((b.fechas || [])[0] || "") ? -1 : 1);
   // Historial: todas las fechas de la sesión ya pasaron (ni hoy ni futuras).
   // Se ordena de la más reciente a la más antigua, que es como interesa
   // revisarlo — y es también lo que hace más útil "Reutilizar", al tener las
@@ -2700,6 +2882,16 @@ function ProgramacionReal({ players, onBack }) {
       const maxB = (b.fechas || []).reduce((m, f) => (f > m ? f : m), "");
       return maxA < maxB ? 1 : -1;
     });
+
+  // Biblioteca de sesiones: cualquier sesión con nombre puesto por el
+  // entrenador, esté o no ya programada/pasada — es ortogonal al calendario
+  // (igual patrón que TeamBuildr/TrainHeroic: la plantilla vive aparte de
+  // cuándo se usó). Se busca por texto sobre ese nombre, sin distinguir
+  // mayúsculas.
+  const plantillas = conTareas
+    .filter((s) => s.nombre && s.nombre.trim())
+    .filter((s) => !busquedaBiblioteca.trim() || s.nombre.toLowerCase().includes(busquedaBiblioteca.trim().toLowerCase()))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   const editar = (s) => {
     setEditingSesion(s);
@@ -2734,6 +2926,7 @@ function ProgramacionReal({ players, onBack }) {
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
       invalidateEntityCache("circuitos");
+      invalidateBootstrapCache();
       retry();
     } catch (e) {
       setErrorBorrado("No se pudo borrar la sesión. Comprueba tu conexión e inténtalo de nuevo.");
@@ -2773,6 +2966,40 @@ function ProgramacionReal({ players, onBack }) {
         </div>
 
         <div style={{ marginTop: 24 }}>
+          <button
+            onClick={() => setVerBiblioteca((v) => !v)}
+            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "1px solid #F5C51855", borderRadius: 8, padding: "10px 14px", cursor: "pointer", color: "#F0F4FF", fontSize: 13, fontWeight: 600 }}
+          >
+            <BookOpen size={14} color="#F5C518" />
+            Biblioteca de sesiones{plantillas.length || busquedaBiblioteca ? ` (${plantillas.length})` : ""}
+            <span style={{ marginLeft: "auto", color: "#4A6680", fontSize: 12, transform: verBiblioteca ? "rotate(90deg)" : "none" }}>›</span>
+          </button>
+          {verBiblioteca && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ position: "relative", marginBottom: 10 }}>
+                <Search size={14} color="#4A6680" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <input
+                  value={busquedaBiblioteca}
+                  onChange={(e) => setBusquedaBiblioteca(e.target.value)}
+                  placeholder="Buscar por nombre..."
+                  style={{ width: "100%", boxSizing: "border-box", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "9px 10px 9px 32px" }}
+                />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {plantillas.map((s) => (
+                  <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                ))}
+                {plantillas.length === 0 && (
+                  <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+                    {busquedaBiblioteca ? "Ninguna plantilla coincide con esa búsqueda." : 'Todavía no has puesto nombre a ninguna sesión. Ponle uno al diseñarla para que aparezca aquí.'}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ marginTop: 14 }}>
           <button
             onClick={() => setVerHistorial((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "1px solid #1A3050", borderRadius: 8, padding: "10px 14px", cursor: "pointer", color: "#F0F4FF", fontSize: 13, fontWeight: 600 }}
@@ -2842,6 +3069,15 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             <>
               <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
               <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>{tarea.objetivoResistencia}</div>
+            </>
+          ) : tarea.esCmj ? (
+            <>
+              <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+              <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
+                {tarea.referenciaCmj
+                  ? `Último salto registrado ${tarea.referenciaCmj.altura} cm${tarea.referenciaCmj.md ? ` (${tarea.referenciaCmj.md})` : ""}`
+                  : "Sin registro previo"}
+              </div>
             </>
           ) : (
             <>
@@ -2959,7 +3195,19 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           )}
         </div>
       )}
-      {mostrarRegistro && !tarea.esResistencia && (
+      {mostrarRegistro && tarea.esCmj && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 56 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>ALTURA DEL SALTO (CM)</span>
+          <input
+            value={registro.carga}
+            onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
+            placeholder="—"
+            inputMode="decimal"
+            style={{ width: 90, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 9px", textAlign: "center" }}
+          />
+        </div>
+      )}
+      {mostrarRegistro && !tarea.esResistencia && !tarea.esCmj && (
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
           {tarea.eligeEquipo && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -3262,6 +3510,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // jugador marcó (subtipo_corporal, reaprovechado aquí igual que para
   // asistencia/lastre) — no basta con mirar el material de la tarea, porque
   // ese campo dice qué estaba disponible, no cuál se usó.
+  // Último salto de CMJ registrado, sea cual sea el MD de hoy — no se
+  // compara MD con MD, solo se recuerda el dato más reciente y de qué MD
+  // venía (si aquella sesión tenía uno puesto).
+  const ultimoCmj = [...historyItems]
+    .filter((it) => it.bloque === "CMJ" && it.date < date && it.cargaReal !== "")
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+
   const lastValueByName = {};
   [...historyItems]
     .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== "" || it.repsReal !== ""))
@@ -3330,6 +3585,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       esResistencia,
       objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
       unilateral: t.lateralidad === "unilateral",
+      esCmj: t.bloque_sesion === "CMJ",
+      // El MD de la sesión de hoy no importa aquí — se recuerda el último
+      // salto registrado, sea de cuando sea, con su propio MD entre
+      // paréntesis si aquella sesión tenía uno (si no, sin paréntesis).
+      referenciaCmj: t.bloque_sesion === "CMJ" && ultimoCmj ? { md: ultimoCmj.md || "", altura: ultimoCmj.cargaReal } : null,
       // Ahora que Activación admite cualquier ejercicio de la biblioteca (no
       // solo la bici estática), ya no se asume automáticamente por bloque —
       // depende solo de si el propio ejercicio se marcó como "sin lateralidad".
@@ -3533,7 +3793,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                             const v = videoEfectivoTarea(item.tarea, getRegistro(item.tarea.id));
                             if (v) setGifAmpliado(v);
                           }}
-                          mostrarRegistro={nombreBloque === "Fuerza"}
+                          mostrarRegistro={nombreBloque === "Fuerza" || nombreBloque === "CMJ"}
                         />
                       )
                     )}
@@ -4830,6 +5090,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
+  // Nombre de plantilla, opcional — es lo que permite luego encontrarla en
+  // la Biblioteca de sesiones y reutilizarla sin tener que reconocerla por
+  // la fecha en la que se programó. Se hereda tanto al editar como al
+  // reutilizar (con "Reutilizar como nueva" seguramente quieras el mismo
+  // nombre — puedes cambiarlo aquí mismo si no).
+  const [nombre, setNombre] = useState(base?.nombre || "");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
@@ -5095,10 +5361,13 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     setActivacionEjercicioNombre(nombre);
   };
 
-  const guardar = async () => {
+  const guardar = async (comoBorrador = false) => {
     setError("");
     setOk(false);
-    if (!fechas.length) {
+    // Un borrador puede guardarse a medias (sin fecha todavía) para
+    // retomarlo luego — la fecha solo es obligatoria al publicar de verdad,
+    // porque ahí sí determina cuándo lo verá el jugador.
+    if (!comoBorrador && !fechas.length) {
       setError("Añade al menos una fecha.");
       return;
     }
@@ -5109,12 +5378,18 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         fechas,
         md,
         objetivo,
+        nombre: nombre.trim(),
         jugadores_destino: targetPlayerIds,
         preventivo_activo: preventivoCantidad,
         activacion_activa: activacionActiva,
         cmj_activo: cmjActiva,
         lote_origen_id: "",
-        enviada: true,
+        // "enviada" aquí significa "publicada, visible para el jugador" —
+        // no que el jugador ya haya mandado datos. Un borrador se guarda con
+        // esto en false, así que bootstrapJugador_ (que filtra por
+        // s.enviada) sigue sin mostrárselo, y en Programación se distingue
+        // con la etiqueta "BORRADOR" mezclada entre las próximas.
+        enviada: !comoBorrador,
       };
       const savedSesion = await api.save("sesiones", sesionRecord);
 
@@ -5152,7 +5427,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           rir: esResistencia ? "" : t.rir,
           resistencia_data: esResistencia ? serializarResistencia(t) : "",
           tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
-          material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
+          material: JSON.stringify(t.materiales || []), // el material se guarda siempre, aunque el bloque no muestre carga (antes se perdía en Core)
           lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           circuito_id: "",
@@ -5178,7 +5453,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
               rir: esResistencia ? "" : t.rir,
               resistencia_data: esResistencia ? serializarResistencia(t) : "",
               tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
-              material: mostrarCarga ? JSON.stringify(t.materiales || []) : "",
+              material: JSON.stringify(t.materiales || []), // idem: antes se perdía en Core al ir dentro de un circuito
               lateralidad: t.lateralidad || "bilateral",
               nota: t.nota || "",
               circuito_id: savedCircuito.id,
@@ -5216,7 +5491,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       // Sin series/reps/RIR — no es una prescripción de carga, es un aviso
       // de que hoy toca test de salto.
       if (cmjActiva) {
-        const ejercicioCmj = await resolveEjercicio(ejercicios, { nombre: "CMJ", bloque: "" });
+        const ejercicioCmj = await resolveEjercicio(ejercicios, { nombre: "CMJ", bloque: "", sin_lateralidad: "si" });
         const saved = await api.save("tareas", {
           id: cmjTareaId || undefined,
           sesion_id: savedSesion.id,
@@ -5327,8 +5602,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
       invalidateEntityCache("circuitos");
+      invalidateBootstrapCache();
 
-      setOk(true);
+      setOk(comoBorrador ? "borrador" : true);
       onGuardado?.();
     } catch (e) {
       setError("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
@@ -5355,6 +5631,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder='Ej. "Fuerza tren inferior — pretemporada"'
+              style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
+            />
+          </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>OBJETIVO (OPCIONAL)</span>
             <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }} />
@@ -5717,19 +6002,29 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         </div>
 
         {!readOnly && error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
+        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? "Guardado como borrador." : "Guardado y enviado."}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
           <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
           </button>
           {!readOnly && (
-            <button
-              onClick={guardar}
-              disabled={guardando}
-              style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
-            >
-              {guardando ? "Guardando..." : "Guardar y enviar"}
-            </button>
+            <>
+              <button
+                onClick={() => guardar(true)}
+                disabled={guardando}
+                title="Se guarda tal cual está, sin fecha obligatoria, y no se envía al jugador hasta que la publiques"
+                style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+              >
+                {guardando ? "Guardando..." : "Guardar borrador"}
+              </button>
+              <button
+                onClick={() => guardar(false)}
+                disabled={guardando}
+                style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+              >
+                {guardando ? "Guardando..." : "Guardar y enviar"}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -5968,6 +6263,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
       invalidateEntityCache("circuitos");
+      invalidateBootstrapCache();
 
       setOk(true);
       onGuardado?.();
