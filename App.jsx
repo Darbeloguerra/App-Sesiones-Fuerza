@@ -62,6 +62,16 @@ function transformToDb(entity, record) {
     }
     if (out.resistencia_data === "") out.resistencia_data = null;
   }
+  if (entity === "ejercicios") {
+    // Con Sheets, "" y "sin valor" eran lo mismo en estas dos columnas.
+    // En Postgres no: categoria_preventiva_id es una referencia a otra
+    // tabla y orden_rotacion es un número, y ninguna de las dos admite un
+    // texto vacío — solo NULL. Sin esto, crear un ejercicio nuevo al vuelo
+    // (p.ej. al escribir un nombre que no existe en la biblioteca) fallaba
+    // siempre, porque resolveEjercicio() manda "" cuando no hay valor.
+    if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
+    if (out.orden_rotacion === "") out.orden_rotacion = null;
+  }
   return out;
 }
 
