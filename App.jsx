@@ -1,88 +1,252 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { createClient } from "@supabase/supabase-js";
 import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search } from "lucide-react";
 
-// ====== Backend remoto (Google Sheets vía Apps Script) ======
-// VUELTO ATRÁS TEMPORALMENTE a Apps Script el 14/09, mientras se termina de
-// depurar la capa de Supabase — ver conversación del día para el motivo.
-// Lee y escribe directamente sobre las 10 pestañas de la Sheet (ver
-// backend/Code.gs y backend/README.md). Nada de almacén clave-valor genérico:
-// cada llamada opera sobre una entidad concreta (jugadores, ejercicios, ...).
-// 1) Pega aquí la URL que te da Apps Script al desplegar (termina en /exec).
-// 2) Pon el mismo token que hayas puesto en el Code.gs (Script Properties → TOKEN).
-const APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxOacDckJsPpSkd2A0i8hRoHgP2xUh0BmqUUyr3uTZUqzg7YJM_cCcboDQJ9rosuBt6NA/exec";
-const SHARED_TOKEN = "7f3a9c2e5b8d1f4a6c0e2b9d7a5f3c1e";
+// ====== Backend remoto (Supabase) ======
+// Sustituye a Google Sheets/Apps Script. Las tablas viven ahora en Postgres
+// (ver schema_supabase.sql + fix_columnas_faltantes.sql + fix_ejercicios.sql,
+// que añaden columnas que faltaban del esquema original: sesiones.objetivo,
+// sesiones.tipo, sesiones.nombre, tareas.fecha, ejercicios.sin_lateralidad).
+// La clave "publishable" es pública a propósito — va dentro del código de la
+// app, igual que antes el token compartido de Apps Script — el candado real
+// de acceso son las políticas RLS creadas en Supabase (politicas_acceso.sql).
+const SUPABASE_URL = "https://ozarscohvitkopamnbtt.supabase.co";
+const SUPABASE_KEY = "sb_publishable_iUxpTZzSNfACaGacbUawFA_uZi3qpN-";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
-const API_GET_ACTIONS = new Set(["list", "get", "materiales", "categoriasPreventivas", "config", "rotacion", "bootstrapJugador", "bootstrapProgramacion"]);
+const ENTITY_TABLE = {
+  jugadores: "jugadores",
+  ejercicios: "ejercicios",
+  categoriasPreventivas: "categorias_preventivas",
+  sesiones: "sesiones",
+  tareas: "tareas",
+  circuitos: "circuitos",
+  registros: "registros",
+};
 
-// Sin esto, un fetch que Apps Script deja colgado (cuota agotada, un bloqueo
-// interno atascado, lo que sea) se queda esperando para siempre — y como
-// TODOS los hooks de datos hacen `loading` hasta que el fetch resuelve
-// (éxito o error), la app entera se queda en "cargando" sin fin y sin forma
-// de recuperarse salvo cerrar y reabrir. Con el timeout, pasado este tiempo
-// se da por fallida la petición y cada hook cae en su rama de error normal
-// (loaded=true, items vacíos) en vez de colgarse.
-const API_TIMEOUT_MS = 20000;
+const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg" };
+function genId(prefix) {
+  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
 
-async function fetchConTimeout(url, options) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...options, signal: controller.signal });
-  } catch (e) {
-    if (e.name === "AbortError") {
-      throw new Error("El servidor no respondió a tiempo. Comprueba tu conexión e inténtalo de nuevo.");
+// Con Google Sheets, la columna "material" y "resistencia_data" de Tareas
+// NUNCA se interpretaban en el propio backend — el resto de la app las
+// trata como texto y las interpreta ella misma (parseMateriales /
+// parseResistenciaData). En Postgres esos dos campos son un array/jsonb de
+// verdad, así que aquí se hace la conversión de ida y vuelta.
+function transformFromDb(entity, row) {
+  if (!row || entity !== "tareas") return row;
+  return {
+    ...row,
+    material: JSON.stringify(row.material || []),
+    resistencia_data: row.resistencia_data ? JSON.stringify(row.resistencia_data) : "",
+  };
+}
+
+// Con Sheets, un número o una referencia "vacíos" y "sin escribir" eran la
+// misma cosa: una celda en blanco. En Postgres, una columna numérica o una
+// referencia a otra tabla exigen un valor real o NULL — un texto vacío ""
+// las rompe. Esto lo traduce automáticamente para cada columna así de cada
+// tabla, en vez de tener que acordarse de arreglarlo cada vez que aparece
+// una nueva (fue precisamente lo que falló varias veces seguidas).
+const NUMERIC_DEFAULTS = {
+  ejercicios: { orden_rotacion: null },
+  sesiones: { preventivo_activo: 0 },
+  circuitos: { rondas: null },
+  tareas: { series: null, cantidad: null, rir: null, orden_en_circuito: null },
+  registros: { reps_hechas: null, carga_kg: null, rir: null },
+};
+function sanitizeNumericos(entity, out) {
+  const cols = NUMERIC_DEFAULTS[entity];
+  if (!cols) return;
+  Object.keys(cols).forEach((col) => {
+    if (!(col in out)) return;
+    const val = out[col];
+    if (val === "" || val === undefined || val === null) {
+      out[col] = cols[col];
+    } else if (typeof val !== "number") {
+      const n = Number(val);
+      out[col] = Number.isFinite(n) ? n : cols[col];
     }
-    throw e;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
-
-async function apiCall(action, params = {}) {
-  if (API_GET_ACTIONS.has(action)) {
-    const cleanParams = {};
-    Object.keys(params).forEach((k) => {
-      if (params[k] !== undefined && params[k] !== null) cleanParams[k] = params[k];
-    });
-    const qs = new URLSearchParams({ action, token: SHARED_TOKEN, ...cleanParams }).toString();
-    const res = await fetchConTimeout(`${APPS_SCRIPT_URL}?${qs}`);
-    return res.json();
-  }
-  const res = await fetchConTimeout(APPS_SCRIPT_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // evita preflight CORS en Apps Script
-    body: JSON.stringify({ action, token: SHARED_TOKEN, ...params }),
   });
-  return res.json();
 }
 
-function unwrapApi(data) {
-  if (data && data.error) throw new Error(data.error);
-  return data;
+function transformToDb(entity, record) {
+  const out = { ...record };
+  if (entity === "tareas") {
+    if (typeof out.material === "string") {
+      try {
+        out.material = JSON.parse(out.material || "[]");
+      } catch {
+        out.material = [];
+      }
+    }
+    if (!out.material) out.material = [];
+    if (typeof out.resistencia_data === "string") {
+      out.resistencia_data = out.resistencia_data ? JSON.parse(out.resistencia_data) : null;
+    }
+    if (out.resistencia_data === "") out.resistencia_data = null;
+    // "modo" tiene una lista cerrada de valores válidos en la base de datos
+    // (reps/tiempo/metros/minutos) — a diferencia de "bloque" en ejercicios,
+    // aquí "" NO está en la lista permitida. Las tareas de Movilidad y
+    // Preventivo (todavía sin usar) mandan "" para "no aplica"; en NULL sí
+    // es válido, así que se traduce aquí.
+    if (out.modo === "") out.modo = null;
+  }
+  if (entity === "ejercicios") {
+    // categoria_preventiva_id es una referencia a otra tabla: no admite
+    // texto vacío, solo NULL.
+    if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
+  }
+  sanitizeNumericos(entity, out);
+  return out;
 }
 
-// Entidades con CRUD genérico: jugadores, ejercicios, categoriasPreventivas,
-// sesiones, tareas, circuitos, registros (ver backend/Code.gs).
+function throwIfError(error) {
+  if (error) throw new Error(error.message);
+}
+
+function applyFilters(query, filters) {
+  Object.keys(filters || {}).forEach((key) => {
+    const value = filters[key];
+    if (value === undefined || value === null || value === "") return;
+    const values = String(value).split(",").map((s) => s.trim()).filter(Boolean);
+    query = values.length > 1 ? query.in(key, values) : query.eq(key, values[0]);
+  });
+  return query;
+}
+
 const api = {
-  list: (entity, filters) => apiCall("list", { entity, ...(filters || {}) }).then(unwrapApi),
-  get: (entity, id) => apiCall("get", { entity, id }).then(unwrapApi),
-  save: (entity, record) => apiCall("save", { entity, record }).then(unwrapApi),
-  delete: (entity, id) => apiCall("delete", { entity, id }).then(unwrapApi),
-  materiales: () => apiCall("materiales").then(unwrapApi),
-  guardarMaterial: (nombre) => apiCall("guardarMaterial", { nombre }).then(unwrapApi),
-  eliminarMaterial: (nombre) => apiCall("eliminarMaterial", { nombre }).then(unwrapApi),
-  categoriasPreventivas: () => apiCall("categoriasPreventivas").then(unwrapApi),
-  config: (clave) => apiCall("config", { clave }).then(unwrapApi),
-  setConfig: (clave, valor) => apiCall("setConfig", { clave, valor }).then(unwrapApi),
-  rotacion: (categoriaId) => apiCall("rotacion", categoriaId ? { categoria_id: categoriaId } : {}).then(unwrapApi),
-  setRotacion: (categoriaId, punteroActual) =>
-    apiCall("setRotacion", { categoria_id: categoriaId, puntero_actual: punteroActual }).then(unwrapApi),
-  uploadGif: (dataUri) => apiCall("uploadGif", { dataUri }).then(unwrapApi),
-  // Junta en una sola petición lo que antes eran 3 peticiones en cadena
-  // (sesiones -> tareas -> ejercicios/circuitos) para la pantalla del
-  // jugador — ver bootstrapJugador_ en Code.gs.
-  bootstrapJugador: (jugadorId, fecha) => apiCall("bootstrapJugador", { jugador_id: jugadorId, fecha }).then(unwrapApi),
-  bootstrapProgramacion: () => apiCall("bootstrapProgramacion", {}).then(unwrapApi),
+  list: async (entity, filters) => {
+    let query = supabase.from(ENTITY_TABLE[entity]).select("*");
+    query = applyFilters(query, filters);
+    const { data, error } = await query;
+    throwIfError(error);
+    return (data || []).map((row) => transformFromDb(entity, row));
+  },
+  get: async (entity, id) => {
+    const { data, error } = await supabase.from(ENTITY_TABLE[entity]).select("*").eq("id", id).maybeSingle();
+    throwIfError(error);
+    return transformFromDb(entity, data);
+  },
+  save: async (entity, record) => {
+    const toSave = transformToDb(entity, record);
+    if (!toSave.id) toSave.id = genId(ID_PREFIX[entity] || "id");
+    const { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle();
+    throwIfError(error);
+    return transformFromDb(entity, data);
+  },
+  delete: async (entity, id) => {
+    const { error } = await supabase.from(ENTITY_TABLE[entity]).delete().eq("id", id);
+    throwIfError(error);
+    return { deleted: true };
+  },
+  materiales: async () => {
+    const { data, error } = await supabase.from("materiales").select("nombre").order("nombre");
+    throwIfError(error);
+    return (data || []).map((r) => r.nombre);
+  },
+  guardarMaterial: async (nombre) => {
+    const { error } = await supabase.from("materiales").upsert({ nombre }, { onConflict: "nombre" });
+    throwIfError(error);
+    return api.materiales();
+  },
+  eliminarMaterial: async (nombre) => {
+    const { error } = await supabase.from("materiales").delete().eq("nombre", nombre);
+    throwIfError(error);
+    return api.materiales();
+  },
+  categoriasPreventivas: async () => {
+    const { data, error } = await supabase.from("categorias_preventivas").select("*");
+    throwIfError(error);
+    return data || [];
+  },
+  config: async (clave) => {
+    const { data, error } = await supabase.from("config").select("valor").eq("clave", clave).maybeSingle();
+    throwIfError(error);
+    return data ? data.valor : null;
+  },
+  setConfig: async (clave, valor) => {
+    const { error } = await supabase.from("config").upsert({ clave, valor }, { onConflict: "clave" });
+    throwIfError(error);
+    return { clave, valor };
+  },
+  rotacion: async (categoriaId) => {
+    if (categoriaId) {
+      const { data, error } = await supabase.from("rotacion").select("*").eq("categoria_id", categoriaId).maybeSingle();
+      throwIfError(error);
+      return data || null;
+    }
+    const { data, error } = await supabase.from("rotacion").select("*");
+    throwIfError(error);
+    return data || [];
+  },
+  setRotacion: async (categoriaId, punteroActual) => {
+    const { error } = await supabase.from("rotacion").upsert({ categoria_id: categoriaId, puntero_actual: punteroActual }, { onConflict: "categoria_id" });
+    throwIfError(error);
+    return { categoria_id: categoriaId, puntero_actual: punteroActual };
+  },
+  // OJO: hace falta un bucket de Storage llamado "gifs" (público) en
+  // Supabase para que esto funcione — no está creado todavía. Ningún botón
+  // de la app llama a esto hoy, así que no bloquea nada.
+  uploadGif: async (dataUri) => {
+    const match = /^data:(.+?);base64,(.+)$/.exec(dataUri || "");
+    if (!match) throw new Error("dataUri inválida");
+    const [, mimeType, base64] = match;
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    const fileName = `ejercicio_${Date.now()}.gif`;
+    const { error } = await supabase.storage.from("gifs").upload(fileName, new Blob([bytes], { type: mimeType }), { contentType: mimeType, upsert: true });
+    throwIfError(error);
+    const { data } = supabase.storage.from("gifs").getPublicUrl(fileName);
+    return { fileId: fileName, url: data.publicUrl };
+  },
+  bootstrapJugador: async (jugadorId, fecha) => {
+    const { data: todasSesiones, error: e1 } = await supabase.from("sesiones").select("*").eq("enviada", true);
+    throwIfError(e1);
+    const sesionesHoy = (todasSesiones || []).filter((s) => {
+      const fechas = s.fechas || [];
+      const destino = s.jugadores_destino || [];
+      return fechas.includes(fecha) && (!destino.length || destino.includes(jugadorId));
+    });
+    const sesionIds = sesionesHoy.map((s) => s.id);
+    let tareas = [];
+    if (sesionIds.length) {
+      const { data, error } = await supabase.from("tareas").select("*").in("sesion_id", sesionIds);
+      throwIfError(error);
+      tareas = (data || []).map((row) => transformFromDb("tareas", row));
+    }
+    const ejercicioIds = [...new Set(tareas.map((t) => t.ejercicio_id).filter(Boolean))];
+    const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
+    let ejercicios = [];
+    if (ejercicioIds.length) {
+      const { data, error } = await supabase.from("ejercicios").select("*").in("id", ejercicioIds);
+      throwIfError(error);
+      ejercicios = data || [];
+    }
+    let circuitos = [];
+    if (circuitoIds.length) {
+      const { data, error } = await supabase.from("circuitos").select("*").in("id", circuitoIds);
+      throwIfError(error);
+      circuitos = data || [];
+    }
+    return { sesiones: sesionesHoy, tareas, ejercicios, circuitos };
+  },
+  bootstrapProgramacion: async () => {
+    const { data: sesiones, error: e1 } = await supabase.from("sesiones").select("*");
+    throwIfError(e1);
+    const sesionIds = (sesiones || []).map((s) => s.id);
+    let tareas = [];
+    if (sesionIds.length) {
+      const { data, error } = await supabase.from("tareas").select("*").in("sesion_id", sesionIds);
+      throwIfError(error);
+      tareas = (data || []).map((row) => transformFromDb("tareas", row));
+    }
+    const { data: ejercicios, error: e3 } = await supabase.from("ejercicios").select("*");
+    throwIfError(e3);
+    return { sesiones: sesiones || [], tareas, ejercicios: ejercicios || [] };
+  },
 };
 // ====== Fin backend remoto ======
 
