@@ -71,6 +71,28 @@ function sanitizeNumericos(entity, out) {
   });
 }
 
+// Cuando eliges "Todo el equipo" al diseñar una sesión, la app guarda
+// internamente `null` como forma de decir "sin restricción" (en vez de una
+// lista vacía). Con Google Sheets esto nunca daba problema porque Code.gs
+// convertía automáticamente CUALQUIER campo de lista que llegara como
+// null/vacío en una lista vacía real antes de escribirlo (`value || []`,
+// igual para fechas, categorías, destinatarios...). Aquí se hace lo mismo,
+// en genérico, para no tener que acordarse columna por columna.
+const ARRAY_COLUMNS = {
+  jugadores: ["categorias_preventivas"],
+  ejercicios: ["tags_descriptivos"],
+  sesiones: ["fechas", "jugadores_destino"],
+  tareas: ["material"],
+};
+function sanitizeArrays(entity, out) {
+  const cols = ARRAY_COLUMNS[entity];
+  if (!cols) return;
+  cols.forEach((col) => {
+    if (!(col in out)) return;
+    if (out[col] === null || out[col] === undefined) out[col] = [];
+  });
+}
+
 function transformToDb(entity, record) {
   const out = { ...record };
   if (entity === "tareas") {
@@ -99,6 +121,7 @@ function transformToDb(entity, record) {
     if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
   }
   sanitizeNumericos(entity, out);
+  sanitizeArrays(entity, out);
   return out;
 }
 
