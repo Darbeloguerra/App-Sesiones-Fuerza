@@ -120,6 +120,12 @@ function transformToDb(entity, record) {
     // texto vacío, solo NULL.
     if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
   }
+  if (entity === "sesiones") {
+    // lote_origen_id es una referencia a otra sesión (para cuando una
+    // sesión viene de duplicar un lote) — mismo caso que categoria_
+    // preventiva_id: "" no es una fila válida, solo NULL lo es.
+    if (out.lote_origen_id === "") out.lote_origen_id = null;
+  }
   sanitizeNumericos(entity, out);
   sanitizeArrays(entity, out);
   return out;
