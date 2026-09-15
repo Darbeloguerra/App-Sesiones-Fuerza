@@ -117,8 +117,9 @@ function transformToDb(entity, record) {
   }
   if (entity === "ejercicios") {
     // categoria_preventiva_id es una referencia a otra tabla: no admite
-    // texto vacío, solo NULL.
+    // texto vacío, solo NULL. ejercicio_base_id (variante de) es lo mismo.
     if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
+    if (out.ejercicio_base_id === "") out.ejercicio_base_id = null;
   }
   if (entity === "sesiones") {
     // lote_origen_id es una referencia a otra sesión (para cuando una
@@ -2328,6 +2329,73 @@ function GraficaProgresoCargaReal({ puntos }) {
   );
 }
 
+// "Mi progreso" — versión ligera de la pestaña "Progreso por tarea" de
+// HistorialPorJugador, para la propia vista del jugador: sin selector de
+// jugador (siempre es el suyo), sin filtro de fechas, sin herramientas de
+// entrenador. Deliberadamente sencilla — solo lo que pidió: información de
+// interés a partir de datos que ya se registran, sin profundizar más.
+function MiProgresoJugadorReal({ items, loaded }) {
+  const [tareaSel, setTareaSel] = useState("");
+
+  if (!loaded) return <LoadingBlock />;
+
+  // Resumen de cumplimiento: sesiones distintas (fecha) con al menos una
+  // tarea completada, en los últimos 30 días — un número de un vistazo,
+  // no un informe.
+  const hace30dias = new Date();
+  hace30dias.setDate(hace30dias.getDate() - 30);
+  const hace30str = hace30dias.toISOString().slice(0, 10);
+  const fechasCompletadas = new Set(items.filter((it) => it.done && it.date >= hace30str).map((it) => it.date));
+
+  const combinacionesPorClave = new Map();
+  items
+    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
+    .forEach((it) => {
+      const equipo = materialEfectivo(it);
+      const clave = claveDisenoTarea(it.name, equipo, it.unilateral, it.reps, it.rir);
+      if (combinacionesPorClave.has(clave)) return;
+      const detalleEquipo = equipo && equipo !== "std" ? ` · ${equipo}` : "";
+      const detalleRir = it.rir !== "" && it.rir != null ? ` · RIR${it.rir}` : "";
+      const detalleLateral = it.unilateral ? " · unilateral" : "";
+      combinacionesPorClave.set(clave, { clave, etiqueta: `${it.name}${detalleEquipo} · ${it.reps} ${it.unidad || "reps"}${detalleRir}${detalleLateral}` });
+    });
+  const combinaciones = [...combinacionesPorClave.values()].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
+  const claveActiva = tareaSel || combinaciones[0]?.clave || "";
+  const puntos = claveActiva
+    ? items
+        .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null && claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir) === claveActiva)
+        .sort((a, b) => (a.date < b.date ? -1 : 1))
+        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
+    : [];
+
+  return (
+    <div>
+      <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 4 }}>ÚLTIMOS 30 DÍAS</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: "#F0F4FF" }}>
+          {fechasCompletadas.size} {fechasCompletadas.size === 1 ? "sesión completada" : "sesiones completadas"}
+        </div>
+      </div>
+      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
+        <select
+          value={claveActiva}
+          onChange={(e) => setTareaSel(e.target.value)}
+          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
+        >
+          {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
+          {combinaciones.map((c) => (
+            <option key={c.clave} value={c.clave}>
+              {c.etiqueta}
+            </option>
+          ))}
+        </select>
+      </label>
+      <GraficaProgresoCargaReal puntos={puntos} />
+    </div>
+  );
+}
+
 function HistorialPorJugador({ players, jugadorInicial }) {
   const [jugadorSel, setJugadorSel] = useState(jugadorInicial || players[0]?.id || "");
   const [desde, setDesde] = useState("");
@@ -3627,6 +3695,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // su propio envío — en vez de mezclar sus tareas en una sola lista donde
   // enviar una bloqueaba también la otra sin haberse tocado.
   const [sesionSeleccionadaId, setSesionSeleccionadaId] = useState(null);
+  // Pestaña "Mi progreso" — puramente aditiva, no toca nada del flujo de
+  // sesión/envío. El jugador puede consultarla incluso en un día sin sesión.
+  const [vistaJugador, setVistaJugador] = useState("hoy");
   const sesionActual = todaySesiones.length === 1 ? todaySesiones[0] : todaySesiones.find((s) => s.id === sesionSeleccionadaId) || null;
   const necesitaElegirSesion = todaySesiones.length > 1 && !sesionActual;
   const estadoPorSesion = todaySesiones.map((s) => {
@@ -3959,7 +4030,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>SESIÓN DE HOY</div>
           <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
           <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{fmtDateLabel(date)}</div>
-          {totalTareas > 0 && (
+          {totalTareas > 0 && vistaJugador === "hoy" && (
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ flex: 1, height: 4, background: "#1A3050", borderRadius: 3, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${(totalHechas / totalTareas) * 100}%`, background: "#F5C518", transition: "width 0.25s ease" }} />
@@ -3971,7 +4042,32 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           )}
         </div>
 
-        {!loaded ? (
+        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
+          {[
+            { id: "hoy", label: "Sesión de hoy" },
+            { id: "progreso", label: "Mi progreso" },
+          ].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setVistaJugador(v.id)}
+              style={{
+                fontSize: 12.5,
+                padding: "7px 12px",
+                borderRadius: 8,
+                border: `1px solid ${vistaJugador === v.id ? "#F5C518" : "#1A3050"}`,
+                background: vistaJugador === v.id ? "#F5C51822" : "transparent",
+                color: vistaJugador === v.id ? "#F5C518" : "#8BA4C0",
+                cursor: "pointer",
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+
+        {vistaJugador === "progreso" ? (
+          <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
+        ) : !loaded ? (
           <LoadingBlock />
         ) : totalTareas === 0 ? (
           <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center", color: "#8BA4C0" }}>
@@ -4165,10 +4261,10 @@ function campoSelectReal(extra = {}) {
 
 const btnIconoReal = { background: "transparent", border: "1px solid #1A3050", borderRadius: 6, color: "#4A6680", width: 26, height: 26, cursor: "pointer", fontSize: 12.5 };
 
-function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
+function TarjetaEjercicioReal({ ejercicio, categorias, esVariante, onEditar, onEliminar, onCrearVariante }) {
   const nombreCategoria = categorias.find((c) => c.id === ejercicio.categoria_preventiva_id)?.nombre;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginLeft: esVariante ? 20 : 0, background: esVariante ? "#0B1A2E" : "#0E1E35", border: `1px solid ${esVariante ? "#1A305088" : "#1A3050"}`, borderRadius: 10 }}>
       {ejercicio.gif_url ? (
         <div style={{ position: "relative", width: 40, height: 40, borderRadius: 7, flexShrink: 0, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
           {miniaturaTarea(ejercicio.gif_url) && (
@@ -4186,8 +4282,14 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF" }}>{ejercicio.nombre}</div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          {esVariante && <span style={{ color: "#4A6680", fontSize: 12 }}>↳</span>}
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF" }}>{ejercicio.nombre}</div>
+        </div>
         <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
+          {esVariante && (
+            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#8BA4C0", border: "1px solid #1A3050", borderRadius: 4, padding: "1px 5px" }}>VARIANTE</span>
+          )}
           {nombreCategoria && (
             <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 5px" }}>{nombreCategoria}</span>
           )}
@@ -4198,6 +4300,11 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
           ))}
         </div>
       </div>
+      {!esVariante && onCrearVariante && (
+        <button onClick={onCrearVariante} style={btnIconoReal} title="Crear variante de este ejercicio">
+          +V
+        </button>
+      )}
       <button onClick={onEditar} style={btnIconoReal} title="Editar ejercicio">
         ✎
       </button>
@@ -4208,11 +4315,16 @@ function TarjetaEjercicioReal({ ejercicio, categorias, onEditar, onEliminar }) {
   );
 }
 
-function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEditar, error }) {
+function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, ejercicioEditar, matrizPreset, error }) {
+  // matrizPreset: cuando se abre desde el botón "+V" de un ejercicio ya
+  // existente, trae el bloque/categoría/etiquetas de partida ya rellenos —
+  // el nombre y el vídeo siguen siendo del todo propios de la variante.
+  const base = ejercicioEditar || matrizPreset;
   const [nombre, setNombre] = useState(ejercicioEditar?.nombre || "");
-  const [bloque, setBloque] = useState(ejercicioEditar?.bloque || "Fuerza");
-  const [categoriaId, setCategoriaId] = useState(ejercicioEditar?.categoria_preventiva_id || categorias[0]?.id || "");
-  const [tagsSel, setTagsSel] = useState(ejercicioEditar?.tags_descriptivos || []);
+  const [ejercicioBaseId, setEjercicioBaseId] = useState(ejercicioEditar?.ejercicio_base_id || matrizPreset?.id || "");
+  const [bloque, setBloque] = useState(base?.bloque || "Fuerza");
+  const [categoriaId, setCategoriaId] = useState(base?.categoria_preventiva_id || categorias[0]?.id || "");
+  const [tagsSel, setTagsSel] = useState(base?.tags_descriptivos || []);
   const [videoUrl, setVideoUrl] = useState(ejercicioEditar?.gif_url || "");
   const [sinLateralidad, setSinLateralidad] = useState(ejercicioEditar?.sin_lateralidad === "si");
   const [materialesDisponibles] = useMaterialesDisponibles();
@@ -4242,6 +4354,20 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE</span>
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Sentadilla frontal" style={campoSelectReal()} />
+        </label>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>VARIANTE DE (OPCIONAL — SOLO PARA AGRUPARLO EN LA BIBLIOTECA)</span>
+          <select value={ejercicioBaseId} onChange={(e) => setEjercicioBaseId(e.target.value)} style={campoSelectReal()}>
+            <option value="">Ninguno — es un ejercicio matriz</option>
+            {(ejercicios || [])
+              .filter((e) => !e.ejercicio_base_id && e.id !== ejercicioEditar?.id)
+              .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
+              .map((e) => (
+                <option key={e.id} value={e.id}>
+                  {e.nombre}
+                </option>
+              ))}
+          </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>BLOQUE (único, obligatorio)</span>
@@ -4384,6 +4510,7 @@ function PanelNuevoEjercicioReal({ categorias, onGuardar, onCerrar, ejercicioEdi
                 nombre: nombre.trim(),
                 bloque,
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
+                ejercicio_base_id: ejercicioBaseId || "",
                 tags_descriptivos: tagsSel,
                 sin_lateralidad: sinLateralidad ? "si" : "",
                 gif_url: videoUrl,
@@ -4467,6 +4594,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
   const [busqueda, setBusqueda] = useState("");
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [ejercicioEditando, setEjercicioEditando] = useState(null);
+  const [matrizParaVariante, setMatrizParaVariante] = useState(null);
   const [vista, setVista] = useState("lista");
   const [errorBorrado, setErrorBorrado] = useState("");
   const [errorGuardado, setErrorGuardado] = useState("");
@@ -4619,19 +4747,62 @@ function BibliotecaEjerciciosReal({ onBack }) {
             </label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {errorBorrado && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorBorrado}</div>}
-              {visibles.map((e) => (
-                <TarjetaEjercicioReal
-                  key={e.id}
-                  ejercicio={e}
-                  categorias={categorias}
-                  onEditar={() => {
-                    setEjercicioEditando(e);
-                    setPanelAbierto(true);
-                  }}
-                  onEliminar={() => eliminarEjercicio(e.id)}
-                />
-              ))}
-              {visibles.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>}
+              {(() => {
+                // Agrupa matriz + variantes para que la lista deje de ser 60
+                // ejercicios sueltos y pase a ser familias de movimiento: la
+                // matriz arriba, sus variantes plegadas justo debajo. Una
+                // familia se muestra si la matriz o cualquiera de sus
+                // variantes pasa los filtros/búsqueda actuales.
+                const idsVisibles = new Set(visibles.map((e) => e.id));
+                const idsExistentes = new Set(ejercicios.map((e) => e.id));
+                const variantesPorMatriz = {};
+                ejercicios.forEach((e) => {
+                  if (e.ejercicio_base_id && idsExistentes.has(e.ejercicio_base_id)) {
+                    (variantesPorMatriz[e.ejercicio_base_id] = variantesPorMatriz[e.ejercicio_base_id] || []).push(e);
+                  }
+                });
+                const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
+                const familias = matrices
+                  .map((m) => ({ matriz: m, variantes: variantesPorMatriz[m.id] || [] }))
+                  .filter((f) => idsVisibles.has(f.matriz.id) || f.variantes.some((v) => idsVisibles.has(v.id)));
+
+                if (familias.length === 0) {
+                  return <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
+                }
+                return familias.map(({ matriz, variantes }) => (
+                  <React.Fragment key={matriz.id}>
+                    <TarjetaEjercicioReal
+                      ejercicio={matriz}
+                      categorias={categorias}
+                      onEditar={() => {
+                        setEjercicioEditando(matriz);
+                        setPanelAbierto(true);
+                      }}
+                      onEliminar={() => eliminarEjercicio(matriz.id)}
+                      onCrearVariante={() => {
+                        setMatrizParaVariante(matriz);
+                        setEjercicioEditando(null);
+                        setPanelAbierto(true);
+                      }}
+                    />
+                    {variantes
+                      .filter((v) => idsVisibles.has(v.id))
+                      .map((v) => (
+                        <TarjetaEjercicioReal
+                          key={v.id}
+                          ejercicio={v}
+                          categorias={categorias}
+                          esVariante
+                          onEditar={() => {
+                            setEjercicioEditando(v);
+                            setPanelAbierto(true);
+                          }}
+                          onEliminar={() => eliminarEjercicio(v.id)}
+                        />
+                      ))}
+                  </React.Fragment>
+                ));
+              })()}
             </div>
           </>
         ) : (
@@ -4641,12 +4812,15 @@ function BibliotecaEjerciciosReal({ onBack }) {
       {panelAbierto && (
         <PanelNuevoEjercicioReal
           categorias={categorias}
+          ejercicios={ejercicios}
           ejercicioEditar={ejercicioEditando}
+          matrizPreset={matrizParaVariante}
           onGuardar={guardarEjercicio}
           error={errorGuardado}
           onCerrar={() => {
             setPanelAbierto(false);
             setEjercicioEditando(null);
+            setMatrizParaVariante(null);
           }}
         />
       )}
@@ -5079,10 +5253,28 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
 function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
-  const opciones = ejercicios.filter((e) => {
-    const coincideBloque = !bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
-    const coincideTexto = (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
-    return coincideBloque && coincideTexto;
+  const coincideBloque = (e) => !bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
+  const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
+
+  // Igual que en la Biblioteca: la matriz aparece primero, y justo debajo,
+  // indentadas, sus variantes — en vez de una lista alfabética plana donde
+  // "Sentadilla" y "Sentadilla + salto" quedan sin relación aparente.
+  const idsExistentes = new Set(ejercicios.map((e) => e.id));
+  const variantesPorMatriz = {};
+  ejercicios.forEach((e) => {
+    if (e.ejercicio_base_id && idsExistentes.has(e.ejercicio_base_id)) {
+      (variantesPorMatriz[e.ejercicio_base_id] = variantesPorMatriz[e.ejercicio_base_id] || []).push(e);
+    }
+  });
+  const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
+  const opciones = [];
+  matrices.forEach((m) => {
+    if (!coincideBloque(m)) return;
+    const variantes = (variantesPorMatriz[m.id] || []).filter((v) => coincideBloque(v) && coincideTexto(v));
+    if (coincideTexto(m) || variantes.length) {
+      opciones.push(m);
+      variantes.forEach((v) => opciones.push({ ...v, esVariante: true }));
+    }
   });
 
   return (
@@ -5110,11 +5302,14 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
                   setAbierto(false);
                   setFiltro("");
                 }}
-                style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
+                style={{ padding: "7px 8px", paddingLeft: e.esVariante ? 18 : 8, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
                 onMouseEnter={(ev) => (ev.currentTarget.style.background = "#1A3050")}
                 onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
               >
-                <span style={{ color: "#F0F4FF", fontSize: 13 }}>{e.nombre}</span>
+                <span style={{ color: e.esVariante ? "#C7D4E5" : "#F0F4FF", fontSize: e.esVariante ? 12.5 : 13 }}>
+                  {e.esVariante && "↳ "}
+                  {e.nombre}
+                </span>
                 <span style={{ color: "#4A6680", fontSize: 10.5, fontFamily: "'IBM Plex Mono', monospace" }}>{(e.tags_descriptivos || []).join(" · ")}</span>
               </div>
             ))}
