@@ -3986,6 +3986,31 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     }
   };
 
+  // "Mi progreso" es su propia pantalla, independiente de si la sesión de
+  // hoy está enviada o no — así se ve igual entres por la pestaña o por el
+  // botón de la pantalla de "Sesión enviada". Se comprueba ANTES que el
+  // "enviado", que si no, esa pantalla no dejaba llegar aquí nunca: era el
+  // fallo que has visto.
+  if (vistaJugador === "progreso") {
+    return (
+      <PantallaBase rol="jugador" maxWidth={480}>
+        <div>
+          <button
+            onClick={() => setVistaJugador("hoy")}
+            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+          >
+            ← Volver
+          </button>
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>MI PROGRESO</div>
+            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
+          </div>
+          <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
+        </div>
+      </PantallaBase>
+    );
+  }
+
   if (enviado || yaEnviadaAntes) {
     const otrasPendientes = todaySesiones.length > 1 && estadoPorSesion.some((e) => e.sesion.id !== sesionActual?.id && !e.completa);
     return (
@@ -4009,7 +4034,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               Ver la otra sesión de hoy
             </button>
           )}
-          <button onClick={onExit} style={{ marginTop: 8, background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
+          <button onClick={() => setVistaJugador("progreso")} style={{ marginTop: 8, background: "transparent", border: "1px solid #F5C51866", color: "#F5C518", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
+            Ver mi progreso
+          </button>
+          <button onClick={onExit} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
             ← Volver al portal
           </button>
         </div>
@@ -4065,9 +4093,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           ))}
         </div>
 
-        {vistaJugador === "progreso" ? (
-          <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
-        ) : !loaded ? (
+        {!loaded ? (
           <LoadingBlock />
         ) : totalTareas === 0 ? (
           <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center", color: "#8BA4C0" }}>
