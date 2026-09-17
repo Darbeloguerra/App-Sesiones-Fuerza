@@ -22,9 +22,10 @@ const ENTITY_TABLE = {
   tareas: "tareas",
   circuitos: "circuitos",
   registros: "registros",
+  grupos: "grupos",
 };
 
-const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg" };
+const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp" };
 function genId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
@@ -79,7 +80,7 @@ function sanitizeNumericos(entity, out) {
 // igual para fechas, categorías, destinatarios...). Aquí se hace lo mismo,
 // en genérico, para no tener que acordarse columna por columna.
 const ARRAY_COLUMNS = {
-  jugadores: ["categorias_preventivas"],
+  jugadores: ["categorias_preventivas", "grupos_ids"],
   ejercicios: ["tags_descriptivos"],
   sesiones: ["fechas", "jugadores_destino"],
   tareas: ["material"],
@@ -561,6 +562,9 @@ function useConfigValue(clave) {
 // player.name/player.groupIds tal cual (evita renombrar decenas de sitios),
 // y aquí se traduce a las columnas reales (nombre, estado, categorias_preventivas).
 // groupIds es un array (un jugador puede tener varias categorías preventivas).
+// gruposIds es un concepto distinto y nuevo: los "grupos" que tú creas
+// (equipos, agrupaciones libres) — un usuario puede estar en varios a la
+// vez, igual mecánica que groupIds pero sin relación con lo preventivo.
 function usePlayers() {
   const [rows, saveRows, loaded, error, retry] = useEntityList("jugadores");
 
@@ -574,6 +578,7 @@ function usePlayers() {
         pin: r.pin,
         estado: r.estado || "activo",
         groupIds: Array.isArray(r.categorias_preventivas) ? r.categorias_preventivas : [],
+        gruposIds: Array.isArray(r.grupos_ids) ? r.grupos_ids : [],
       })),
     [rows]
   );
@@ -583,17 +588,19 @@ function usePlayers() {
       const nextRows = nextPlayers.map((p) => {
         const original = p.id ? rowsById.get(p.id) : null;
         const groupIds = p.groupIds || [];
+        const gruposIds = p.gruposIds || [];
         const estado = p.estado || "activo";
         if (
           original &&
           original.nombre === p.name &&
           original.pin === p.pin &&
           original.estado === estado &&
-          JSON.stringify(original.categorias_preventivas || []) === JSON.stringify(groupIds)
+          JSON.stringify(original.categorias_preventivas || []) === JSON.stringify(groupIds) &&
+          JSON.stringify(original.grupos_ids || []) === JSON.stringify(gruposIds)
         ) {
           return original; // sin cambios reales: misma referencia -> no se reguarda
         }
-        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds };
+        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds };
       });
       return saveRows(nextRows);
     },
@@ -1598,6 +1605,7 @@ function ChipReal({ children, tono = "neutro" }) {
     neutro: { color: "#8BA4C0", border: "#1A305033" },
     verde: { color: "#F5C518", border: "#F5C51855" },
     ambar: { color: "#F97316", border: "#F9731655" },
+    azul: { color: "#60A5FA", border: "#60A5FA55" },
   };
   const t = tonos[tono];
   return (
@@ -1711,6 +1719,66 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
   );
 }
 
+// Mismo patrón que SelectorCategoriasReal, pero para "grupos" (equipos,
+// agrupaciones libres) — una lista plana, sin sub-tipos, y sin relación
+// alguna con las categorías preventivas.
+function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
+  return (
+    <CerrablePorFuera onCerrar={onCerrar}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: "120%",
+          zIndex: 20,
+          width: 200,
+          background: "#122440",
+          border: "1px solid #1A3050",
+          borderRadius: 10,
+          boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+          padding: 8,
+          maxHeight: 320,
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680", padding: "2px 4px 6px" }}>GRUPOS</div>
+        {grupos.length === 0 && <div style={{ fontSize: 11.5, color: "#4A6680", padding: "4px 6px" }}>Todavía no has creado ningún grupo.</div>}
+        {grupos.map((g) => {
+          const activo = seleccionados.includes(g.id);
+          return (
+            <div
+              key={g.id}
+              onClick={() => onCambiar(activo ? seleccionados.filter((id) => id !== g.id) : [...seleccionados, g.id])}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "#F0F4FF" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#1A3050")}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: 4,
+                  border: `1.5px solid ${activo ? "#60A5FA" : "#1A3050"}`,
+                  background: activo ? "#60A5FA" : "transparent",
+                  color: "#060D1A",
+                  fontSize: 10,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {activo ? "✓" : ""}
+              </span>
+              <span style={{ flex: 1 }}>{g.nombre}</span>
+            </div>
+          );
+        })}
+      </div>
+    </CerrablePorFuera>
+  );
+}
+
 function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
   const acciones = [
     { id: "reset", label: "Resetear PIN" },
@@ -1758,13 +1826,17 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
   );
 }
 
-function FilaJugadorReal({ jugador, categorias, onAccion, onCambiarCategorias }) {
+function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCategorias, onCambiarGrupos }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
+  const [selectorGruposAbierto, setSelectorGruposAbierto] = useState(false);
   const [pinVisible, setPinVisible] = useState(false);
   const suspendido = jugador.estado === "suspendido";
   const nombresCategorias = jugador.groupIds
     .map((id) => categorias.find((c) => c.id === id)?.nombre)
+    .filter(Boolean);
+  const nombresGrupos = (jugador.gruposIds || [])
+    .map((id) => grupos.find((g) => g.id === id)?.nombre)
     .filter(Boolean);
 
   return (
@@ -1785,6 +1857,32 @@ function FilaJugadorReal({ jugador, categorias, onAccion, onCambiarCategorias })
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{jugador.name}</span>
           {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
+          {nombresGrupos.length > 0 ? (
+            nombresGrupos.map((g) => (
+              <ChipReal key={g} tono="azul">
+                {g}
+              </ChipReal>
+            ))
+          ) : (
+            <span style={{ fontSize: 11, color: "#4A6680" }}>Independiente</span>
+          )}
+          <span
+            onClick={() => setSelectorGruposAbierto((v) => !v)}
+            style={{ fontSize: 11, color: "#4A6680", cursor: "pointer", border: "1px dashed #1A3050", borderRadius: 4, padding: "0px 5px" }}
+            title="Editar grupos"
+          >
+            +
+          </span>
+          {selectorGruposAbierto && (
+            <SelectorGruposReal
+              grupos={grupos}
+              seleccionados={jugador.gruposIds || []}
+              onCambiar={(nuevos) => onCambiarGrupos(jugador.id, nuevos)}
+              onCerrar={() => setSelectorGruposAbierto(false)}
+            />
+          )}
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
           {nombresCategorias.length > 0 ? (
@@ -1848,7 +1946,7 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
         onClick={(e) => e.stopPropagation()}
         style={{ width: "100%", maxWidth: 480, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>Añadir jugador</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>Añadir usuario</div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE</span>
           <input
@@ -1933,9 +2031,87 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
               opacity: guardando ? 0.6 : 1,
             }}
           >
-            {guardando ? "Guardando..." : "Añadir jugador"}
+            {guardando ? "Guardando..." : "Añadir usuario"}
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Crear y borrar grupos — panel mínimo, mismo estilo que PanelAltaReal.
+// Renombrar un grupo no hace falta todavía: se borra y se crea de nuevo si
+// hace falta, dado lo poco que van a cambiar de nombre en la práctica.
+function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
+  const [nombre, setNombre] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [confirmarBorrado, setConfirmarBorrado] = useState(null);
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 480, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>Grupos</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
+          {grupos.length === 0 && <div style={{ fontSize: 12.5, color: "#4A6680" }}>Todavía no has creado ningún grupo.</div>}
+          {grupos.map((g) => (
+            <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#122440", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 10px" }}>
+              <span style={{ flex: 1, fontSize: 13, color: "#F0F4FF" }}>{g.nombre}</span>
+              {confirmarBorrado === g.id ? (
+                <>
+                  <span style={{ fontSize: 11.5, color: "#8BA4C0" }}>¿Seguro?</span>
+                  <button onClick={() => onEliminar(g.id)} style={{ background: "transparent", border: "1px solid #EF444455", color: "#EF4444", borderRadius: 6, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
+                    Sí, borrar
+                  </button>
+                  <button onClick={() => setConfirmarBorrado(null)} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 6, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
+                    Cancelar
+                  </button>
+                </>
+              ) : (
+                <button onClick={() => setConfirmarBorrado(g.id)} style={{ background: "transparent", border: "none", color: "#4A6680", fontSize: 15, cursor: "pointer" }} title="Eliminar grupo">
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NUEVO GRUPO</span>
+          <div style={{ display: "flex", gap: 8 }}>
+            <input
+              value={nombre}
+              onChange={(e) => setNombre(e.target.value)}
+              placeholder="Ej. Delanteros"
+              style={{ flex: 1, background: "#122440", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13.5, padding: "9px 10px" }}
+            />
+            <button
+              disabled={!nombre.trim() || guardando}
+              onClick={async () => {
+                setGuardando(true);
+                const ok = await onCrear(nombre.trim());
+                setGuardando(false);
+                if (ok) setNombre("");
+              }}
+              style={{
+                background: nombre.trim() ? "#F5C518" : "#1A3050",
+                border: `1px solid ${nombre.trim() ? "#F5C518" : "#1A3050"}`,
+                color: nombre.trim() ? "#060D1A" : "#4A6680",
+                borderRadius: 7,
+                padding: "9px 14px",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: nombre.trim() ? "pointer" : "not-allowed",
+              }}
+            >
+              {guardando ? "..." : "Crear"}
+            </button>
+          </div>
+        </label>
+        <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer", alignSelf: "flex-end" }}>
+          Cerrar
+        </button>
       </div>
     </div>
   );
@@ -1944,13 +2120,15 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
 function GestionRosterReal({ onBack, onOpenHistory }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
+  const [grupos, saveGrupos, gruposLoaded] = useEntityList("grupos");
   const [coachPin, , coachPinLoaded] = useConfigValue("coach_pin");
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
+  const [panelGrupoAbierto, setPanelGrupoAbierto] = useState(false);
   const [errorAccion, setErrorAccion] = useState("");
 
-  if (!playersLoaded || !categoriasLoaded || !coachPinLoaded) return <LoadingBlock />;
+  if (!playersLoaded || !categoriasLoaded || !coachPinLoaded || !gruposLoaded) return <LoadingBlock />;
 
   // El código de entrenador nunca puede coincidir con el PIN de un jugador
   // (si coinciden, quien entra con ese número accede como entrenador a todo
@@ -1978,7 +2156,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
   };
 
   const agregarJugador = async ({ nombre, pin }) => {
-    const ok = await savePlayers([...players, { name: nombre, pin, estado: "activo", groupIds: [] }]);
+    const ok = await savePlayers([...players, { name: nombre, pin, estado: "activo", groupIds: [], gruposIds: [] }]);
     if (ok) setPanelAltaAbierto(false);
   };
 
@@ -1988,11 +2166,43 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
     if (!ok) setErrorAccion("No se pudo guardar el cambio de categoría. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
+  const cambiarGrupos = async (id, nuevos) => {
+    setErrorAccion("");
+    const ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, gruposIds: nuevos } : p)));
+    if (!ok) setErrorAccion("No se pudo guardar el cambio de grupo. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+
+  const crearGrupo = async (nombre) => {
+    setErrorAccion("");
+    const ok = await saveGrupos([...grupos, { nombre }]);
+    if (!ok) setErrorAccion("No se pudo crear el grupo. Comprueba tu conexión e inténtalo de nuevo.");
+    return ok;
+  };
+
+  const eliminarGrupo = async (id) => {
+    setErrorAccion("");
+    // Al borrar un grupo, se desengancha automáticamente de cualquier
+    // usuario que lo tuviera — no deja referencias sueltas.
+    const ok1 = await saveGrupos(grupos.filter((g) => g.id !== id));
+    const afectados = players.filter((p) => (p.gruposIds || []).includes(id));
+    const ok2 = afectados.length
+      ? await savePlayers(players.map((p) => (p.gruposIds || []).includes(id) ? { ...p, gruposIds: p.gruposIds.filter((g) => g !== id) } : p))
+      : true;
+    if (!ok1 || !ok2) setErrorAccion("No se pudo eliminar el grupo del todo. Comprueba tu conexión e inténtalo de nuevo.");
+    if (filtro === id) setFiltro("todos");
+  };
+
   const visibles = players
-    .filter((j) => (filtro === "todos" ? true : j.estado === filtro))
+    .filter((j) => {
+      if (filtro === "todos") return true;
+      if (filtro === "activo" || filtro === "suspendido") return j.estado === filtro;
+      if (filtro === "independientes") return (j.gruposIds || []).length === 0;
+      return (j.gruposIds || []).includes(filtro); // filtro = id de un grupo concreto
+    })
     .filter((j) => j.name.toLowerCase().includes(busqueda.toLowerCase()));
   const activos = players.filter((j) => j.estado === "activo").length;
   const suspendidos = players.filter((j) => j.estado === "suspendido").length;
+  const independientes = players.filter((j) => (j.gruposIds || []).length === 0).length;
 
   return (
     <PantallaBase rol="entrenador" maxWidth={560}>
@@ -2004,23 +2214,27 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
           ← Volver a Dashboard
         </button>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>ROSTER · SUB-19</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Jugadores</h1>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>USUARIOS</div>
+          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Usuarios</h1>
           <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>
-            {activos} activos · {suspendidos} suspendidos
+            {activos} activos · {suspendidos} suspendidos · {independientes} independientes
           </div>
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
           <input
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar jugador..."
+            placeholder="Buscar usuario..."
             style={{ flex: 1, minWidth: 160, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
           />
+        </div>
+        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
           {[
             { id: "todos", label: "Todos" },
             { id: "activo", label: "Activos" },
             { id: "suspendido", label: "Suspendidos" },
+            { id: "independientes", label: "Independientes" },
+            ...grupos.map((g) => ({ id: g.id, label: g.nombre })),
           ].map((f) => (
             <button
               key={f.id}
@@ -2039,22 +2253,31 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
               {f.label}
             </button>
           ))}
+          <button
+            onClick={() => setPanelGrupoAbierto(true)}
+            style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 8, border: "1px dashed #60A5FA66", background: "transparent", color: "#60A5FA", cursor: "pointer", whiteSpace: "nowrap" }}
+          >
+            + Grupo
+          </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {errorAccion && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorAccion}</div>}
           {visibles.map((j) => (
-            <FilaJugadorReal key={j.id} jugador={j} categorias={categorias} onAccion={manejarAccion} onCambiarCategorias={cambiarCategorias} />
+            <FilaJugadorReal key={j.id} jugador={j} categorias={categorias} grupos={grupos} onAccion={manejarAccion} onCambiarCategorias={cambiarCategorias} onCambiarGrupos={cambiarGrupos} />
           ))}
-          {visibles.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin jugadores en este filtro</div>}
+          {visibles.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
         </div>
         <button
           onClick={() => setPanelAltaAbierto(true)}
           style={{ width: "100%", marginTop: 16, background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 10, padding: "12px 16px", fontSize: 13.5, fontWeight: 500, cursor: "pointer" }}
         >
-          + Añadir jugador
+          + Añadir usuario
         </button>
       </div>
       {panelAltaAbierto && <PanelAltaReal pinsExistentes={pinsOcupados()} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
+      {panelGrupoAbierto && (
+        <PanelGestionGruposReal grupos={grupos} onCrear={crearGrupo} onEliminar={eliminarGrupo} onCerrar={() => setPanelGrupoAbierto(false)} />
+      )}
     </PantallaBase>
   );
 }
@@ -2114,7 +2337,7 @@ const MODULOS_DASHBOARD = [
   { id: "programacion", nombre: "Programación", descripcion: "Sesión de hoy y próximas programadas", icono: "calendario" },
   { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
   { id: "complementarias", nombre: "Dinámicas complementarias", descripcion: "Programas puntuales (ej. Miembro Superior) para días concretos", icono: "rayo" },
-  { id: "roster", nombre: "Jugadores", descripcion: "Roster, PINs y categorías preventivas", icono: "personas" },
+  { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
   { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
 ];
@@ -2426,7 +2649,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
     }, {});
 
   if (!players.length) {
-    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay jugadores en el roster.</div>;
+    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
   }
 
   // Se agrupa por fecha + sesión de origen, no solo por fecha — dos sesiones
@@ -2664,7 +2887,7 @@ function HistorialPorTarea({ players }) {
   const { loaded, items } = usePlayerHistory(jugadorSel || null);
 
   if (!players.length) {
-    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay jugadores en el roster.</div>;
+    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
   }
 
   const ejerciciosDisponibles = [...new Set(items.map((it) => it.name))].sort();
