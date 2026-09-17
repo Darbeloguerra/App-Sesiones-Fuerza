@@ -1032,6 +1032,18 @@ async function resolveEjercicio(ejercicios, def) {
   return saved;
 }
 
+// Actualiza solo la zona corporal de un ejercicio ya existente en tu
+// biblioteca — se usa cuando eliges un ejercicio antiguo (creado antes de
+// que la zona fuera obligatoria) desde el buscador de "Diseñar sesión": en
+// vez de dejarlo sin clasificar, se le asigna ahí mismo y queda guardado
+// para siempre en ese ejercicio.
+async function actualizarZonaEjercicio(ejercicio, zona) {
+  const record = { ...ejercicio, tags_descriptivos: [zona] };
+  const saved = await api.save("ejercicios", record);
+  invalidateEntityCache("ejercicios");
+  return saved;
+}
+
 // ---------- SESIONES / TAREAS / REGISTROS (en vivo, sin caché) ----------
 
 function useCategoriasPreventivas() {
@@ -4621,7 +4633,7 @@ function videoEfectivoTarea(tarea, registro) {
 const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "m" };
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
-const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior"];
+const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior", "Zona media", "Global"];
 const TIPOS_TEJIDO_BIBLIOTECA = ["Muscular", "Tendinosa", "Articular"];
 
 function TagChipReal({ tag, activo, onClick }) {
@@ -4728,7 +4740,10 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   const [guardando, setGuardando] = useState(false);
 
   const esPreventivo = bloque === "Preventivo";
-  const toggleTag = (t) => setTagsSel((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  // Selección única: con "Global" cubriendo el caso de superior+inferior a
+  // la vez, cada ejercicio pertenece a una sola zona corporal — ya no tiene
+  // sentido dejar marcar varias a la vez como antes.
+  const seleccionarZona = (t) => setTagsSel([t]);
   const videoIdValido = extractYouTubeId(videoUrl);
   const esDirectoValido = esVideoDirecto(videoUrl);
   const enlaceReconocido = !!videoIdValido || esDirectoValido;
@@ -4789,10 +4804,10 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           </label>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAGS DESCRIPTIVOS (solo para buscar — no afectan a la rotación)</span>
+          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>ZONA CORPORAL (obligatoria)</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
-              <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => toggleTag(t)} />
+              <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => seleccionarZona(t)} />
             ))}
           </div>
         </div>
@@ -4894,7 +4909,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           <button
             disabled={guardando}
             onClick={async () => {
-              if (!nombre.trim()) return;
+              if (!nombre.trim() || tagsSel.length === 0) return;
               setGuardando(true);
               await onGuardar({
                 id: ejercicioEditar?.id,
@@ -5641,9 +5656,15 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   );
 }
 
-function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
+function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
+  // Ejercicio (ya existente sin zona, o { nombre, nuevo: true } recién
+  // escrito) que está esperando a que se le asigne zona corporal antes de
+  // poder añadirse a la sesión — la zona es obligatoria desde ahora, así
+  // que ningún ejercicio pasa de aquí sin ella.
+  const [pendienteZona, setPendienteZona] = useState(null);
+  const [guardandoZona, setGuardandoZona] = useState(false);
   const coincideBloque = (e) => !bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
   const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
 
@@ -5668,55 +5689,104 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
     }
   });
 
+  const cerrarTodo = () => {
+    setAbierto(false);
+    setFiltro("");
+    setPendienteZona(null);
+  };
+
+  const elegirZona = async (zona) => {
+    setGuardandoZona(true);
+    try {
+      if (pendienteZona.nuevo) {
+        // Todavía no existe en la base de datos — la zona viaja junto con
+        // el resto de datos hasta el sitio donde de verdad se crea.
+        onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: [zona] });
+      } else {
+        // Ya existe: se actualiza ese ejercicio en tu biblioteca para
+        // siempre, y se añade a la sesión con la zona ya puesta.
+        const actualizado = await onAsignarZona(pendienteZona, zona);
+        onAdd(actualizado);
+      }
+      cerrarTodo();
+    } catch (e) {
+      // Se deja el aviso abierto para que puedas reintentar sin perder la
+      // búsqueda ni tener que volver a encontrar el ejercicio.
+    }
+    setGuardandoZona(false);
+  };
+
   return (
     <div style={{ position: "relative" }}>
       <button onClick={() => setAbierto((v) => !v)} style={{ fontSize: 12.5, color: "#F5C518", background: "transparent", border: "1px dashed #F5C51866", borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}>
         + Añadir tarea desde biblioteca
       </button>
       {abierto && (
-        <CerrablePorFuera onCerrar={() => setAbierto(false)}>
+        <CerrablePorFuera onCerrar={cerrarTodo}>
         <div style={{ position: "absolute", zIndex: 10, top: "110%", left: 0, width: 260, background: "#122440", border: "1px solid #1A3050", borderRadius: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 8 }}>
-          <input
-            autoFocus
-            value={filtro}
-            onChange={(e) => setFiltro(e.target.value)}
-            placeholder="Buscar ejercicio..."
-            style={{ width: "100%", background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
-          />
-          <div style={{ maxHeight: 220, overflowY: "auto" }}>
-            {opciones.length === 0 && <div style={{ color: "#4A6680", fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
-            {opciones.map((e) => (
-              <div
-                key={e.id}
-                onClick={() => {
-                  onAdd(e);
-                  setAbierto(false);
-                  setFiltro("");
-                }}
-                style={{ padding: "7px 8px", paddingLeft: e.esVariante ? 18 : 8, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
-                onMouseEnter={(ev) => (ev.currentTarget.style.background = "#1A3050")}
-                onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
-              >
-                <span style={{ color: e.esVariante ? "#C7D4E5" : "#F0F4FF", fontSize: e.esVariante ? 12.5 : 13 }}>
-                  {e.esVariante && "↳ "}
-                  {e.nombre}
-                </span>
-                <span style={{ color: "#4A6680", fontSize: 10.5, fontFamily: "'IBM Plex Mono', monospace" }}>{(e.tags_descriptivos || []).join(" · ")}</span>
+          {!pendienteZona && (
+            <>
+              <input
+                autoFocus
+                value={filtro}
+                onChange={(e) => setFiltro(e.target.value)}
+                placeholder="Buscar ejercicio..."
+                style={{ width: "100%", background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
+              />
+              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                {opciones.length === 0 && <div style={{ color: "#4A6680", fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
+                {opciones.map((e) => (
+                  <div
+                    key={e.id}
+                    onClick={() => {
+                      if (!(e.tags_descriptivos && e.tags_descriptivos.length)) {
+                        setPendienteZona(e);
+                        return;
+                      }
+                      onAdd(e);
+                      cerrarTodo();
+                    }}
+                    style={{ padding: "7px 8px", paddingLeft: e.esVariante ? 18 : 8, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
+                    onMouseEnter={(ev) => (ev.currentTarget.style.background = "#1A3050")}
+                    onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
+                  >
+                    <span style={{ color: e.esVariante ? "#C7D4E5" : "#F0F4FF", fontSize: e.esVariante ? 12.5 : 13 }}>
+                      {e.esVariante && "↳ "}
+                      {e.nombre}
+                    </span>
+                    <span style={{ color: "#4A6680", fontSize: 10.5, fontFamily: "'IBM Plex Mono', monospace" }}>{(e.tags_descriptivos || []).join(" · ")}</span>
+                  </div>
+                ))}
+                {filtro.trim() && (
+                  <div
+                    onClick={() => setPendienteZona({ nombre: filtro.trim(), nuevo: true })}
+                    style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: "#F5C518", fontSize: 12.5, borderTop: "1px solid #1A3050", marginTop: 4 }}
+                  >
+                    + Crear "{filtro.trim()}" como nuevo ejercicio
+                  </div>
+                )}
               </div>
-            ))}
-            {filtro.trim() && (
-              <div
-                onClick={() => {
-                  onAdd({ nombre: filtro.trim(), nuevo: true });
-                  setAbierto(false);
-                  setFiltro("");
-                }}
-                style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: "#F5C518", fontSize: 12.5, borderTop: "1px solid #1A3050", marginTop: 4 }}
-              >
-                + Crear "{filtro.trim()}" como nuevo ejercicio
+            </>
+          )}
+          {pendienteZona && (
+            <div style={{ padding: 4 }}>
+              <div style={{ fontSize: 11.5, color: "#F5C518", marginBottom: 8, lineHeight: 1.4 }}>
+                "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}
               </div>
-            )}
-          </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
+                  <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />
+                ))}
+              </div>
+              <button
+                onClick={() => setPendienteZona(null)}
+                disabled={guardandoZona}
+                style={{ marginTop: 8, fontSize: 11, color: "#8BA4C0", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
+              >
+                {guardandoZona ? "Guardando..." : "Cancelar"}
+              </button>
+            </div>
+          )}
         </div>
         </CerrablePorFuera>
       )}
@@ -5724,7 +5794,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito }) {
   const tareas = circuito.tareas;
   const rondas = circuito.rondas || 1;
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
@@ -5751,7 +5821,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       // tarea con un ejercicioId vacío, sin decir nada, y quedaba con el
       // nombre perdido para siempre.
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         onEjercicioCreado?.(creado);
       } catch (e) {
@@ -5818,7 +5888,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
           )
         )}
       </div>
-      <SelectorEjercicioReal ejercicios={ejercicios} bloque={bloque} onAdd={agregarEjercicioAlCircuito} />
+      <SelectorEjercicioReal ejercicios={ejercicios} bloque={bloque} onAdd={agregarEjercicioAlCircuito} onAsignarZona={onAsignarZona} />
     </div>
   );
 }
@@ -5891,6 +5961,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [categoriasPreventivas, categoriasLoaded] = useCategoriasPreventivas();
   const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
+  // Le dice a SelectorEjercicioReal cómo guardar la zona corporal de un
+  // ejercicio antiguo que todavía no la tenía, y refresca la lista local
+  // para que el cambio se vea sin recargar la pantalla.
+  const asignarZonaYActualizar = async (ejercicio, zona) => {
+    const actualizado = await actualizarZonaEjercicio(ejercicio, zona);
+    addEjercicioLocal(actualizado);
+    return actualizado;
+  };
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
@@ -6137,7 +6215,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         addEjercicioLocal(creado);
       } catch (e) {
@@ -6153,7 +6231,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         addEjercicioLocal(creado);
       } catch (e) {
@@ -6552,7 +6630,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                             {activacionEjercicioNombre || "Sin elegir todavía"}
                           </span>
                         </div>
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} />
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} onAsignarZona={asignarZonaYActualizar} />
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <span style={{ fontSize: 13, color: "#8BA4C0" }}>Duración</span>
                           <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
@@ -6658,6 +6736,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         mostrarCarga={false}
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
                         onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
@@ -6667,7 +6746,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} />
+                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
@@ -6694,6 +6773,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         bloque="Resistencia"
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
                         onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
@@ -6706,12 +6786,13 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       <SelectorEjercicioReal
                         ejercicios={ejercicios}
                         bloque="Resistencia"
+                        onAsignarZona={asignarZonaYActualizar}
                         onAdd={async (eOClic) => {
                           let ejercicioId = eOClic.id;
                           let nombre = eOClic.nombre;
                           if (!ejercicioId) {
                             try {
-                              const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+                              const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: eOClic.tags_descriptivos || [] });
                               ejercicioId = creado.id;
                               addEjercicioLocal(creado);
                             } catch (e) {
@@ -6781,6 +6862,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         mostrarCarga={true}
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
                         onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
@@ -6790,7 +6872,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} />
+                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
@@ -6852,6 +6934,11 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const [players, , playersLoaded] = usePlayers();
   const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
+  const asignarZonaYActualizar = async (ejercicio, zona) => {
+    const actualizado = await actualizarZonaEjercicio(ejercicio, zona);
+    addEjercicioLocal(actualizado);
+    return actualizado;
+  };
 
   const [nombreBloque, setNombreBloque] = useState("");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
@@ -6968,7 +7055,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
     let nombre = ejercicioOClic.nombre;
     if (!ejercicioId) {
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "" });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         addEjercicioLocal(creado);
       } catch (e) {
@@ -7185,6 +7272,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 mostrarCarga={true}
                 ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
                         onError={setError}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
@@ -7194,7 +7282,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
               />
             ))}
             <div style={{ display: "flex", gap: 8 }}>
-              <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} />
+              <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} onAsignarZona={asignarZonaYActualizar} />
               <button
                 onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                 style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
