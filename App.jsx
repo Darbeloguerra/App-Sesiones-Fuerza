@@ -2372,43 +2372,27 @@ const MODULOS_DASHBOARD = [
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
 ];
 
-function TarjetaModuloReal({ modulo, destacado, onClick }) {
+function TarjetaModuloCompactaReal({ modulo, onClick }) {
   return (
     <button
       onClick={onClick}
       style={{
         display: "flex",
-        alignItems: "center",
-        gap: 14,
-        width: "100%",
-        textAlign: "left",
-        background: destacado ? TEMA.superficieAlta : TEMA.superficie,
-        border: `1px solid ${destacado ? TEMA.acento + "55" : TEMA.borde}`,
-        borderRadius: 12,
-        padding: "16px 16px",
+        flexDirection: "column",
+        alignItems: "flex-start",
+        gap: 8,
+        background: TEMA.superficie,
+        border: `1px solid ${TEMA.borde}`,
+        borderRadius: 10,
+        padding: "12px 12px",
         cursor: "pointer",
+        textAlign: "left",
       }}
     >
-      <div
-        style={{
-          width: 42,
-          height: 42,
-          borderRadius: 10,
-          background: destacado ? TEMA.acentoSuave : TEMA.fondoElevado,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: TEMA.acento,
-          flexShrink: 0,
-        }}
-      >
+      <div style={{ width: 30, height: 30, borderRadius: 8, background: TEMA.fondoElevado, display: "flex", alignItems: "center", justifyContent: "center", color: TEMA.textoMuted }}>
         <IconoModulo tipo={modulo.icono} />
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 700, color: TEMA.texto }}>{modulo.nombre}</div>
-        <div style={{ fontSize: 12, color: TEMA.textoMuted, marginTop: 2 }}>{modulo.descripcion}</div>
-      </div>
-      <span style={{ color: TEMA.textoTenue, fontSize: 16 }}>›</span>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: TEMA.texto, lineHeight: 1.25 }}>{modulo.nombre}</div>
     </button>
   );
 }
@@ -2416,7 +2400,11 @@ function TarjetaModuloReal({ modulo, destacado, onClick }) {
 // Tarjeta de estado de hoy — lo primero que se ve al entrar. Antes el
 // Dashboard era solo una lista de botones sin decir nada; esto reutiliza
 // datos que ya se cargan en Programación para responder de un vistazo a
-// "¿tengo algo pendiente hoy?" sin tener que entrar a mirarlo.
+// "¿tengo algo pendiente hoy?" sin tener que entrar a mirarlo. El texto
+// evita hablar de "sesión" como si fuera lo único que puede pasar hoy —
+// hoy es lo único que hay, pero la tarjeta no lo da por sentado para
+// siempre (cuando haya otros tipos de trabajo, esto es lo primero que
+// habrá que generalizar).
 function TarjetaEstadoHoyReal({ onAbrirModulo }) {
   const { sesiones, loaded } = useBootstrapProgramacion();
   const hoy = todayStr();
@@ -2424,52 +2412,53 @@ function TarjetaEstadoHoyReal({ onAbrirModulo }) {
   const borradores = sesiones.filter((s) => !s.enviada).length;
 
   if (!loaded) {
-    return (
-      <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "18px 18px", marginBottom: 20, minHeight: 64 }} />
-    );
+    return <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 16, padding: "22px 22px", marginBottom: 14, minHeight: 96 }} />;
   }
 
   let titulo, detalle, accionLabel, accionModulo;
   if (!sesionHoy) {
-    titulo = "Sin sesión programada para hoy";
-    detalle = "Diseña una cuando quieras — no hace falta que sea a primera hora.";
-    accionLabel = "Diseñar sesión";
+    titulo = "Nada planificado para hoy";
+    detalle = "Cuando quieras, prepara el trabajo del día.";
+    accionLabel = "Planificar";
     accionModulo = "diseno";
   } else if (!sesionHoy.enviada) {
-    titulo = "Tienes un borrador de hoy sin enviar";
-    detalle = sesionHoy.md ? `Sesión marcada como ${sesionHoy.md}, pendiente de publicar.` : "Pendiente de publicar para que la vean tus jugadores.";
+    titulo = "Hay un borrador de hoy sin publicar";
+    detalle = sesionHoy.md ? `Marcado como ${sesionHoy.md}, a falta de enviarlo.` : "A falta de enviarlo para que lo vean.";
     accionLabel = "Retomar borrador";
     accionModulo = "programacion";
   } else {
-    titulo = "Sesión de hoy enviada";
-    detalle = sesionHoy.md ? `Marcada como ${sesionHoy.md}.` : "Ya está visible para tus jugadores.";
+    titulo = "Trabajo de hoy publicado";
+    detalle = sesionHoy.md ? `Marcado como ${sesionHoy.md}.` : "Ya está visible.";
     accionLabel = "Ver quién ha registrado";
     accionModulo = "historial";
   }
+  const colorEstado = !sesionHoy ? TEMA.textoTenue : sesionHoy.enviada ? TEMA.exito : TEMA.alerta;
 
   return (
     <div
       style={{
-        background: TEMA.superficie,
-        border: `1px solid ${!sesionHoy ? TEMA.borde : sesionHoy.enviada ? TEMA.exito + "44" : TEMA.alerta + "44"}`,
-        borderLeft: `3px solid ${!sesionHoy ? TEMA.textoTenue : sesionHoy.enviada ? TEMA.exito : TEMA.alerta}`,
-        borderRadius: 12,
-        padding: "16px 18px",
-        marginBottom: 20,
+        background: `linear-gradient(135deg, ${TEMA.superficieAlta}, ${TEMA.superficie})`,
+        border: `1px solid ${colorEstado}44`,
+        borderRadius: 16,
+        padding: "22px 22px",
+        marginBottom: 14,
+        position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 700, color: TEMA.texto, marginBottom: 3 }}>{titulo}</div>
-      <div style={{ fontSize: 12.5, color: TEMA.textoMuted, marginBottom: 12 }}>{detalle}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 4, background: colorEstado }} />
+      <div style={{ fontSize: 18, fontWeight: 700, color: TEMA.texto, marginBottom: 5 }}>{titulo}</div>
+      <div style={{ fontSize: 13, color: TEMA.textoMuted, marginBottom: 16, maxWidth: 420 }}>{detalle}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <button
           onClick={() => onAbrirModulo(accionModulo)}
-          style={{ background: "transparent", border: `1px solid ${TEMA.acento}66`, color: TEMA.acento, borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+          style={{ background: TEMA.acento, border: `1px solid ${TEMA.acento}`, color: "#161200", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
         >
           {accionLabel}
         </button>
         {borradores > 0 && (
-          <span style={{ fontSize: 11.5, color: TEMA.textoTenue }}>
-            {borradores} {borradores === 1 ? "borrador más pendiente" : "borradores más pendientes"}
+          <span style={{ fontSize: 12, color: TEMA.textoTenue }}>
+            {borradores} {borradores === 1 ? "borrador más pendiente de enviar" : "borradores más pendientes de enviar"}
           </span>
         )}
       </div>
@@ -2477,10 +2466,39 @@ function TarjetaEstadoHoyReal({ onAbrirModulo }) {
   );
 }
 
+// Resumen de usuarios y grupos — datos que ya existen (usePlayers, grupos)
+// pero que hasta ahora solo se veían al entrar en Usuarios. "Independiente"
+// se cuenta como dato neutro, no como aviso: es un estado válido y buscado,
+// no un problema por resolver.
+function TarjetaUsuariosGruposReal({ onAbrirModulo }) {
+  const [players, , playersLoaded] = usePlayers();
+  const [grupos, , gruposLoaded] = useEntityList("grupos");
+  if (!playersLoaded || !gruposLoaded) {
+    return <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "16px 16px", minHeight: 110 }} />;
+  }
+  const activos = players.filter((p) => p.estado === "activo").length;
+  const independientes = players.filter((p) => (p.gruposIds || []).length === 0).length;
+  return (
+    <button
+      onClick={() => onAbrirModulo("roster")}
+      style={{ textAlign: "left", cursor: "pointer", background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "16px 16px", display: "flex", flexDirection: "column", gap: 10 }}
+    >
+      <div style={{ fontSize: 12, color: TEMA.textoMuted, fontWeight: 600 }}>Usuarios</div>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: TEMA.texto, fontFamily: TEMA.fuenteTitular }}>{activos}</span>
+        <span style={{ fontSize: 12.5, color: TEMA.textoMuted }}>activos</span>
+      </div>
+      <div style={{ fontSize: 12, color: TEMA.textoTenue }}>
+        {grupos.length} {grupos.length === 1 ? "grupo" : "grupos"} · {independientes} {independientes === 1 ? "independiente" : "independientes"}
+      </div>
+    </button>
+  );
+}
+
 function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
   const hoy = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" });
   return (
-    <PantallaBase rol="entrenador" maxWidth={480}>
+    <PantallaBase rol="entrenador" maxWidth={720}>
       <div>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
           <div>
@@ -2494,10 +2512,17 @@ function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
             Cerrar sesión
           </button>
         </div>
+
         <TarjetaEstadoHoyReal onAbrirModulo={onAbrirModulo} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 22 }}>
+          <TarjetaUsuariosGruposReal onAbrirModulo={onAbrirModulo} />
+        </div>
+
+        <div style={{ fontSize: 11.5, fontWeight: 600, color: TEMA.textoTenue, marginBottom: 8 }}>Ir a</div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 8 }}>
           {MODULOS_DASHBOARD.map((m) => (
-            <TarjetaModuloReal key={m.id} modulo={m} destacado={m.id === "diseno" || m.id === "programacion"} onClick={() => onAbrirModulo(m.id)} />
+            <TarjetaModuloCompactaReal key={m.id} modulo={m} onClick={() => onAbrirModulo(m.id)} />
           ))}
         </div>
       </div>
