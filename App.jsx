@@ -1,6 +1,9 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search } from "lucide-react";
+import GlobalStyles from "./GlobalStyles";
+import { colors as ds, spacing as dsSp, radius as dsR, shadow as dsSh, font as dsF } from "./theme";
+import { Button as DsButton, Card as DsCard, Toggle as DsToggle, Badge as DsBadge, Input as DsInput, Select as DsSelect, TabSwitcher as DsTabSwitcher, ProgressRing as DsProgressRing } from "./ui-components";
 
 // ====== Backend remoto (Supabase) ======
 // Sustituye a Google Sheets/Apps Script. Las tablas viven ahora en Postgres
@@ -955,6 +958,7 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
   const anchoMax = maxWidth || (rol === "jugador" ? 420 : 640);
   return (
     <div
+      className="ds-reset"
       style={{
         position: "fixed",
         top: 0,
@@ -972,6 +976,7 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
         overflowY: "auto",
       }}
     >
+      <GlobalStyles />
       <div
         style={{
           width: "100%",
@@ -2653,7 +2658,7 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 function GraficaProgresoCargaReal({ puntos }) {
   if (puntos.length < 2) {
     return (
-      <div style={{ color: "#4A6680", fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
+      <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
         {puntos.length === 0 ? "Sin registros de carga para esta tarea en este rango." : "Hace falta al menos 2 registros para trazar la evolución."}
       </div>
     );
@@ -2674,29 +2679,29 @@ function GraficaProgresoCargaReal({ puntos }) {
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke="#1A3050" strokeWidth={1} />
-        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill="#4A6680">
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
+        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>
           {maxV}
         </text>
-        <text x={2} y={coordY(minV) + 3} fontSize="9" fill="#4A6680">
+        <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>
           {minV}
         </text>
-        <path d={pathD} fill="none" stroke="#F5C518" strokeWidth={2} />
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2} />
         {puntos.map((p, i) => (
-          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill="#F5C518" />
+          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={ds.accent} />
         ))}
-        <text x={padX} y={height - 5} fontSize="9" fill="#4A6680">
+        <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>
           {fmtDateShort(puntos[0].date)}
         </text>
-        <text x={width - padX} y={height - 5} fontSize="9" fill="#4A6680" textAnchor="end">
+        <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">
           {fmtDateShort(puntos[puntos.length - 1].date)}
         </text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {[...puntos].reverse().map((p, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: "#8BA4C0", fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: ds.inkSecondary, fontFamily: dsF.mono }}>
             <span>{fmtDateShort(p.date)}</span>
-            <span style={{ color: "#F0F4FF" }}>
+            <span style={{ color: ds.ink }}>
               {p.valor}kg{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
             </span>
           </div>
@@ -2747,26 +2752,22 @@ function MiProgresoJugadorReal({ items, loaded }) {
 
   return (
     <div>
-      <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: "14px 16px", marginBottom: 16 }}>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 4 }}>ÚLTIMOS 30 DÍAS</div>
-        <div style={{ fontSize: 20, fontWeight: 700, color: "#F0F4FF" }}>
+      <DsCard style={{ padding: "14px 16px", marginBottom: 16 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 4 }}>ÚLTIMOS 30 DÍAS</div>
+        <div style={{ fontSize: 20, fontWeight: 700, color: ds.ink }}>
           {fechasCompletadas.size} {fechasCompletadas.size === 1 ? "sesión completada" : "sesiones completadas"}
         </div>
-      </div>
+      </DsCard>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
-        <select
-          value={claveActiva}
-          onChange={(e) => setTareaSel(e.target.value)}
-          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
-        >
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
+        <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)}>
           {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
           {combinaciones.map((c) => (
             <option key={c.clave} value={c.clave}>
               {c.etiqueta}
             </option>
           ))}
-        </select>
+        </DsSelect>
       </label>
       <GraficaProgresoCargaReal puntos={puntos} />
     </div>
@@ -3697,46 +3698,79 @@ function ProgramacionReal({ players, onBack }) {
 
 // ---------- PANTALLA DEL JUGADOR (calcado de pantalla-jugador.jsx) ----------
 
+// Chip pequeño de selección (banda elástica, corporal/asistencia/lastre,
+// elegir material, completo/parcial en Resistencia) — no existe como
+// componente en ui-components.jsx, así que se resuelve aquí mismo con los
+// mismos tokens del sistema nuevo (ds.*) en vez de hex sueltos, para que
+// visualmente sea parte de la misma familia que Button/Badge/Toggle.
+function ChipSeleccionableReal({ activo, onClick, children }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        fontSize: 10.5,
+        padding: "6px 9px",
+        borderRadius: dsR.sm,
+        border: `1px solid ${activo ? ds.accent : ds.border}`,
+        background: activo ? ds.accentSubtle : "transparent",
+        color: activo ? ds.accent : ds.inkSecondary,
+        cursor: "pointer",
+        fontFamily: dsF.sans,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function EtiquetaCampoReal({ children, color }) {
+  return (
+    <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: color || ds.inkMuted, letterSpacing: "0.02em" }}>{children}</span>
+  );
+}
+
 function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
   const videoEfectivo = videoEfectivoTarea(tarea, registro);
   return (
-    <div style={{ background: "#0E1E35", border: `1px solid ${hecho ? "#22C55E55" : "#1A3050"}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+    <DsCard status={hecho ? "done" : "default"} style={{ padding: 12, gap: 10 }}>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         {orden != null && (
-          <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#122440", color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 20, height: 20, borderRadius: dsR.full, background: ds.bgElevated, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
         {videoEfectivo ? (
-          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: 8, flexShrink: 0, cursor: "pointer", background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: dsR.md, flexShrink: 0, cursor: "pointer", background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {miniaturaTarea(videoEfectivo) && (
-              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: 8, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
             {(extractYouTubeId(videoEfectivo) || esVideoDirecto(videoEfectivo)) && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 8 }}>
-                <Play size={16} color={miniaturaTarea(videoEfectivo) ? "#fff" : "#F5C518"} fill={miniaturaTarea(videoEfectivo) ? "#fff" : "#F5C518"} />
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+                <Play size={16} color={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} fill={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} />
               </div>
             )}
           </div>
         ) : tarea.eligeEquipo ? (
-          <div style={{ width: 46, height: 46, borderRadius: 8, background: "#122440", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#4A6680", fontSize: 8, fontFamily: "'IBM Plex Mono', monospace", textAlign: "center", lineHeight: 1.2, padding: 3 }}>
+          <div style={{ width: 46, height: 46, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 8, fontFamily: dsF.mono, textAlign: "center", lineHeight: 1.2, padding: 3 }}>
             ELIGE MATERIAL
           </div>
         ) : (
-          <div style={{ width: 46, height: 46, borderRadius: 8, background: "#122440", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
+          <div style={{ width: 46, height: 46, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
             VÍDEO
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {tarea.esResistencia ? (
             <>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>{tarea.objetivoResistencia}</div>
+              <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, marginTop: 2 }}>{tarea.objetivoResistencia}</div>
             </>
           ) : tarea.esCmj ? (
             <>
-              <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
-              <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
+              <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 3 }}>
                 {tarea.referenciaCmj
                   ? `Último salto registrado ${tarea.referenciaCmj.altura} cm${tarea.referenciaCmj.md ? ` (${tarea.referenciaCmj.md})` : ""}`
                   : "Sin registro previo"}
@@ -3745,31 +3779,18 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           ) : (
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{tarea.nombre}</div>
+                <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
                 {tarea.mostrarLateralidad !== false && (
-                  <span
-                    style={{
-                      fontFamily: "'IBM Plex Mono', monospace",
-                      fontSize: 9,
-                      padding: "2px 6px",
-                      borderRadius: 5,
-                      border: `1px solid ${tarea.unilateral ? "#F5C51855" : "#1A3050"}`,
-                      color: tarea.unilateral ? "#F5C518" : "#8BA4C0",
-                      background: tarea.unilateral ? "#F5C51818" : "transparent",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {tarea.unilateral ? "Unilateral" : "Bilateral"}
-                  </span>
+                  <DsBadge tone={tarea.unilateral ? "accent" : "neutral"}>{tarea.unilateral ? "Unilateral" : "Bilateral"}</DsBadge>
                 )}
               </div>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#8BA4C0", marginTop: 2 }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, marginTop: 2 }}>
                 {tarea.series ? `${tarea.series} × ` : ""}
                 {tarea.cantidad} {tarea.unidad}
                 {tarea.unilateral ? " · cada lado" : ""}
-                {tarea.rirObjetivo != null && <span style={{ color: "#F5C518", fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
+                {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
               </div>
-              <div style={{ fontSize: 10.5, color: "#4A6680", marginTop: 3 }}>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 3 }}>
                 {tarea.eligeEquipo
                   ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
                     ? tarea.referenciasPorEquipo?.[registro.subtipo]
@@ -3783,42 +3804,19 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             </>
           )}
         </div>
-        <button
-          onClick={onToggle}
-          style={{
-            width: 30,
-            height: 30,
-            borderRadius: "50%",
-            border: `1.5px solid ${hecho ? "#22C55E" : "#1A3050"}`,
-            background: hecho ? "#22C55E" : "transparent",
-            color: hecho ? "#060D1A" : "#4A6680",
-            fontSize: 15,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            flexShrink: 0,
-          }}
-        >
-          {hecho ? "✓" : ""}
-        </button>
+        <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
       </div>
       {tarea.materiales && tarea.materiales.length > 0 && (
         <div style={{ marginLeft: 56, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {tarea.materiales.map((m) => (
-            <span
-              key={m}
-              style={{ fontSize: 10.5, color: "#F5C518", background: "#F5C51818", border: "1px solid #F5C51840", borderRadius: 5, padding: "2px 7px", fontFamily: "'IBM Plex Mono', monospace" }}
-            >
-              {m}
-            </span>
+            <DsBadge key={m} tone="accent">{m}</DsBadge>
           ))}
         </div>
       )}
       {tarea.nota && (
-        <div style={{ marginLeft: 56, display: "flex", gap: 6, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, padding: "6px 8px" }}>
-          <span style={{ color: "#F97316", fontSize: 11.5, flexShrink: 0 }}>📝</span>
-          <span style={{ fontSize: 11.5, color: "#8BA4C0", lineHeight: 1.35 }}>{tarea.nota}</span>
+        <div style={{ marginLeft: 56, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "6px 8px" }}>
+          <span style={{ color: ds.warning, fontSize: 11.5, flexShrink: 0 }}>📝</span>
+          <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>{tarea.nota}</span>
         </div>
       )}
       {mostrarRegistro && tarea.esResistencia && (
@@ -3828,31 +3826,19 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               { v: "completo", label: "Cumplido completo" },
               { v: "parcial", label: "Hice menos" },
             ].map((op) => (
-              <button
-                key={op.v}
-                onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v })}
-                style={{
-                  fontSize: 11,
-                  padding: "7px 10px",
-                  borderRadius: 6,
-                  border: `1px solid ${(registro.subtipo || "completo") === op.v ? "#F5C518" : "#1A3050"}`,
-                  background: (registro.subtipo || "completo") === op.v ? "#F5C51822" : "transparent",
-                  color: (registro.subtipo || "completo") === op.v ? "#F5C518" : "#8BA4C0",
-                  cursor: "pointer",
-                }}
-              >
+              <ChipSeleccionableReal key={op.v} activo={(registro.subtipo || "completo") === op.v} onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v })}>
                 {op.label}
-              </button>
+              </ChipSeleccionableReal>
             ))}
           </div>
           {registro.subtipo === "parcial" && (
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>¿CUÁNTO HAS HECHO?</span>
-              <input
+              <EtiquetaCampoReal>¿CUÁNTO HAS HECHO?</EtiquetaCampoReal>
+              <DsInput
                 value={registro.carga}
                 onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
                 placeholder="ej. 2 de 3 series, 8 min..."
-                style={{ background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px", width: "100%", boxSizing: "border-box" }}
+                style={{ padding: "7px 9px", fontSize: 12.5 }}
               />
             </label>
           )}
@@ -3860,13 +3846,13 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
       )}
       {mostrarRegistro && tarea.esCmj && (
         <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 56 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>ALTURA DEL SALTO (CM)</span>
-          <input
+          <EtiquetaCampoReal>ALTURA DEL SALTO (CM)</EtiquetaCampoReal>
+          <DsInput
             value={registro.carga}
             onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
             placeholder="—"
             inputMode="decimal"
-            style={{ width: 90, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 9px", textAlign: "center" }}
+            style={{ width: 90, fontFamily: dsF.mono, fontSize: 13, padding: "6px 9px", textAlign: "center" }}
           />
         </div>
       )}
@@ -3874,24 +3860,12 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
           {tarea.eligeEquipo && (
             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518" }}>¿QUÉ MATERIAL VAS A UTILIZAR?</span>
+              <EtiquetaCampoReal color={ds.accent}>¿QUÉ MATERIAL VAS A UTILIZAR?</EtiquetaCampoReal>
               <div style={{ display: "flex", gap: 6 }}>
                 {(tarea.equiposElegibles || []).map((op) => (
-                  <button
-                    key={op}
-                    onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}
-                    style={{
-                      fontSize: 10.5,
-                      padding: "5px 9px",
-                      borderRadius: 6,
-                      border: `1px solid ${registro.subtipo === op ? "#F5C518" : "#1A3050"}`,
-                      background: registro.subtipo === op ? "#F5C51822" : "transparent",
-                      color: registro.subtipo === op ? "#F5C518" : "#8BA4C0",
-                      cursor: "pointer",
-                    }}
-                  >
+                  <ChipSeleccionableReal key={op} activo={registro.subtipo === op} onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}>
                     {op}
-                  </button>
+                  </ChipSeleccionableReal>
                 ))}
               </div>
             </div>
@@ -3903,61 +3877,37 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 { v: "asistencia", label: "Con asistencia" },
                 { v: "lastre", label: "Con lastre" },
               ].map((op) => (
-                <button
-                  key={op.v || "corporal"}
-                  onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v, carga: "" })}
-                  style={{
-                    fontSize: 10.5,
-                    padding: "5px 9px",
-                    borderRadius: 6,
-                    border: `1px solid ${(registro.subtipo || "") === op.v ? "#F5C518" : "#1A3050"}`,
-                    background: (registro.subtipo || "") === op.v ? "#F5C51822" : "transparent",
-                    color: (registro.subtipo || "") === op.v ? "#F5C518" : "#8BA4C0",
-                    cursor: "pointer",
-                  }}
-                >
+                <ChipSeleccionableReal key={op.v || "corporal"} activo={(registro.subtipo || "") === op.v} onClick={() => onCambiarRegistro({ ...registro, subtipo: op.v, carga: "" })}>
                   {op.label}
-                </button>
+                </ChipSeleccionableReal>
               ))}
             </div>
           )}
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>Registra tu carga máxima del día</div>
+          <EtiquetaCampoReal>Registra tu carga máxima del día</EtiquetaCampoReal>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>{(tarea.unidad || "reps").toUpperCase()}</span>
-              <input
+              <EtiquetaCampoReal>{(tarea.unidad || "reps").toUpperCase()}</EtiquetaCampoReal>
+              <DsInput
                 value={registro.reps}
                 onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
                 placeholder="—"
-                style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+                style={{ width: 46, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
               />
             </label>
             {registro.subtipo === "asistencia" ? (
               <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>BANDA</span>
+                <EtiquetaCampoReal>BANDA</EtiquetaCampoReal>
                 <div style={{ display: "flex", gap: 5 }}>
                   {["Ligera", "Media", "Dura"].map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => onCambiarRegistro({ ...registro, carga: r })}
-                      style={{
-                        fontSize: 10.5,
-                        padding: "6px 8px",
-                        borderRadius: 6,
-                        border: `1px solid ${registro.carga === r ? "#F5C518" : "#1A3050"}`,
-                        background: registro.carga === r ? "#F5C51822" : "#122440",
-                        color: registro.carga === r ? "#F5C518" : "#8BA4C0",
-                        cursor: "pointer",
-                      }}
-                    >
+                    <ChipSeleccionableReal key={r} activo={registro.carga === r} onClick={() => onCambiarRegistro({ ...registro, carga: r })}>
                       {r}
-                    </button>
+                    </ChipSeleccionableReal>
                   ))}
                 </div>
               </label>
             ) : tarea.esCorporal && registro.subtipo === "" ? null : (
               <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>
+                <EtiquetaCampoReal>
                   {registro.subtipo === "lastre"
                     ? "KG LASTRE"
                     : tarea.eligeEquipo
@@ -3967,47 +3917,47 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                     : tarea.equipoUnico
                     ? `KG (${tarea.equipoUnico.toUpperCase()})`
                     : "CARGA KG"}
-                </span>
-                <input
+                </EtiquetaCampoReal>
+                <DsInput
                   value={registro.carga}
                   onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
                   placeholder="—"
-                  style={{ width: 60, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+                  style={{ width: 60, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
                 />
               </label>
             )}
             <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680" }}>RIR</span>
-              <input
+              <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
+              <DsInput
                 value={registro.rir}
                 onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
                 placeholder="—"
-                style={{ width: 46, background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+                style={{ width: 46, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
               />
             </label>
           </div>
         </div>
       )}
-    </div>
+    </DsCard>
   );
 }
 
 function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
   return (
-    <div style={{ border: "1.5px solid #F5C51855", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: "#0E1E3540" }}>
+    <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.lg, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.06em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
-        <span style={{ fontSize: 11, color: "#4A6680" }}>seguir orden</span>
+        <DsBadge tone="accent">CIRCUITO</DsBadge>
+        <span style={{ fontSize: 11, color: ds.inkMuted }}>seguir orden</span>
         <span
           style={{
             marginLeft: "auto",
-            fontFamily: "'IBM Plex Mono', monospace",
+            fontFamily: dsF.mono,
             fontSize: 11,
             fontWeight: 700,
-            color: "#F5C518",
-            background: "#F5C51818",
-            border: "1px solid #F5C51850",
-            borderRadius: 6,
+            color: ds.accent,
+            background: ds.accentSubtle,
+            border: `1px solid ${ds.accentBorderSubtle}`,
+            borderRadius: dsR.sm,
             padding: "3px 8px",
           }}
         >
@@ -4097,9 +4047,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       <PantallaBase rol="jugador" centrarContenido>
         <div style={{ textAlign: "center" }}>
           <div style={{ marginBottom: 12 }}>No se encontró tu perfil.</div>
-          <button onClick={onExit} style={{ background: "#F5C518", border: "none", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontWeight: 700, cursor: "pointer" }}>
-            Volver al portal
-          </button>
+          <DsButton onClick={onExit}>Volver al portal</DsButton>
         </div>
       </PantallaBase>
     );
@@ -4112,9 +4060,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       <PantallaBase rol="jugador" centrarContenido>
         <div style={{ textAlign: "center", maxWidth: 260 }}>
           <div style={{ marginBottom: 12 }}>Tu acceso está desactivado. Habla con tu entrenador.</div>
-          <button onClick={onExit} style={{ background: "#F5C518", border: "none", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontWeight: 700, cursor: "pointer" }}>
-            Volver al portal
-          </button>
+          <DsButton onClick={onExit}>Volver al portal</DsButton>
         </div>
       </PantallaBase>
     );
@@ -4126,30 +4072,26 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return (
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
-          <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+          <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
             ← Cambiar de jugador
           </button>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>SESIONES DE HOY</div>
-            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
-            <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{fmtDateLabel(date)} · elige cuál trabajar ahora</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIONES DE HOY</div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
+            <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)} · elige cuál trabajar ahora</div>
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {estadoPorSesion.map(({ sesion, total, hechas, completa }) => (
-              <button
-                key={sesion.id}
-                onClick={() => setSesionSeleccionadaId(sesion.id)}
-                style={{ textAlign: "left", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: "14px 16px", cursor: "pointer", display: "flex", flexDirection: "column", gap: 6 }}
-              >
+              <DsCard key={sesion.id} interactive onClick={() => setSesionSeleccionadaId(sesion.id)} style={{ textAlign: "left", padding: "14px 16px", cursor: "pointer" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
-                  <span style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>{sesion.objetivo || sesion.md || "Sesión"}</span>
-                  {completa && <span style={{ color: "#22C55E", fontSize: 11, fontFamily: "'IBM Plex Mono', monospace" }}>✓ ENVIADA</span>}
+                  <span style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>{sesion.objetivo || sesion.md || "Sesión"}</span>
+                  {completa && <DsBadge tone="success">✓ ENVIADA</DsBadge>}
                 </div>
-                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#8BA4C0" }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>
                   {total} tarea{total === 1 ? "" : "s"}
                   {hechas > 0 && !completa ? ` · ${hechas}/${total} en progreso` : ""}
                 </span>
-              </button>
+              </DsCard>
             ))}
           </div>
         </div>
@@ -4374,13 +4316,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         <div>
           <button
             onClick={() => setVistaJugador("hoy")}
-            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
           >
             ← Volver
           </button>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>MI PROGRESO</div>
-            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>MI PROGRESO</div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
           </div>
           <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
         </div>
@@ -4393,30 +4335,28 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return (
       <PantallaBase rol="jugador" centrarContenido>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 12 }}>
-          <div style={{ width: 56, height: 56, borderRadius: "50%", background: "#0E1E35", border: "2px solid #22C55E", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: "#22C55E" }}>✓</div>
-          <div style={{ fontSize: 17, fontWeight: 700, color: "#F0F4FF" }}>Sesión enviada</div>
-          <div style={{ fontSize: 13, color: "#8BA4C0", maxWidth: 260, lineHeight: 1.5 }}>
+          <div style={{ width: 56, height: 56, borderRadius: dsR.full, background: ds.bgElevated, border: `2px solid ${ds.success}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 24, color: ds.success }}>✓</div>
+          <div style={{ fontSize: 17, fontWeight: 700, color: ds.ink }}>Sesión enviada</div>
+          <div style={{ fontSize: 13, color: ds.inkSecondary, maxWidth: 260, lineHeight: 1.5 }}>
             {otrasPendientes ? "Todavía te queda otra sesión de hoy por hacer." : "Tu próxima sesión estará disponible aquí cuando toque."}
           </div>
           {otrasPendientes && (
-            <button
+            <DsButton
               onClick={() => {
                 setSesionSeleccionadaId(null);
                 setEnviado(false);
                 setHechoDraft({});
                 setRegistrosDraft({});
               }}
-              style={{ marginTop: 4, background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "10px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+              style={{ marginTop: 4 }}
             >
               Ver la otra sesión de hoy
-            </button>
+            </DsButton>
           )}
-          <button onClick={() => setVistaJugador("progreso")} style={{ marginTop: 8, background: "transparent", border: "1px solid #F5C51866", color: "#F5C518", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
+          <DsButton variant="secondary" onClick={() => setVistaJugador("progreso")} style={{ marginTop: 8, borderColor: ds.accentBorderSubtle, color: ds.accent }}>
             Ver mi progreso
-          </button>
-          <button onClick={onExit} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "10px 16px", fontSize: 13, cursor: "pointer" }}>
-            ← Volver al portal
-          </button>
+          </DsButton>
+          <DsButton variant="secondary" onClick={onExit}>← Volver al portal</DsButton>
         </div>
       </PantallaBase>
     );
@@ -4427,53 +4367,41 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       <div>
         <button
           onClick={() => (todaySesiones.length > 1 ? setSesionSeleccionadaId(null) : onExit())}
-          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
         >
           {todaySesiones.length > 1 ? "← Elegir otra sesión de hoy" : "← Cambiar de jugador"}
         </button>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>SESIÓN DE HOY</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 22, fontWeight: 600, margin: "0 0 4px" }}>{player.name}</h1>
-          <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{fmtDateLabel(date)}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIÓN DE HOY</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)}</div>
           {totalTareas > 0 && vistaJugador === "hoy" && (
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, height: 4, background: "#1A3050", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${(totalHechas / totalTareas) * 100}%`, background: "#F5C518", transition: "width 0.25s ease" }} />
+              <div style={{ flex: 1, height: 4, background: ds.border, borderRadius: 3, overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${(totalHechas / totalTareas) * 100}%`, background: ds.accent, transition: "width 0.25s ease" }} />
               </div>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#4A6680" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted }}>
                 {totalHechas}/{totalTareas}
               </span>
             </div>
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-          {[
-            { id: "hoy", label: "Sesión de hoy" },
-            { id: "progreso", label: "Mi progreso" },
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setVistaJugador(v.id)}
-              style={{
-                fontSize: 12.5,
-                padding: "7px 12px",
-                borderRadius: 8,
-                border: `1px solid ${vistaJugador === v.id ? "#F5C518" : "#1A3050"}`,
-                background: vistaJugador === v.id ? "#F5C51822" : "transparent",
-                color: vistaJugador === v.id ? "#F5C518" : "#8BA4C0",
-                cursor: "pointer",
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
+        <div style={{ marginBottom: 16 }}>
+          <DsTabSwitcher
+            tabs={[
+              { id: "hoy", label: "Sesión de hoy" },
+              { id: "progreso", label: "Mi progreso" },
+            ]}
+            active={vistaJugador}
+            onChange={setVistaJugador}
+          />
         </div>
 
         {!loaded ? (
           <LoadingBlock />
         ) : totalTareas === 0 ? (
-          <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 20, textAlign: "center", color: "#8BA4C0" }}>
+          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 20, textAlign: "center", color: ds.inkSecondary }}>
             <div style={{ marginBottom: 6 }}>No tienes sesión de fuerza asignada hoy.</div>
           </div>
         ) : (
@@ -4482,7 +4410,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               {Object.entries(bloques).map(([nombreBloque, tareasBloque]) => (
                 <div key={nombreBloque}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingLeft: 2 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: "#8BA4C0" }}>{nombreBloque}</span>
+                    <span style={{ fontSize: 13.5, fontWeight: 600, color: ds.inkSecondary }}>{nombreBloque}</span>
                   </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasBloque.map((item, idx) =>
@@ -4520,21 +4448,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             </div>
 
             {errorEnvio && (
-              <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
+              <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
             )}
             {pidiendoConfirmacion ? (
               <div style={{ display: "flex", gap: 8, marginTop: 22 }}>
-                <button
-                  onClick={() => setPidiendoConfirmacion(false)}
-                  disabled={enviando}
-                  style={{ flex: 1, background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 10, padding: "13px 16px", fontSize: 14, fontWeight: 600, cursor: "pointer" }}
-                >
+                <DsButton variant="secondary" onClick={() => setPidiendoConfirmacion(false)} disabled={enviando} style={{ flex: 1 }}>
                   Cancelar
-                </button>
+                </DsButton>
                 <button
                   onClick={confirmarEnvio}
                   disabled={enviando}
-                  style={{ flex: 2, background: "#22C55E", border: "1px solid #22C55E", color: "#060D1A", borderRadius: 10, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}
+                  style={{ flex: 2, background: ds.success, border: `1px solid ${ds.success}`, color: ds.accentInk, borderRadius: dsR.lg, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}
                 >
                   {enviando ? "Enviando..." : "Confirmar envío"}
                 </button>
@@ -4545,10 +4469,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                 style={{
                   width: "100%",
                   marginTop: 22,
-                  background: totalHechas === totalTareas ? "#22C55E" : "#122440",
-                  border: `1px solid ${totalHechas === totalTareas ? "#22C55E" : "#1A3050"}`,
-                  color: totalHechas === totalTareas ? "#060D1A" : "#4A6680",
-                  borderRadius: 10,
+                  background: totalHechas === totalTareas ? ds.success : ds.bgElevated,
+                  border: `1px solid ${totalHechas === totalTareas ? ds.success : ds.border}`,
+                  color: totalHechas === totalTareas ? ds.accentInk : ds.inkMuted,
+                  borderRadius: dsR.lg,
                   padding: "13px 16px",
                   fontSize: 14,
                   fontWeight: 600,
@@ -4569,7 +4493,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </div>
           <button
             onClick={() => setGifAmpliado(null)}
-            style={{ position: "absolute", top: 20, right: 20, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", width: 34, height: 34, borderRadius: "50%", fontSize: 16, cursor: "pointer" }}
+            style={{ position: "absolute", top: 20, right: 20, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, width: 34, height: 34, borderRadius: dsR.full, fontSize: 16, cursor: "pointer" }}
           >
             ×
           </button>
