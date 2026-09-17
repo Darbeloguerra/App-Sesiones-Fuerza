@@ -505,6 +505,19 @@ const api = {
       const destino = s.jugadores_destino || [];
       return fechas.includes(fecha) && (!destino.length || destino.includes(jugadorId));
     });
+    // Próxima sesión futura de este jugador (para el Dashboard): mismo
+    // conjunto de sesiones que ya se ha traído arriba para calcular las de
+    // hoy, así que no hace falta ninguna llamada extra — solo mirar, de
+    // las suyas, cuál es la fecha futura más próxima.
+    let proximaSesion = null;
+    (todasSesiones || []).forEach((s) => {
+      const destino = s.jugadores_destino || [];
+      if (destino.length && !destino.includes(jugadorId)) return;
+      (s.fechas || []).forEach((f) => {
+        if (f <= fecha) return;
+        if (!proximaSesion || f < proximaSesion.fecha) proximaSesion = { sesion: s, fecha: f };
+      });
+    });
     const sesionIds = sesionesHoy.map((s) => s.id);
     let tareas = [];
     if (sesionIds.length) {
@@ -526,7 +539,7 @@ const api = {
       throwIfError(error);
       circuitos = data || [];
     }
-    return { sesiones: sesionesHoy, tareas, ejercicios, circuitos };
+    return { sesiones: sesionesHoy, tareas, ejercicios, circuitos, proximaSesion };
   },
   bootstrapProgramacion: async () => {
     const { data: sesiones, error: e1 } = await supabase.from("sesiones").select("*");
@@ -1577,6 +1590,7 @@ function useBootstrapJugador(jugadorId, fecha) {
     tareas: data?.tareas || [],
     ejercicios: data?.ejercicios || [],
     circuitos: data?.circuitos || [],
+    proximaSesion: data?.proximaSesion || null,
   };
 }
 
@@ -2916,7 +2930,7 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 // SVG a mano, sin librería externa (esta app no tiene ninguna cargada).
 // Cada punto es un registro con carga válida; se traza una línea recta entre
 // ellos en el orden de las fechas.
-function GraficaProgresoCargaReal({ puntos }) {
+function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
   if (puntos.length < 2) {
     return (
       <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
@@ -2963,7 +2977,7 @@ function GraficaProgresoCargaReal({ puntos }) {
           <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: ds.inkSecondary, fontFamily: dsF.mono }}>
             <span>{fmtDateShort(p.date)}</span>
             <span style={{ color: ds.ink }}>
-              {p.valor}kg{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
+              {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
             </span>
           </div>
         ))}
@@ -4256,7 +4270,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // circuitos), cada una esperando a que resolviera la anterior. Ahora: 1
   // sola petición que ya trae las 4 cosas juntas, resueltas dentro de la
   // misma ejecución de Apps Script.
-  const { loaded: bootstrapLoaded, sesiones: sesionesBootstrap, tareas: tareasBootstrap, ejercicios, circuitos } = useBootstrapJugador(player?.id, date);
+  const { loaded: bootstrapLoaded, sesiones: sesionesBootstrap, tareas: tareasBootstrap, ejercicios, circuitos, proximaSesion } = useBootstrapJugador(player?.id, date);
   // Defensa igual que en el resto de la app: no fiarse de que el filtrado
   // del backend sea correcto, se re-aplica aquí siempre.
   const todaySesiones = player
@@ -4283,9 +4297,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // su propio envío — en vez de mezclar sus tareas en una sola lista donde
   // enviar una bloqueaba también la otra sin haberse tocado.
   const [sesionSeleccionadaId, setSesionSeleccionadaId] = useState(null);
-  // Pestaña "Mi progreso" — puramente aditiva, no toca nada del flujo de
-  // sesión/envío. El jugador puede consultarla incluso en un día sin sesión.
-  const [vistaJugador, setVistaJugador] = useState("hoy");
+  // "dashboard" es ahora la pantalla de entrada — antes se entraba directo
+  // en "hoy". "sesion" es la antigua pestaña "Hoy", a la que solo se llega
+  // pulsando "Ver sesión" desde el dashboard. "cmj" es nueva.
+  const [vistaJugador, setVistaJugador] = useState("dashboard");
   const sesionActual = todaySesiones.length === 1 ? todaySesiones[0] : todaySesiones.find((s) => s.id === sesionSeleccionadaId) || null;
   const necesitaElegirSesion = todaySesiones.length > 1 && !sesionActual;
   const estadoPorSesion = todaySesiones.map((s) => {
@@ -4329,12 +4344,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   const loaded = bootstrapLoaded && registrosLoaded && historyLoaded;
 
-  if (loaded && necesitaElegirSesion) {
+  if (loaded && vistaJugador === "sesion" && necesitaElegirSesion) {
     return (
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
-          <button onClick={onExit} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-            ← Cambiar de jugador
+          <button onClick={() => setVistaJugador("dashboard")} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+            ← Volver al dashboard
           </button>
           <div style={{ marginBottom: 18 }}>
             <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIONES DE HOY</div>
@@ -4385,6 +4400,93 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const ultimoCmj = [...historyItems]
     .filter((it) => it.bloque === "CMJ" && it.date < date && it.cargaReal !== "")
     .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+
+  // ---- Datos reales para el Dashboard y la pestaña CMJ ----
+  // Historial completo de saltos (no solo "antes de hoy" como ultimoCmj,
+  // que es para la referencia dentro de la tarea) — con esto se puede
+  // mostrar tendencia y mejor marca, no solo el último dato.
+  const historialCmj = [...historyItems]
+    .filter((it) => it.bloque === "CMJ" && it.cargaReal !== "" && it.cargaReal != null)
+    .sort((a, b) => (a.date < b.date ? -1 : 1))
+    .map((it) => ({ date: it.date, value: Number(it.cargaReal) }));
+  const cmjResumen = historialCmj.length
+    ? {
+        lastValue: historialCmj[historialCmj.length - 1].value,
+        bestValue: Math.max(...historialCmj.map((p) => p.value)),
+        deltaLabel:
+          historialCmj.length > 1
+            ? `${historialCmj[historialCmj.length - 1].value - historialCmj[historialCmj.length - 2].value > 0 ? "+" : ""}${(
+                historialCmj[historialCmj.length - 1].value - historialCmj[historialCmj.length - 2].value
+              ).toFixed(1).replace(/\.0$/, "")}cm`
+            : null,
+        direction: historialCmj.length > 1 ? (historialCmj[historialCmj.length - 1].value >= historialCmj[historialCmj.length - 2].value ? "up" : "down") : "neutral",
+        history: historialCmj,
+      }
+    : null;
+
+  // "Esta semana destaca" y "Tendencia por zona corporal": ventana corrediza
+  // de 7 días naturales (hoy + 6 anteriores) contra los 7 días previos a
+  // esa — es nuestra definición de "semana" para este cálculo, no tiene por
+  // qué coincidir con tu semana de trabajo real (p. ej. lunes-domingo o tu
+  // propio microciclo); si prefieres esa referencia en vez de esta ventana
+  // corrediza, se cambia solo aquí.
+  const haceDias = (dias) => {
+    const d = new Date(date);
+    d.setDate(d.getDate() - dias);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const inicioSemanaActual = haceDias(6);
+  const inicioSemanaAnterior = haceDias(13);
+  const finSemanaAnterior = haceDias(7);
+
+  const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
+
+  // Tarea que más ha mejorado esta semana frente a su propia media
+  // histórica (la semana actual no entra en el cálculo de esa media, para
+  // no comparar la semana consigo misma).
+  const historialPorClave = new Map();
+  registrosConCarga.forEach((it) => {
+    const clave = claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir);
+    if (!historialPorClave.has(clave)) historialPorClave.set(clave, []);
+    historialPorClave.get(clave).push(it);
+  });
+  let tareaConMasMejora = null;
+  historialPorClave.forEach((regs) => {
+    const deEstaSemana = regs.filter((it) => it.date >= inicioSemanaActual);
+    const deAntes = regs.filter((it) => it.date < inicioSemanaActual);
+    if (!deEstaSemana.length || !deAntes.length) return;
+    const mediaAntes = deAntes.reduce((s, it) => s + Number(it.cargaReal), 0) / deAntes.length;
+    if (mediaAntes <= 0) return;
+    const ultimoEstaSemana = [...deEstaSemana].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+    const delta = Number(ultimoEstaSemana.cargaReal) - mediaAntes;
+    if (!tareaConMasMejora || delta > tareaConMasMejora.delta) {
+      tareaConMasMejora = { nombre: ultimoEstaSemana.name, delta, deltaLabel: `${delta > 0 ? "+" : ""}${delta.toFixed(1).replace(/\.0$/, "")}kg` };
+    }
+  });
+  const highlights =
+    tareaConMasMejora && tareaConMasMejora.delta > 0
+      ? [{ id: "mejora-semana", text: `${tareaConMasMejora.nombre} es la tarea que más ha mejorado esta semana: ${tareaConMasMejora.deltaLabel} sobre tu media histórica.` }]
+      : [];
+
+  // Tendencia por zona corporal: Zona media queda fuera (no maneja cargas);
+  // Global cuenta para las dos zonas a la vez, porque implica a ambas.
+  const perteneceAZona = (it, zona) => (it.tipos || []).includes(zona) || (it.tipos || []).includes("Global");
+  const mediaEnVentana = (zona, desde, hasta) => {
+    const regs = registrosConCarga.filter((it) => perteneceAZona(it, zona) && it.date >= desde && it.date <= hasta);
+    if (!regs.length) return null;
+    return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
+  };
+  const regionTrends = [];
+  [
+    { id: "superior", label: "Tren superior", zona: "Miembro superior" },
+    { id: "inferior", label: "Tren inferior", zona: "Miembro inferior" },
+  ].forEach(({ id, label, zona }) => {
+    const actual = mediaEnVentana(zona, inicioSemanaActual, date);
+    const anterior = mediaEnVentana(zona, inicioSemanaAnterior, finSemanaAnterior);
+    if (actual == null || anterior == null || anterior === 0) return;
+    const pct = ((actual - anterior) / anterior) * 100;
+    regionTrends.push({ id, label, deltaLabel: `${pct > 0 ? "+" : ""}${pct.toFixed(0)}%`, direction: pct >= 0 ? "up" : "down" });
+  });
 
   const lastValueByName = {};
   [...historyItems]
@@ -4566,6 +4668,186 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     }
   };
 
+  // Las tres pestañas compartidas entre Dashboard/Progreso/CMJ — "Sesión de
+  // hoy" ya no es una pestaña, se abre aparte al pulsar "Ver sesión" desde
+  // el Dashboard (ver JugadorHoy/JugadorDashboard del sistema de diseño).
+  const PLAYER_TABS = [
+    { id: "dashboard", label: "Dashboard" },
+    { id: "progreso", label: "Progreso" },
+    { id: "cmj", label: "CMJ" },
+  ];
+
+  if (vistaJugador === "dashboard") {
+    const sesionesEnviadasHoy = todaySesiones.length > 0 && estadoPorSesion.every((e) => e.completa);
+    const session = sesionesEnviadasHoy
+      ? { status: "completada" }
+      : todaySesiones.length > 0
+      ? { status: "hoy", tag: todaySesiones.length > 1 ? `${todaySesiones.length} sesiones hoy` : sesionActual?.objetivo || sesionActual?.md, taskCount: tareas.length }
+      : proximaSesion
+      ? { status: "proxima", dateLabel: fmtDateLabel(proximaSesion.fecha), detail: proximaSesion.sesion.objetivo, mdTag: proximaSesion.sesion.md }
+      : { status: "ninguna" };
+    return (
+      <PantallaBase rol="jugador" maxWidth={480}>
+        <div>
+          <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.accent, marginBottom: 4, textTransform: "uppercase" }}>
+                HOY · {fmtDateLabel(date).toUpperCase()}
+              </div>
+              <h1 style={{ fontFamily: dsF.display, fontSize: 23, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Hola, {player.name}</h1>
+            </div>
+            <button onClick={onExit} aria-label="Cambiar de jugador" style={{ width: 40, height: 40, borderRadius: 11, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.inkSecondary, cursor: "pointer", flexShrink: 0 }}>
+              ⟳
+            </button>
+          </div>
+
+          <div style={{ margin: "14px 0 20px" }}>
+            <DsTabSwitcher tabs={PLAYER_TABS} active="dashboard" onChange={setVistaJugador} />
+          </div>
+
+          <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Sesión</div>
+          {session.status === "hoy" && (
+            <DsCard style={{ borderColor: ds.accentBorderSubtle, padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.accentSubtle, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.accent, fontSize: 18 }}>⚡</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Tienes una sesión disponible hoy</div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>
+                    {session.tag}
+                    {session.taskCount != null ? ` · ${session.taskCount} tareas` : ""}
+                  </div>
+                </div>
+              </div>
+              <DsButton onClick={() => setVistaJugador("sesion")} style={{ width: "100%", marginTop: 12 }}>
+                Ver sesión →
+              </DsButton>
+            </DsCard>
+          )}
+          {session.status === "completada" && (
+            <DsCard status="done" style={{ padding: "14px 16px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: `${ds.success}22`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.success, fontSize: 18 }}>✓</div>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700 }}>Sesión de hoy enviada</div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>Tu próxima sesión aparecerá aquí cuando toque.</div>
+                </div>
+              </div>
+            </DsCard>
+          )}
+          {session.status === "proxima" && (
+            <DsCard style={{ padding: "14px 16px", flexDirection: "row", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, fontSize: 18 }}>📅</div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 14, fontWeight: 600, textTransform: "capitalize" }}>
+                  {session.dateLabel}
+                  {session.detail ? ` · ${session.detail}` : ""}
+                </div>
+                <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>Hoy no tienes sesión — esta es la próxima</div>
+              </div>
+              {session.mdTag && <DsBadge>{session.mdTag}</DsBadge>}
+            </DsCard>
+          )}
+          {session.status === "ninguna" && (
+            <div style={{ background: ds.surface, border: `1px dashed ${ds.border}`, borderRadius: dsR.lg, padding: 16, textAlign: "center", color: ds.inkMuted, fontSize: 13 }}>
+              Aún no tienes sesiones disponibles. Cuando tu entrenador publique una, aparecerá aquí.
+            </div>
+          )}
+
+          {highlights.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Esta semana destaca</div>
+              {highlights.map((h) => (
+                <div key={h.id} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", gap: 10 }}>
+                  <span style={{ color: ds.success, flexShrink: 0 }}>↗</span>
+                  <div style={{ fontSize: 13, color: ds.ink, lineHeight: 1.45 }}>{h.text}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {regionTrends.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Tendencia por zona corporal</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {regionTrends.map((r) => (
+                  <div key={r.id} style={{ flex: 1, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                    <div style={{ fontSize: 12, color: ds.inkSecondary, fontWeight: 600, marginBottom: 6 }}>{r.label}</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, color: r.direction === "up" ? ds.success : ds.danger, fontFamily: dsF.mono, fontSize: 15, fontWeight: 700 }}>
+                      {r.direction === "up" ? "↑" : "↓"} {r.deltaLabel}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginTop: 20 }}>
+            <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Salto (CMJ)</div>
+            {cmjResumen ? (
+              <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{cmjResumen.lastValue} cm</div>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, marginTop: 2 }}>último salto registrado</div>
+                </div>
+                {cmjResumen.deltaLabel && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, color: cmjResumen.direction === "up" ? ds.success : ds.danger, fontFamily: dsF.mono, fontSize: 12.5, fontWeight: 700 }}>
+                    {cmjResumen.direction === "up" ? "↑" : "↓"} {cmjResumen.deltaLabel}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", color: ds.inkMuted, fontSize: 12.5, lineHeight: 1.4 }}>
+                Próximamente: seguimiento de tu salto (CMJ) a lo largo del tiempo.
+              </div>
+            )}
+          </div>
+        </div>
+      </PantallaBase>
+    );
+  }
+
+  if (vistaJugador === "cmj") {
+    return (
+      <PantallaBase rol="jugador" maxWidth={480}>
+        <div>
+          <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>{player.name}</div>
+              <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Salto (CMJ)</h1>
+            </div>
+            <button onClick={onExit} aria-label="Cambiar de jugador" style={{ width: 40, height: 40, borderRadius: 11, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.inkSecondary, cursor: "pointer", flexShrink: 0 }}>
+              ⟳
+            </button>
+          </div>
+          <div style={{ margin: "14px 0 18px" }}>
+            <DsTabSwitcher tabs={PLAYER_TABS} active="cmj" onChange={setVistaJugador} />
+          </div>
+          <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Historial de saltos</div>
+          {cmjResumen ? (
+            <DsCard>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em" }}>
+                  {cmjResumen.lastValue}
+                  <span style={{ fontSize: 13, color: ds.inkSecondary, fontWeight: 600 }}>cm</span>
+                </div>
+                {cmjResumen.deltaLabel && (
+                  <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: cmjResumen.direction === "up" ? ds.success : ds.danger }}>{cmjResumen.deltaLabel}</div>
+                )}
+              </div>
+              <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Mejor marca: {cmjResumen.bestValue}cm</div>
+              <GraficaProgresoCargaReal puntos={cmjResumen.history.map((p) => ({ date: p.date, valor: p.value, rir: "" }))} unidad="cm" />
+            </DsCard>
+          ) : (
+            <div style={{ border: `1px dashed ${ds.border}`, borderRadius: dsR.lg, padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 10, color: ds.inkMuted }}>
+              <div style={{ fontSize: 13.5, color: ds.ink, fontWeight: 600 }}>Aún no hay tendencia de salto que mostrar</div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>En cuanto registres tu primer CMJ en una sesión, empezará a verse aquí.</div>
+            </div>
+          )}
+        </div>
+      </PantallaBase>
+    );
+  }
+
   // "Mi progreso" es su propia pantalla, independiente de si la sesión de
   // hoy está enviada o no — así se ve igual entres por la pestaña o por el
   // botón de la pantalla de "Sesión enviada". Se comprueba ANTES que el
@@ -4575,15 +4857,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return (
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
-          <button
-            onClick={() => setVistaJugador("hoy")}
-            style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
-          >
-            ← Volver
-          </button>
-          <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>MI PROGRESO</div>
-            <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
+          <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>{player.name}</div>
+              <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Tu progreso</h1>
+            </div>
+            <button onClick={onExit} aria-label="Cambiar de jugador" style={{ width: 40, height: 40, borderRadius: 11, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.inkSecondary, cursor: "pointer", flexShrink: 0 }}>
+              ⟳
+            </button>
+          </div>
+          <div style={{ margin: "14px 0 18px" }}>
+            <DsTabSwitcher tabs={PLAYER_TABS} active="progreso" onChange={setVistaJugador} />
           </div>
           <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
         </div>
@@ -4591,7 +4875,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     );
   }
 
-  if (enviado || yaEnviadaAntes) {
+  if (vistaJugador === "sesion" && (enviado || yaEnviadaAntes)) {
     const otrasPendientes = todaySesiones.length > 1 && estadoPorSesion.some((e) => e.sesion.id !== sesionActual?.id && !e.completa);
     return (
       <PantallaBase rol="jugador" centrarContenido>
@@ -4617,7 +4901,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           <DsButton variant="secondary" onClick={() => setVistaJugador("progreso")} style={{ marginTop: 8, borderColor: ds.accentBorderSubtle, color: ds.accent }}>
             Ver mi progreso
           </DsButton>
-          <DsButton variant="secondary" onClick={onExit}>← Volver al portal</DsButton>
+          <DsButton variant="secondary" onClick={() => setVistaJugador("dashboard")}>← Volver al dashboard</DsButton>
         </div>
       </PantallaBase>
     );
@@ -4627,16 +4911,24 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     <PantallaBase rol="jugador" maxWidth={480}>
       <div>
         <button
-          onClick={() => (todaySesiones.length > 1 ? setSesionSeleccionadaId(null) : onExit())}
+          onClick={() => setVistaJugador("dashboard")}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
         >
-          {todaySesiones.length > 1 ? "← Elegir otra sesión de hoy" : "← Cambiar de jugador"}
+          ← Volver al dashboard
         </button>
+        {todaySesiones.length > 1 && (
+          <button
+            onClick={() => setSesionSeleccionadaId(null)}
+            style={{ display: "block", background: "transparent", border: "none", color: ds.accent, fontSize: 11.5, cursor: "pointer", padding: 0, marginBottom: 10 }}
+          >
+            Elegir otra sesión de hoy
+          </button>
+        )}
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIÓN DE HOY</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)}</div>
-          {totalTareas > 0 && vistaJugador === "hoy" && (
+          {totalTareas > 0 && (
             <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
               <div style={{ flex: 1, height: 4, background: ds.border, borderRadius: 3, overflow: "hidden" }}>
                 <div style={{ height: "100%", width: `${(totalHechas / totalTareas) * 100}%`, background: ds.accent, transition: "width 0.25s ease" }} />
@@ -4646,17 +4938,6 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               </span>
             </div>
           )}
-        </div>
-
-        <div style={{ marginBottom: 16 }}>
-          <DsTabSwitcher
-            tabs={[
-              { id: "hoy", label: "Sesión de hoy" },
-              { id: "progreso", label: "Mi progreso" },
-            ]}
-            active={vistaJugador}
-            onChange={setVistaJugador}
-          />
         </div>
 
         {!loaded ? (
