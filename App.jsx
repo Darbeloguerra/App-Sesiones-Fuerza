@@ -281,6 +281,36 @@ const api = {
 };
 // ====== Fin backend remoto ======
 
+// ====== Sistema de diseño ======
+// Colores y tipografía centralizados — antes cada pantalla llevaba sus
+// propios valores sueltos repetidos (#0E1E35, #1A3050...) sin ningún sitio
+// común. Se introduce aquí, y las pantallas se van pasando a usarlo una a
+// una (no todas de golpe) para poder comprobar cada una por separado.
+// Paleta pensada para esto en concreto — fútbol, sub-19, sala de
+// readaptación — no la plantilla "panel oscuro + un acento" por defecto:
+// fondo con un pelín de calidez (no negro plano), el dorado reservado para
+// lo que de verdad destaca en vez de repetido en cada etiqueta, y un verde
+// con carácter propio para "hecho/positivo" en vez del verde genérico de
+// cualquier interfaz.
+const TEMA = {
+  fondo: "#0A1220",
+  fondoElevado: "#0D1A2E",
+  superficie: "#111F35",
+  superficieAlta: "#152744",
+  borde: "#1E3355",
+  bordeSuave: "#1A3050",
+  texto: "#F3F6FA",
+  textoMuted: "#8CA0BC",
+  textoTenue: "#5A7291",
+  acento: "#F0B429",
+  acentoSuave: "#F0B42922",
+  exito: "#3FBF6F",
+  alerta: "#FB923C",
+  error: "#F0605C",
+  fuenteTitular: "'Space Grotesk', sans-serif",
+  fuenteTexto: "'Inter', -apple-system, sans-serif",
+};
+
 // "Hoy" en la fecha local del dispositivo — NUNCA en UTC. España está por
 // delante de UTC (+1 invierno, +2 verano), así que usar
 // `new Date().toISOString()` devolvía el día de ayer durante las primeras
@@ -931,9 +961,9 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
         left: 0,
         right: 0,
         height: alto,
-        background: "#060D1A",
-        color: "#F0F4FF",
-        fontFamily: "'Inter', -apple-system, sans-serif",
+        background: TEMA.fondo,
+        color: TEMA.texto,
+        fontFamily: TEMA.fuenteTexto,
         display: "flex",
         justifyContent: "center",
         // Capa 1: SOLO scroll. No lleva justifyContent ni ninguna alineación —
@@ -2342,21 +2372,108 @@ const MODULOS_DASHBOARD = [
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
 ];
 
-function TarjetaModuloReal({ modulo, onClick }) {
+function TarjetaModuloReal({ modulo, destacado, onClick }) {
   return (
     <button
       onClick={onClick}
-      style={{ display: "flex", alignItems: "center", gap: 14, width: "100%", textAlign: "left", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: "16px 16px", cursor: "pointer" }}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 14,
+        width: "100%",
+        textAlign: "left",
+        background: destacado ? TEMA.superficieAlta : TEMA.superficie,
+        border: `1px solid ${destacado ? TEMA.acento + "55" : TEMA.borde}`,
+        borderRadius: 12,
+        padding: "16px 16px",
+        cursor: "pointer",
+      }}
     >
-      <div style={{ width: 42, height: 42, borderRadius: 10, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center", color: "#F5C518", flexShrink: 0 }}>
+      <div
+        style={{
+          width: 42,
+          height: 42,
+          borderRadius: 10,
+          background: destacado ? TEMA.acentoSuave : TEMA.fondoElevado,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: TEMA.acento,
+          flexShrink: 0,
+        }}
+      >
         <IconoModulo tipo={modulo.icono} />
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 14.5, fontWeight: 700, color: "#F0F4FF" }}>{modulo.nombre}</div>
-        <div style={{ fontSize: 12, color: "#8BA4C0", marginTop: 2 }}>{modulo.descripcion}</div>
+        <div style={{ fontSize: 14.5, fontWeight: 700, color: TEMA.texto }}>{modulo.nombre}</div>
+        <div style={{ fontSize: 12, color: TEMA.textoMuted, marginTop: 2 }}>{modulo.descripcion}</div>
       </div>
-      <span style={{ color: "#4A6680", fontSize: 16 }}>›</span>
+      <span style={{ color: TEMA.textoTenue, fontSize: 16 }}>›</span>
     </button>
+  );
+}
+
+// Tarjeta de estado de hoy — lo primero que se ve al entrar. Antes el
+// Dashboard era solo una lista de botones sin decir nada; esto reutiliza
+// datos que ya se cargan en Programación para responder de un vistazo a
+// "¿tengo algo pendiente hoy?" sin tener que entrar a mirarlo.
+function TarjetaEstadoHoyReal({ onAbrirModulo }) {
+  const { sesiones, loaded } = useBootstrapProgramacion();
+  const hoy = todayStr();
+  const sesionHoy = sesiones.find((s) => (s.fechas || []).includes(hoy));
+  const borradores = sesiones.filter((s) => !s.enviada).length;
+
+  if (!loaded) {
+    return (
+      <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "18px 18px", marginBottom: 20, minHeight: 64 }} />
+    );
+  }
+
+  let titulo, detalle, accionLabel, accionModulo;
+  if (!sesionHoy) {
+    titulo = "Sin sesión programada para hoy";
+    detalle = "Diseña una cuando quieras — no hace falta que sea a primera hora.";
+    accionLabel = "Diseñar sesión";
+    accionModulo = "diseno";
+  } else if (!sesionHoy.enviada) {
+    titulo = "Tienes un borrador de hoy sin enviar";
+    detalle = sesionHoy.md ? `Sesión marcada como ${sesionHoy.md}, pendiente de publicar.` : "Pendiente de publicar para que la vean tus jugadores.";
+    accionLabel = "Retomar borrador";
+    accionModulo = "programacion";
+  } else {
+    titulo = "Sesión de hoy enviada";
+    detalle = sesionHoy.md ? `Marcada como ${sesionHoy.md}.` : "Ya está visible para tus jugadores.";
+    accionLabel = "Ver quién ha registrado";
+    accionModulo = "historial";
+  }
+
+  return (
+    <div
+      style={{
+        background: TEMA.superficie,
+        border: `1px solid ${!sesionHoy ? TEMA.borde : sesionHoy.enviada ? TEMA.exito + "44" : TEMA.alerta + "44"}`,
+        borderLeft: `3px solid ${!sesionHoy ? TEMA.textoTenue : sesionHoy.enviada ? TEMA.exito : TEMA.alerta}`,
+        borderRadius: 12,
+        padding: "16px 18px",
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: 700, color: TEMA.texto, marginBottom: 3 }}>{titulo}</div>
+      <div style={{ fontSize: 12.5, color: TEMA.textoMuted, marginBottom: 12 }}>{detalle}</div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={() => onAbrirModulo(accionModulo)}
+          style={{ background: "transparent", border: `1px solid ${TEMA.acento}66`, color: TEMA.acento, borderRadius: 8, padding: "7px 12px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}
+        >
+          {accionLabel}
+        </button>
+        {borradores > 0 && (
+          <span style={{ fontSize: 11.5, color: TEMA.textoTenue }}>
+            {borradores} {borradores === 1 ? "borrador más pendiente" : "borradores más pendientes"}
+          </span>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2365,22 +2482,22 @@ function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
   return (
     <PantallaBase rol="entrenador" maxWidth={480}>
       <div>
-        <div style={{ marginBottom: 24 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518" }}>MODO ENTRENADOR</div>
-            <button
-              onClick={onCerrarSesion}
-              style={{ fontSize: 11.5, color: "#8BA4C0", background: "transparent", border: "1px solid #1A3050", borderRadius: 6, padding: "4px 9px", cursor: "pointer" }}
-            >
-              Cerrar sesión
-            </button>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+          <div>
+            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 27, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
+            <div style={{ fontSize: 12.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>{hoy}</div>
           </div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
-          <div style={{ fontSize: 12.5, color: "#8BA4C0", textTransform: "capitalize" }}>{hoy}</div>
+          <button
+            onClick={onCerrarSesion}
+            style={{ fontSize: 11.5, color: TEMA.textoMuted, background: "transparent", border: `1px solid ${TEMA.bordeSuave}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer", flexShrink: 0, marginTop: 4 }}
+          >
+            Cerrar sesión
+          </button>
         </div>
+        <TarjetaEstadoHoyReal onAbrirModulo={onAbrirModulo} />
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {MODULOS_DASHBOARD.map((m) => (
-            <TarjetaModuloReal key={m.id} modulo={m} onClick={() => onAbrirModulo(m.id)} />
+            <TarjetaModuloReal key={m.id} modulo={m} destacado={m.id === "diseno" || m.id === "programacion"} onClick={() => onAbrirModulo(m.id)} />
           ))}
         </div>
       </div>
