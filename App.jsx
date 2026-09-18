@@ -1321,13 +1321,13 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
 
 function PinInput({ value, onChange, autoFocus }) {
   return (
-    <input
+    <DsInput
       autoFocus={autoFocus}
       type="password"
       inputMode="numeric"
       pattern="[0-9]*"
       maxLength={4}
-      style={{ ...inputStyle, textAlign: "center", fontSize: 22, letterSpacing: 10, fontWeight: 700 }}
+      style={{ textAlign: "center", fontSize: 22, letterSpacing: 10, fontWeight: 700, fontFamily: dsF.mono }}
       placeholder="····"
       value={value}
       onChange={(e) => onChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -1733,7 +1733,8 @@ function useBootstrapProgramacion() {
 // ninguna altura, ni de flexbox, ni de que el navegador soporte dvh/vh bien.
 function PantallaPortal({ children, maxWidth = 320 }) {
   return (
-    <div style={{ position: "fixed", inset: 0, background: "#060D1A" }}>
+    <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas }}>
+      <GlobalStyles />
       <div
         style={{
           position: "absolute",
@@ -1744,8 +1745,8 @@ function PantallaPortal({ children, maxWidth = 320 }) {
           maxWidth,
           padding: "0 24px",
           boxSizing: "border-box",
-          color: "#F0F4FF",
-          fontFamily: "'Inter', -apple-system, sans-serif",
+          color: ds.ink,
+          fontFamily: dsF.sans,
         }}
       >
         {children}
@@ -1834,23 +1835,23 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (fallosDeConexion && coachPin == null && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.1em", color: "#F5C518", marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10, color: "#EF4444" }}>No se pudo conectar</div>
-        <div style={{ fontSize: 13, color: "#8BA4C0", marginBottom: 20, lineHeight: 1.5 }}>
+        <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10, color: ds.danger }}>No se pudo conectar</div>
+        <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 20, lineHeight: 1.5 }}>
           No se ha podido comprobar tu código — puede ser un problema de conexión o que el servidor esté tardando en
           responder. No es que falte crear uno nuevo.
         </div>
-        <button
+        <DsButton
           onClick={() => {
             retryPlayers();
             retryCoachPin();
           }}
-          style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
+          style={{ width: "100%" }}
         >
           Reintentar
-        </button>
+        </DsButton>
       </div>
     );
   }
@@ -1858,20 +1859,17 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (coachPin == null && !creatingPin && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.1em", color: "#F5C518", marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
-        <div style={{ fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Primer acceso</div>
-        <div style={{ fontSize: 13, color: "#8BA4C0", marginBottom: 20, lineHeight: 1.5 }}>
+        <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Primer acceso</div>
+        <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 20, lineHeight: 1.5 }}>
           Todavía no tienes un código de entrenador. Créalo ahora; si eres jugador, pídeselo a tu entrenador antes de
           entrar.
         </div>
-        <button
-          onClick={() => setCreatingPin(true)}
-          style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-        >
+        <DsButton onClick={() => setCreatingPin(true)} style={{ width: "100%" }}>
           Crear mi código de entrenador
-        </button>
+        </DsButton>
       </div>
     );
   }
@@ -1880,31 +1878,27 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320 }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.1em", color: "#F5C518", marginBottom: 6 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
             ENTRENAMIENTO DE FUERZA
           </div>
-          <div style={{ fontSize: 20, fontWeight: 700 }}>Crea tu código de entrenador</div>
+          <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700 }}>Crea tu código de entrenador</div>
         </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>
           CÓDIGO (4 DÍGITOS)
         </div>
         <div style={{ marginBottom: 10 }}>
           <PinInput value={pinA} onChange={setPinA} autoFocus />
         </div>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>
           REPITE EL CÓDIGO
         </div>
         <div style={{ marginBottom: 14 }}>
           <PinInput value={pinB} onChange={setPinB} />
         </div>
-        {createError && <div style={{ color: "#EF4444", fontSize: 12, textAlign: "center", marginBottom: 10 }}>{createError}</div>}
-        <button
-          onClick={crearPin}
-          disabled={saving}
-          style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.6 : 1 }}
-        >
+        {createError && <div style={{ color: ds.danger, fontSize: 12, textAlign: "center", marginBottom: 10 }}>{createError}</div>}
+        <DsButton onClick={crearPin} disabled={saving} style={{ width: "100%" }}>
           {saving ? "Guardando..." : "Crear código"}
-        </button>
+        </DsButton>
       </div>
     );
   }
@@ -1916,31 +1910,28 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
           style={{
             width: 60,
             height: 60,
-            borderRadius: "50%",
-            background: "#0E1E35",
-            border: "2px solid #22C55E",
+            borderRadius: dsR.full,
+            background: ds.bgElevated,
+            border: `2px solid ${ds.success}`,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
             fontSize: 26,
-            color: "#22C55E",
+            color: ds.success,
             margin: "0 auto 16px",
           }}
         >
           ✓
         </div>
-        <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 700, marginBottom: 6 }}>
           {resultado.tipo === "entrenador" ? "Acceso como entrenador" : `Hola, ${resultado.nombre}`}
         </div>
-        <div style={{ fontSize: 13, color: "#8BA4C0", lineHeight: 1.5, marginBottom: 20 }}>
+        <div style={{ fontSize: 13, color: ds.inkSecondary, lineHeight: 1.5, marginBottom: 20 }}>
           {resultado.tipo === "entrenador" ? "Entrando al panel del entrenador..." : "Entrando a tu sesión de hoy..."}
         </div>
-        <button
-          onClick={() => (resultado.tipo === "entrenador" ? onEnterCoach() : onEnterPlayer(resultado.id))}
-          style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-        >
+        <DsButton onClick={() => (resultado.tipo === "entrenador" ? onEnterCoach() : onEnterPlayer(resultado.id))} style={{ width: "100%" }}>
           Continuar
-        </button>
+        </DsButton>
       </div>
     );
   }
@@ -1948,14 +1939,14 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   return screenWrap(
     <div style={{ width: "100%", maxWidth: 320 }}>
       <div style={{ textAlign: "center", marginBottom: 28 }}>
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.1em", color: "#F5C518", marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
-        <div style={{ fontSize: 22, fontWeight: 700 }}>Introduce tu código</div>
-        <div style={{ fontSize: 12.5, color: "#8BA4C0", marginTop: 6 }}>El PIN de jugador o el código de entrenador</div>
+        <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700 }}>Introduce tu código</div>
+        <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 6 }}>El PIN de jugador o el código de entrenador</div>
       </div>
 
-      <input
+      <DsInput
         value={codigo}
         onChange={(e) => {
           setCodigo(e.target.value);
@@ -1966,34 +1957,26 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
         autoFocus
         type="password"
         inputMode="numeric"
+        error={!!error}
         style={{
-          width: "100%",
-          boxSizing: "border-box",
-          background: "#0E1E35",
-          border: `1.5px solid ${error ? "#EF4444" : "#1A3050"}`,
-          borderRadius: 10,
-          color: "#F0F4FF",
           fontSize: 20,
           letterSpacing: "0.2em",
           textAlign: "center",
           padding: "14px 12px",
-          fontFamily: "'IBM Plex Mono', monospace",
+          fontFamily: dsF.mono,
           marginBottom: 10,
         }}
       />
 
       {error && (
-        <div style={{ color: "#EF4444", fontSize: 12, textAlign: "center", marginBottom: 10 }}>
+        <div style={{ color: ds.danger, fontSize: 12, textAlign: "center", marginBottom: 10 }}>
           {error === true ? "Código no reconocido. Revisa e inténtalo de nuevo." : error}
         </div>
       )}
 
-      <button
-        onClick={validar}
-        style={{ width: "100%", background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 10, padding: "12px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer" }}
-      >
+      <DsButton onClick={validar} style={{ width: "100%" }}>
         Entrar
-      </button>
+      </DsButton>
     </div>
   );
 }
