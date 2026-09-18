@@ -290,33 +290,6 @@ function DsStatTile({ label, value, icon, delta, style, className }) {
     </div>
   );
 }
-function DsAvatar({ size = 32, style, className, children }) {
-  return (
-    <div className={dsCx("ds-avatar", className)} style={{ width: size, height: size, fontSize: Math.round(size * 0.4), ...style }}>
-      {children}
-    </div>
-  );
-}
-function DsNavItem({ active, icon, onClick, className, children }) {
-  return (
-    <button type="button" onClick={onClick} className={dsCx("ds-navitem", active && "ds-navitem--active", className)}>
-      {icon}
-      {children}
-    </button>
-  );
-}
-function DsStatTile({ label, value, icon, delta, style, className }) {
-  return (
-    <div className={dsCx("ds-stattile", className)} style={style}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span className="ds-stattile__label">{label}</span>
-        {icon}
-      </div>
-      <div className="ds-stattile__value">{value}</div>
-      {delta && <div className={`ds-stattile__delta ds-stattile__delta--${delta.direction || "neutral"}`}>{delta.label}</div>}
-    </div>
-  );
-}
 // FIN sistema de diseño incrustado
 // ============================================================
 
