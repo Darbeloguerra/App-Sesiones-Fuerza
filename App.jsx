@@ -17,7 +17,7 @@ const ds = {
   surface: "#111F35",
   surfaceRaised: "#152744",
   border: "#1E3355",
-  borderSoft: ds.border,
+  borderSoft: "#1A3050",
   borderMuted: "#2A4A75",
   ink: "#F3F6FA",
   inkSecondary: "#8CA0BC",
@@ -46,7 +46,7 @@ const dsSh = {
 const dsF = {
   display: "'Manrope', sans-serif",
   sans: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-  mono: dsF.mono,
+  mono: "'IBM Plex Mono', 'SF Mono', monospace",
 };
 
 // ---------- GlobalStyles.jsx (hover/pulsado/foco de los controles) ----------
