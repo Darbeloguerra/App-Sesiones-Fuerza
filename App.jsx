@@ -17,7 +17,7 @@ const ds = {
   surface: "#111F35",
   surfaceRaised: "#152744",
   border: "#1E3355",
-  borderSoft: "#1A3050",
+  borderSoft: ds.border,
   borderMuted: "#2A4A75",
   ink: "#F3F6FA",
   inkSecondary: "#8CA0BC",
@@ -46,7 +46,7 @@ const dsSh = {
 const dsF = {
   display: "'Manrope', sans-serif",
   sans: "'Inter', -apple-system, BlinkMacSystemFont, sans-serif",
-  mono: "'IBM Plex Mono', 'SF Mono', monospace",
+  mono: dsF.mono,
 };
 
 // ---------- GlobalStyles.jsx (hover/pulsado/foco de los controles) ----------
@@ -602,7 +602,7 @@ const TEMA = {
   superficie: "#111F35",
   superficieAlta: "#152744",
   borde: "#1E3355",
-  bordeSuave: "#1A3050",
+  bordeSuave: ds.border,
   texto: "#F3F6FA",
   textoMuted: "#8CA0BC",
   textoTenue: "#5A7291",
@@ -611,8 +611,8 @@ const TEMA = {
   exito: "#3FBF6F",
   alerta: "#FB923C",
   error: "#F0605C",
-  fuenteTitular: "'Space Grotesk', sans-serif",
-  fuenteTexto: "'Inter', -apple-system, sans-serif",
+  fuenteTitular: dsF.display,
+  fuenteTexto: dsF.sans,
 };
 
 // "Hoy" en la fecha local del dispositivo — NUNCA en UTC. España está por
@@ -948,12 +948,12 @@ const MD_TAGS = ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1", "MD", "MD+1", "
 
 const inputStyle = {
   width: "100%",
-  background: "#060D1A",
-  border: "1px solid #1A3050",
-  borderRadius: 8,
+  background: ds.canvas,
+  border: `1px solid ${ds.border}`,
+  borderRadius: dsR.md,
   padding: "10px 12px",
-  color: "#F0F4FF",
-  fontFamily: "'Inter', sans-serif",
+  color: ds.ink,
+  fontFamily: dsF.sans,
   fontSize: 14,
   outline: "none",
   boxSizing: "border-box",
@@ -1163,14 +1163,14 @@ function VideoEmbed({ url }) {
     return (
       <div style={{ marginTop: 8, position: "relative", width: "100%", borderRadius: 8, overflow: "hidden", background: "#000", minHeight: estado === "error" ? 0 : 160 }} onClick={(e) => e.stopPropagation()}>
         {estado === "cargando" && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "#8BA4C0", background: "#0E1E35" }}>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, background: ds.surface }}>
             <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
           </div>
         )}
         {estado === "error" ? (
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "18px 12px", background: "#0E1E35", border: "1px solid #EF444455", borderRadius: 8, color: "#EF4444", fontSize: 12.5, textAlign: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6, padding: "18px 12px", background: ds.surface, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: 8, color: ds.danger, fontSize: 12.5, textAlign: "center" }}>
             <span>No se pudo cargar el vídeo.</span>
-            <span style={{ color: "#8BA4C0", fontSize: 11.5 }}>Comprueba tu conexión o que el enlace siga siendo válido.</span>
+            <span style={{ color: ds.inkSecondary, fontSize: 11.5 }}>Comprueba tu conexión o que el enlace siga siendo válido.</span>
           </div>
         ) : (
           <video
@@ -1189,14 +1189,14 @@ function VideoEmbed({ url }) {
 
   return (
     <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}>
-      <img src={url} alt="Demostración de la tarea" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 8, display: "block", background: "#060D1A" }} />
+      <img src={url} alt="Demostración de la tarea" style={{ width: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 8, display: "block", background: ds.canvas }} />
     </div>
   );
 }
 
 function LoadingBlock() {
   return (
-    <div style={{ display: "flex", justifyContent: "center", padding: 40, color: "#8BA4C0" }}>
+    <div style={{ display: "flex", justifyContent: "center", padding: 40, color: ds.inkSecondary }}>
       <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
@@ -1990,16 +1990,16 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
 
 function ChipReal({ children, tono = "neutro" }) {
   const tonos = {
-    neutro: { color: "#8BA4C0", border: "#1A305033" },
-    verde: { color: "#F5C518", border: "#F5C51855" },
-    ambar: { color: "#F97316", border: "#F9731655" },
-    azul: { color: "#60A5FA", border: "#60A5FA55" },
+    neutro: { color: ds.inkSecondary, border: `${ds.border}99` },
+    verde: { color: ds.accent, border: ds.accentBorderSubtle },
+    ambar: { color: ds.warning, border: `${ds.warning}55` },
+    azul: { color: ds.chart2, border: `${ds.chart2}55` },
   };
   const t = tonos[tono];
   return (
     <span
       style={{
-        fontFamily: "'IBM Plex Mono', monospace",
+        fontFamily: dsF.mono,
         fontSize: 10,
         letterSpacing: "0.03em",
         color: t.color,
@@ -2039,8 +2039,8 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
         top: "120%",
         zIndex: 20,
         width: 200,
-        background: "#122440",
-        border: "1px solid #1A3050",
+        background: ds.bgElevated,
+        border: `1px solid ${ds.border}`,
         borderRadius: 10,
         boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
         padding: 8,
@@ -2048,7 +2048,7 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
         overflowY: "auto",
       }}
     >
-      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680", padding: "2px 4px 6px" }}>
+      <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, padding: "2px 4px 6px" }}>
         CATEGORÍAS PREVENTIVAS
       </div>
       {tipos.map((tipo) => {
@@ -2056,7 +2056,7 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
         if (!delTipo.length) return null;
         return (
           <div key={tipo}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.05em", color: "#F5C518", padding: "6px 6px 3px" }}>
+            <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.05em", color: ds.accent, padding: "6px 6px 3px" }}>
               {tipo.toUpperCase()}
             </div>
             {delTipo.map((cat) => {
@@ -2073,9 +2073,9 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
                     borderRadius: 6,
                     cursor: "pointer",
                     fontSize: 12.5,
-                    color: activa ? "#F5C518" : "#8BA4C0",
+                    color: activa ? ds.accent : ds.inkSecondary,
                   }}
-                  onMouseEnter={(e) => (e.currentTarget.style.background = "#1A3050")}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
                   <span
@@ -2083,9 +2083,9 @@ function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar
                       width: 14,
                       height: 14,
                       borderRadius: 4,
-                      border: `1.5px solid ${activa ? "#F5C518" : "#1A3050"}`,
-                      background: activa ? "#F5C518" : "transparent",
-                      color: "#060D1A",
+                      border: `1.5px solid ${activa ? ds.accent : ds.border}`,
+                      background: activa ? ds.accent : "transparent",
+                      color: ds.accentInk,
                       fontSize: 10,
                       display: "flex",
                       alignItems: "center",
@@ -2120,8 +2120,8 @@ function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
           top: "120%",
           zIndex: 20,
           width: 200,
-          background: "#122440",
-          border: "1px solid #1A3050",
+          background: ds.bgElevated,
+          border: `1px solid ${ds.border}`,
           borderRadius: 10,
           boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
           padding: 8,
@@ -2129,16 +2129,16 @@ function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
           overflowY: "auto",
         }}
       >
-        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680", padding: "2px 4px 6px" }}>GRUPOS</div>
-        {grupos.length === 0 && <div style={{ fontSize: 11.5, color: "#4A6680", padding: "4px 6px" }}>Todavía no has creado ningún grupo.</div>}
+        <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, padding: "2px 4px 6px" }}>GRUPOS</div>
+        {grupos.length === 0 && <div style={{ fontSize: 11.5, color: ds.inkMuted, padding: "4px 6px" }}>Todavía no has creado ningún grupo.</div>}
         {grupos.map((g) => {
           const activo = seleccionados.includes(g.id);
           return (
             <div
               key={g.id}
               onClick={() => onCambiar(activo ? seleccionados.filter((id) => id !== g.id) : [...seleccionados, g.id])}
-              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: "#F0F4FF" }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#1A3050")}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: ds.ink }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <span
@@ -2146,9 +2146,9 @@ function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
                   width: 14,
                   height: 14,
                   borderRadius: 4,
-                  border: `1.5px solid ${activo ? "#60A5FA" : "#1A3050"}`,
-                  background: activo ? "#60A5FA" : "transparent",
-                  color: "#060D1A",
+                  border: `1.5px solid ${activo ? ds.chart2 : ds.border}`,
+                  background: activo ? ds.chart2 : "transparent",
+                  color: ds.accentInk,
                   fontSize: 10,
                   display: "flex",
                   alignItems: "center",
@@ -2185,15 +2185,15 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
         top: "110%",
         zIndex: 20,
         width: 190,
-        background: "#122440",
-        border: "1px solid #1A3050",
+        background: ds.bgElevated,
+        border: `1px solid ${ds.border}`,
         borderRadius: 10,
         boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
         padding: 6,
       }}
     >
       {acciones.map((a) => {
-        const color = a.tono === "peligro" ? "#EF4444" : a.tono === "ambar" ? "#F97316" : a.tono === "verde" ? "#22C55E" : "#F0F4FF";
+        const color = a.tono === "peligro" ? ds.danger : a.tono === "ambar" ? ds.warning : a.tono === "verde" ? ds.success : ds.ink;
         return (
           <div
             key={a.id}
@@ -2202,7 +2202,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
               onCerrar();
             }}
             style={{ padding: "8px 10px", borderRadius: 6, fontSize: 12.5, color, cursor: "pointer" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = "#1A3050")}
+            onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
             {a.label}
@@ -2234,16 +2234,16 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
         alignItems: "center",
         gap: 10,
         padding: "12px 12px",
-        background: "#0E1E35",
-        border: `1px solid ${suspendido ? "#F9731633" : "#1A3050"}`,
-        borderRadius: 10,
+        background: ds.surface,
+        border: `1px solid ${suspendido ? `${ds.warning}33` : ds.border}`,
+        borderRadius: dsR.lg,
         opacity: suspendido ? 0.7 : 1,
       }}
     >
-      <div style={{ width: 8, height: 8, borderRadius: "50%", background: suspendido ? "#F97316" : "#22C55E", flexShrink: 0 }} />
+      <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, flexShrink: 0 }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "#F0F4FF" }}>{jugador.name}</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{jugador.name}</span>
           {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
         </div>
         <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
@@ -2254,11 +2254,11 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
               </ChipReal>
             ))
           ) : (
-            <span style={{ fontSize: 11, color: "#4A6680" }}>Independiente</span>
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente</span>
           )}
           <span
             onClick={() => setSelectorGruposAbierto((v) => !v)}
-            style={{ fontSize: 11, color: "#4A6680", cursor: "pointer", border: "1px dashed #1A3050", borderRadius: 4, padding: "0px 5px" }}
+            style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px" }}
             title="Editar grupos"
           >
             +
@@ -2280,11 +2280,11 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
               </ChipReal>
             ))
           ) : (
-            <span style={{ fontSize: 11, color: "#4A6680" }}>Sin categoría preventiva</span>
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Sin categoría preventiva</span>
           )}
           <span
             onClick={() => setSelectorAbierto((v) => !v)}
-            style={{ fontSize: 11, color: "#4A6680", cursor: "pointer", border: "1px dashed #1A3050", borderRadius: 4, padding: "0px 5px" }}
+            style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px" }}
             title="Editar categorías preventivas"
           >
             +
@@ -2301,13 +2301,13 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
       </div>
       <div
         onClick={() => setPinVisible((v) => !v)}
-        style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12.5, color: "#4A6680", cursor: "pointer", minWidth: 50, textAlign: "center" }}
+        style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkMuted, cursor: "pointer", minWidth: 50, textAlign: "center" }}
         title="Mostrar/ocultar PIN"
       >
         {pinVisible ? jugador.pin : "••••"}
       </div>
       <div style={{ position: "relative" }}>
-        <button onClick={() => setMenuAbierto((v) => !v)} style={{ background: "transparent", border: "none", color: "#4A6680", fontSize: 18, cursor: "pointer", padding: "2px 6px" }}>
+        <button onClick={() => setMenuAbierto((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", padding: "2px 6px" }}>
           ⋮
         </button>
         {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
@@ -2332,21 +2332,15 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "100%", maxWidth: 480, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
+        style={{ width: "100%", maxWidth: 480, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>Añadir usuario</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>Añadir usuario</div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE</span>
-          <input
-            autoFocus
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            placeholder="Ej. Pablo Fernández"
-            style={{ background: "#122440", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13.5, padding: "9px 10px" }}
-          />
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE</span>
+          <DsInput autoFocus value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Pablo Fernández" />
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>PIN DE ACCESO</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>PIN DE ACCESO</span>
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { id: "auto", label: "Generar automáticamente" },
@@ -2359,10 +2353,10 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
                   flex: 1,
                   fontSize: 12,
                   padding: "8px 8px",
-                  borderRadius: 7,
-                  border: `1px solid ${modoPin === op.id ? "#F5C518" : "#1A3050"}`,
-                  background: modoPin === op.id ? "#F5C51822" : "transparent",
-                  color: modoPin === op.id ? "#F5C518" : "#8BA4C0",
+                  borderRadius: dsR.md,
+                  border: `1px solid ${modoPin === op.id ? ds.accent : ds.border}`,
+                  background: modoPin === op.id ? ds.accentSubtle : "transparent",
+                  color: modoPin === op.id ? ds.accent : ds.inkSecondary,
                   cursor: "pointer",
                 }}
               >
@@ -2372,34 +2366,28 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
           </div>
           {modoPin === "manual" && (
             <div>
-              <input
+              <DsInput
                 value={pinManual}
                 onChange={(e) => setPinManual(e.target.value.replace(/\D/g, "").slice(0, 4))}
                 placeholder="4 dígitos"
                 inputMode="numeric"
+                error={pinManualDuplicado}
                 style={{
                   width: 100,
-                  background: "#122440",
-                  border: `1px solid ${pinManualDuplicado ? "#EF4444" : "#1A3050"}`,
-                  borderRadius: 7,
-                  color: "#F0F4FF",
                   fontSize: 15,
-                  padding: "8px 10px",
-                  fontFamily: "'IBM Plex Mono', monospace",
+                  fontFamily: dsF.mono,
                   textAlign: "center",
                   letterSpacing: "0.15em",
                 }}
               />
-              {pinManualDuplicado && <div style={{ fontSize: 11, color: "#EF4444", marginTop: 5 }}>Ese código ya está en uso (por otro jugador o por el entrenador) — elige otro.</div>}
+              {pinManualDuplicado && <div style={{ fontSize: 11, color: ds.danger, marginTop: 5 }}>Ese código ya está en uso (por otro jugador o por el entrenador) — elige otro.</div>}
             </div>
           )}
-          {modoPin === "auto" && <div style={{ fontSize: 11, color: "#4A6680" }}>Se generará un PIN de 4 dígitos que no coincide con ningún otro del roster ni con el código de entrenador.</div>}
+          {modoPin === "auto" && <div style={{ fontSize: 11, color: ds.inkMuted }}>Se generará un PIN de 4 dígitos que no coincide con ningún otro del roster ni con el código de entrenador.</div>}
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-          <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
-            Cancelar
-          </button>
-          <button
+          <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
+          <DsButton
             disabled={!puedeGuardar || guardando}
             onClick={async () => {
               setGuardando(true);
@@ -2407,20 +2395,9 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
               await onGuardar({ nombre: nombre.trim(), pin });
               setGuardando(false);
             }}
-            style={{
-              background: puedeGuardar ? "#F5C518" : "#1A3050",
-              border: `1px solid ${puedeGuardar ? "#F5C518" : "#1A3050"}`,
-              color: puedeGuardar ? "#060D1A" : "#4A6680",
-              borderRadius: 8,
-              padding: "9px 16px",
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: puedeGuardar ? "pointer" : "not-allowed",
-              opacity: guardando ? 0.6 : 1,
-            }}
           >
             {guardando ? "Guardando..." : "Añadir usuario"}
-          </button>
+          </DsButton>
         </div>
       </div>
     </div>
@@ -2439,26 +2416,26 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ width: "100%", maxWidth: 480, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
+        style={{ width: "100%", maxWidth: 480, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14 }}
       >
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>Grupos</div>
+        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>Grupos</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto" }}>
-          {grupos.length === 0 && <div style={{ fontSize: 12.5, color: "#4A6680" }}>Todavía no has creado ningún grupo.</div>}
+          {grupos.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Todavía no has creado ningún grupo.</div>}
           {grupos.map((g) => (
-            <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#122440", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 10px" }}>
-              <span style={{ flex: 1, fontSize: 13, color: "#F0F4FF" }}>{g.nombre}</span>
+            <div key={g.id} style={{ display: "flex", alignItems: "center", gap: 8, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
+              <span style={{ flex: 1, fontSize: 13, color: ds.ink }}>{g.nombre}</span>
               {confirmarBorrado === g.id ? (
                 <>
-                  <span style={{ fontSize: 11.5, color: "#8BA4C0" }}>¿Seguro?</span>
-                  <button onClick={() => onEliminar(g.id)} style={{ background: "transparent", border: "1px solid #EF444455", color: "#EF4444", borderRadius: 6, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
+                  <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>¿Seguro?</span>
+                  <button onClick={() => onEliminar(g.id)} style={{ background: "transparent", border: `1px solid ${ds.dangerBorderSubtle}`, color: ds.danger, borderRadius: dsR.sm, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
                     Sí, borrar
                   </button>
-                  <button onClick={() => setConfirmarBorrado(null)} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 6, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
+                  <button onClick={() => setConfirmarBorrado(null)} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.sm, padding: "4px 8px", fontSize: 11.5, cursor: "pointer" }}>
                     Cancelar
                   </button>
                 </>
               ) : (
-                <button onClick={() => setConfirmarBorrado(g.id)} style={{ background: "transparent", border: "none", color: "#4A6680", fontSize: 15, cursor: "pointer" }} title="Eliminar grupo">
+                <button onClick={() => setConfirmarBorrado(g.id)} style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 15, cursor: "pointer" }} title="Eliminar grupo">
                   ×
                 </button>
               )}
@@ -2466,15 +2443,10 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
           ))}
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NUEVO GRUPO</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NUEVO GRUPO</span>
           <div style={{ display: "flex", gap: 8 }}>
-            <input
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              placeholder="Ej. Delanteros"
-              style={{ flex: 1, background: "#122440", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13.5, padding: "9px 10px" }}
-            />
-            <button
+            <DsInput value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Delanteros" style={{ flex: 1 }} />
+            <DsButton
               disabled={!nombre.trim() || guardando}
               onClick={async () => {
                 setGuardando(true);
@@ -2482,24 +2454,14 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
                 setGuardando(false);
                 if (ok) setNombre("");
               }}
-              style={{
-                background: nombre.trim() ? "#F5C518" : "#1A3050",
-                border: `1px solid ${nombre.trim() ? "#F5C518" : "#1A3050"}`,
-                color: nombre.trim() ? "#060D1A" : "#4A6680",
-                borderRadius: 7,
-                padding: "9px 14px",
-                fontSize: 13,
-                fontWeight: 600,
-                cursor: nombre.trim() ? "pointer" : "not-allowed",
-              }}
             >
               {guardando ? "..." : "Crear"}
-            </button>
+            </DsButton>
           </div>
         </label>
-        <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer", alignSelf: "flex-end" }}>
+        <DsButton variant="secondary" onClick={onCerrar} style={{ alignSelf: "flex-end" }}>
           Cerrar
-        </button>
+        </DsButton>
       </div>
     </div>
   );
@@ -2597,23 +2559,23 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
       <div>
         <button
           onClick={onBack}
-          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
         >
           ← Volver a Dashboard
         </button>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>USUARIOS</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Usuarios</h1>
-          <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>USUARIOS</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
             {activos} activos · {suspendidos} suspendidos · {independientes} independientes
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <input
+          <DsInput
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             placeholder="Buscar usuario..."
-            style={{ flex: 1, minWidth: 160, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
+            style={{ flex: 1, minWidth: 160 }}
           />
         </div>
         <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
@@ -2630,10 +2592,10 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
               style={{
                 fontSize: 12.5,
                 padding: "8px 12px",
-                borderRadius: 8,
-                border: `1px solid ${filtro === f.id ? "#F5C518" : "#1A3050"}`,
-                background: filtro === f.id ? "#F5C51822" : "transparent",
-                color: filtro === f.id ? "#F5C518" : "#8BA4C0",
+                borderRadius: dsR.md,
+                border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`,
+                background: filtro === f.id ? ds.accentSubtle : "transparent",
+                color: filtro === f.id ? ds.accent : ds.inkSecondary,
                 cursor: "pointer",
                 whiteSpace: "nowrap",
               }}
@@ -2643,24 +2605,21 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
           ))}
           <button
             onClick={() => setPanelGrupoAbierto(true)}
-            style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: 8, border: "1px dashed #60A5FA66", background: "transparent", color: "#60A5FA", cursor: "pointer", whiteSpace: "nowrap" }}
+            style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: dsR.md, border: `1px dashed ${ds.chart2}66`, background: "transparent", color: ds.chart2, cursor: "pointer", whiteSpace: "nowrap" }}
           >
             + Grupo
           </button>
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {errorAccion && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorAccion}</div>}
+          {errorAccion && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px" }}>{errorAccion}</div>}
           {visibles.map((j) => (
             <FilaJugadorReal key={j.id} jugador={j} categorias={categorias} grupos={grupos} onAccion={manejarAccion} onCambiarCategorias={cambiarCategorias} onCambiarGrupos={cambiarGrupos} />
           ))}
-          {visibles.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
+          {visibles.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
         </div>
-        <button
-          onClick={() => setPanelAltaAbierto(true)}
-          style={{ width: "100%", marginTop: 16, background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 10, padding: "12px 16px", fontSize: 13.5, fontWeight: 500, cursor: "pointer" }}
-        >
+        <DsButton variant="secondary" onClick={() => setPanelAltaAbierto(true)} style={{ width: "100%", marginTop: 16, borderStyle: "dashed", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
           + Añadir usuario
-        </button>
+        </DsButton>
       </div>
       {panelAltaAbierto && <PanelAltaReal pinsExistentes={pinsOcupados()} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
       {panelGrupoAbierto && (
@@ -2810,7 +2769,7 @@ function TarjetaEstadoHoyReal({ onAbrirModulo }) {
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
         <button
           onClick={() => onAbrirModulo(accionModulo)}
-          style={{ background: TEMA.acento, border: `1px solid ${TEMA.acento}`, color: "#161200", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+          style={{ background: TEMA.acento, border: `1px solid ${TEMA.acento}`, color: ds.accentInk, borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
         >
           {accionLabel}
         </button>
@@ -3181,9 +3140,9 @@ function PuntoEstadoReal({ hecho }) {
       style={{
         width: 8,
         height: 8,
-        borderRadius: "50%",
-        background: hecho ? "#22C55E" : "#1A3050",
-        border: hecho ? "none" : "1px solid #EF4444",
+        borderRadius: dsR.full,
+        background: hecho ? ds.success : ds.border,
+        border: hecho ? "none" : `1px solid ${ds.danger}`,
         flexShrink: 0,
         display: "inline-block",
       }}
@@ -3196,14 +3155,14 @@ function FilaTareaHistorialReal({ tarea: t }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <PuntoEstadoReal hecho={t.done} />
-        <span style={{ fontSize: 12, color: t.done ? "#F0F4FF" : "#4A6680", flex: 1 }}>{t.name}</span>
+        <span style={{ fontSize: 12, color: t.done ? ds.ink : ds.inkMuted, flex: 1 }}>{t.name}</span>
         {t.done && t.esResistencia && (
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: t.subtipoCorporal === "parcial" ? "#F5C518" : "#22C55E", textAlign: "right" }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: t.subtipoCorporal === "parcial" ? ds.accent : ds.success, textAlign: "right" }}>
             {t.subtipoCorporal === "parcial" ? `Hizo menos: ${t.cargaReal || "sin detalle"}` : "Cumplido completo"}
           </span>
         )}
         {t.done && !t.esResistencia && (
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", textAlign: "right" }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, textAlign: "right" }}>
             {t.repsReal !== "" && t.repsReal != null ? t.repsReal : t.reps} {t.unidad || "reps"}
             {t.cargaReal !== "" && t.cargaReal != null ? (t.subtipoCorporal === "asistencia" ? ` · banda ${t.cargaReal}` : ` · ${t.cargaReal}kg`) : ""}
             {t.subtipoCorporal === "lastre"
@@ -3215,7 +3174,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
               : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
             {t.cambioPct != null && (
-              <span style={{ color: t.cambioPct > 0 ? "#22C55E" : t.cambioPct < 0 ? "#F97316" : "#4A6680", fontWeight: 700 }}>
+              <span style={{ color: t.cambioPct > 0 ? ds.success : t.cambioPct < 0 ? ds.warning : ds.inkMuted, fontWeight: 700 }}>
                 {" "}
                 · {t.cambioPct > 0 ? "+" : ""}
                 {t.cambioPct.toFixed(0)}%
@@ -3225,8 +3184,8 @@ function FilaTareaHistorialReal({ tarea: t }) {
         )}
       </div>
       {t.nota && (
-        <div style={{ marginLeft: 20, display: "flex", gap: 5, fontSize: 10.5, color: "#8BA4C0" }}>
-          <span style={{ color: "#F97316", flexShrink: 0 }}>📝</span>
+        <div style={{ marginLeft: 20, display: "flex", gap: 5, fontSize: 10.5, color: ds.inkSecondary }}>
+          <span style={{ color: ds.warning, flexShrink: 0 }}>📝</span>
           <span>{t.nota}</span>
         </div>
       )}
@@ -3245,24 +3204,24 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
   });
 
   return (
-    <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, overflow: "hidden" }}>
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, overflow: "hidden" }}>
       <div onClick={() => setAbierto((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", cursor: "pointer" }}>
         <div style={{ flex: 1 }}>
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF", textTransform: "capitalize" }}>
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink, textTransform: "capitalize" }}>
             {fmtDateLabel(fecha)}
-            {etiqueta && <span style={{ textTransform: "none", color: "#8BA4C0", fontWeight: 400 }}> · {etiqueta}</span>}
+            {etiqueta && <span style={{ textTransform: "none", color: ds.inkSecondary, fontWeight: 400 }}> · {etiqueta}</span>}
           </div>
-          <div style={{ fontSize: 11, color: "#4A6680", marginTop: 2 }}>
+          <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 2 }}>
             {hechas}/{total} tareas completadas
           </div>
         </div>
-        <span style={{ color: "#4A6680", fontSize: 12, transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
+        <span style={{ color: ds.inkMuted, fontSize: 12, transform: abierto ? "rotate(90deg)" : "none" }}>›</span>
       </div>
       {abierto && (
-        <div style={{ borderTop: "1px solid #1A3050", padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ borderTop: `1px solid ${ds.border}`, padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
           {Object.entries(bloques).map(([nombreBloque, tareas]) => (
             <div key={nombreBloque}>
-              <div style={{ fontSize: 12, fontWeight: 600, color: "#8BA4C0", marginBottom: 5 }}>{nombreBloque}</div>
+              <div style={{ fontSize: 12, fontWeight: 600, color: ds.inkSecondary, marginBottom: 5 }}>{nombreBloque}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {tareas.map((t) => (
                   <FilaTareaHistorialReal key={t.id} tarea={t} />
@@ -3429,7 +3388,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
     }, {});
 
   if (!players.length) {
-    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
+    return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
   }
 
   // Se agrupa por fecha + sesión de origen, no solo por fecha — dos sesiones
@@ -3492,18 +3451,14 @@ function HistorialPorJugador({ players, jugadorInicial }) {
   return (
     <>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>JUGADOR</span>
-        <select
-          value={jugadorSel}
-          onChange={(e) => setJugadorSel(e.target.value)}
-          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 240 }}
-        >
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>JUGADOR</span>
+        <DsSelect value={jugadorSel} onChange={(e) => setJugadorSel(e.target.value)} style={{ maxWidth: 240 }}>
           {players.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
-        </select>
+        </DsSelect>
       </label>
       <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
         {[
@@ -3516,10 +3471,10 @@ function HistorialPorJugador({ players, jugadorInicial }) {
             style={{
               fontSize: 12.5,
               padding: "7px 12px",
-              borderRadius: 8,
-              border: `1px solid ${vista === v.id ? "#F5C518" : "#1A3050"}`,
-              background: vista === v.id ? "#F5C51822" : "transparent",
-              color: vista === v.id ? "#F5C518" : "#8BA4C0",
+              borderRadius: dsR.md,
+              border: `1px solid ${vista === v.id ? ds.accent : ds.border}`,
+              background: vista === v.id ? ds.accentSubtle : "transparent",
+              color: vista === v.id ? ds.accent : ds.inkSecondary,
               cursor: "pointer",
             }}
           >
@@ -3529,29 +3484,25 @@ function HistorialPorJugador({ players, jugadorInicial }) {
       </div>
       {vista === "tarea" && (
         <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
-          <select
-            value={claveActiva}
-            onChange={(e) => setTareaSel(e.target.value)}
-            style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 280 }}
-          >
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
+          <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)} style={{ maxWidth: 280 }}>
             {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada</option>}
             {combinaciones.map((c) => (
               <option key={c.clave} value={c.clave}>
                 {c.etiqueta}
               </option>
             ))}
-          </select>
+          </DsSelect>
         </label>
       )}
       <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>DESDE</span>
-          <input type="date" value={desde} onChange={(e) => setDesde(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 12.5, padding: "7px 8px" }} />
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>DESDE</span>
+          <DsInput type="date" value={desde} onChange={(e) => setDesde(e.target.value)} style={{ fontSize: 12.5, padding: "7px 8px" }} />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>HASTA</span>
-          <input type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 12.5, padding: "7px 8px" }} />
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>HASTA</span>
+          <DsInput type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={{ fontSize: 12.5, padding: "7px 8px" }} />
         </label>
       </div>
       {!loaded ? (
@@ -3565,7 +3516,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
               <TarjetaDiaReal key={`${f}::${i}`} fecha={g.fecha} tareasDelDia={g.tareas} etiqueta={gruposPorFecha[f].length > 1 ? `sesión ${i + 1} de ${gruposPorFecha[f].length}` : null} />
             ))
           )}
-          {fechas.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin sesiones registradas en este rango</div>}
+          {fechas.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin sesiones registradas en este rango</div>}
         </div>
       )}
     </>
@@ -3588,7 +3539,7 @@ function HistorialPorSesion({ players }) {
 
   if (!sesionesLoaded) return <LoadingBlock />;
   if (!enviadas.length) {
-    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no se ha enviado ninguna sesión.</div>;
+    return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no se ha enviado ninguna sesión.</div>;
   }
 
   const targets = sesionSel?.jugadores_destino?.length ? players.filter((p) => sesionSel.jugadores_destino.includes(p.id)) : players;
@@ -3610,12 +3561,8 @@ function HistorialPorSesion({ players }) {
   return (
     <>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>SESIÓN</span>
-        <select
-          value={sesionSel?.id || ""}
-          onChange={(e) => setFechaSesionSel(e.target.value)}
-          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 280 }}
-        >
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>SESIÓN</span>
+        <DsSelect value={sesionSel?.id || ""} onChange={(e) => setFechaSesionSel(e.target.value)} style={{ maxWidth: 280 }}>
           {enviadas.map((s) => (
             <option key={s.id} value={s.id}>
               {(s.fechas || []).map((f) => fmtDateShort(f)).join(", ")}
@@ -3623,14 +3570,14 @@ function HistorialPorSesion({ players }) {
               {s.objetivo ? ` · ${s.objetivo}` : ""}
             </option>
           ))}
-        </select>
+        </DsSelect>
       </label>
       {!loaded ? (
         <LoadingBlock />
       ) : (
         <>
-          <div style={{ fontSize: 12, color: "#8BA4C0", marginBottom: 12, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 12px" }}>
-            <strong style={{ color: enviadosCount === estados.length && estados.length > 0 ? "#22C55E" : "#F97316" }}>
+          <div style={{ fontSize: 12, color: ds.inkSecondary, marginBottom: 12, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 12px" }}>
+            <strong style={{ color: enviadosCount === estados.length && estados.length > 0 ? ds.success : ds.warning }}>
               {enviadosCount}/{estados.length}
             </strong>{" "}
             jugadores han enviado esta sesión
@@ -3638,12 +3585,12 @@ function HistorialPorSesion({ players }) {
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {estados.map((e) => {
               const completo = e.enviado && e.hechas === e.total;
-              const color = e.enviado ? (completo ? "#22C55E" : "#F5C518") : "#F97316";
+              const color = e.enviado ? (completo ? ds.success : ds.accent) : ds.warning;
               return (
-                <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, padding: "10px 14px" }}>
-                  <span style={{ width: 9, height: 9, borderRadius: "50%", background: e.enviado ? color : "#1A3050", border: e.enviado ? "none" : "1px solid #F97316", flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 13.5, color: "#F0F4FF" }}>{e.jugador}</span>
-                  <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color }}>
+                <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "10px 14px" }}>
+                  <span style={{ width: 9, height: 9, borderRadius: dsR.full, background: e.enviado ? color : ds.border, border: e.enviado ? "none" : `1px solid ${ds.warning}`, flexShrink: 0 }} />
+                  <span style={{ flex: 1, fontSize: 13.5, color: ds.ink }}>{e.jugador}</span>
+                  <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color }}>
                     {e.enviado ? `✓ Enviada (${e.hechas}/${e.total})` : "Sin enviar"}
                   </span>
                 </div>
@@ -3667,7 +3614,7 @@ function HistorialPorTarea({ players }) {
   const { loaded, items } = usePlayerHistory(jugadorSel || null);
 
   if (!players.length) {
-    return <div style={{ color: "#8BA4C0", fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
+    return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
   }
 
   const ejerciciosDisponibles = [...new Set(items.map((it) => it.name))].sort();
@@ -3700,22 +3647,22 @@ function HistorialPorTarea({ players }) {
   return (
     <>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>JUGADOR</span>
-        <select
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>JUGADOR</span>
+        <DsSelect
           value={jugadorSel}
           onChange={(e) => {
             setJugadorSel(e.target.value);
             setEjercicioSel("");
             setDisenoSel("");
           }}
-          style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 240 }}
+          style={{ maxWidth: 240 }}
         >
           {players.map((p) => (
             <option key={p.id} value={p.id}>
               {p.name}
             </option>
           ))}
-        </select>
+        </DsSelect>
       </label>
 
       {!loaded ? (
@@ -3723,14 +3670,14 @@ function HistorialPorTarea({ players }) {
       ) : (
         <>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>EJERCICIO</span>
-            <select
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>EJERCICIO</span>
+            <DsSelect
               value={ejercicioSel}
               onChange={(e) => {
                 setEjercicioSel(e.target.value);
                 setDisenoSel("");
               }}
-              style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "8px 10px", maxWidth: 280 }}
+              style={{ maxWidth: 280 }}
             >
               <option value="">— Elige un ejercicio —</option>
               {ejerciciosDisponibles.map((nombre) => (
@@ -3738,7 +3685,7 @@ function HistorialPorTarea({ players }) {
                   {nombre}
                 </option>
               ))}
-            </select>
+            </DsSelect>
           </label>
 
           {ejercicioSel && (
@@ -3750,10 +3697,10 @@ function HistorialPorTarea({ players }) {
                   style={{
                     fontSize: 12,
                     padding: "6px 10px",
-                    borderRadius: 8,
-                    border: `1px solid ${disenoSel === d.clave ? "#F5C518" : "#1A3050"}`,
-                    background: disenoSel === d.clave ? "#F5C51822" : "transparent",
-                    color: disenoSel === d.clave ? "#F5C518" : "#8BA4C0",
+                    borderRadius: dsR.md,
+                    border: `1px solid ${disenoSel === d.clave ? ds.accent : ds.border}`,
+                    background: disenoSel === d.clave ? ds.accentSubtle : "transparent",
+                    color: disenoSel === d.clave ? ds.accent : ds.inkSecondary,
                     cursor: "pointer",
                   }}
                 >
@@ -3767,7 +3714,7 @@ function HistorialPorTarea({ players }) {
             (puntos.length ? (
               <GraficoProgresionCarga puntos={puntos} />
             ) : (
-              <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
+              <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
             ))}
         </>
       )}
@@ -3792,22 +3739,22 @@ function GraficoProgresionCarga({ puntos }) {
   const puntosSvg = puntos.map((p, i) => `${x(i)},${y(p.carga)}`).join(" ");
 
   return (
-    <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 10, padding: 12 }}>
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 12 }}>
       <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <polyline points={puntosSvg} fill="none" stroke="#F5C518" strokeWidth="2" />
+        <polyline points={puntosSvg} fill="none" stroke={ds.accent} strokeWidth="2" />
         {puntos.map((p, i) => (
-          <circle key={i} cx={x(i)} cy={y(p.carga)} r="3.5" fill="#F5C518" />
+          <circle key={i} cx={x(i)} cy={y(p.carga)} r="3.5" fill={ds.accent} />
         ))}
-        <text x={padding.left} y={alto - 8} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace">
+        <text x={padding.left} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono}>
           {puntos[0].fecha}
         </text>
-        <text x={ancho - padding.right} y={alto - 8} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+        <text x={ancho - padding.right} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
           {puntos[puntos.length - 1].fecha}
         </text>
-        <text x={padding.left - 6} y={y(max) + 4} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+        <text x={padding.left - 6} y={y(max) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
           {max}kg
         </text>
-        <text x={padding.left - 6} y={y(min) + 4} fill="#4A6680" fontSize="10" fontFamily="'IBM Plex Mono', monospace" textAnchor="end">
+        <text x={padding.left - 6} y={y(min) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
           {min}kg
         </text>
       </svg>
@@ -3816,7 +3763,7 @@ function GraficoProgresionCarga({ puntos }) {
           .slice()
           .reverse()
           .map((p, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#8BA4C0" }}>
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: ds.inkSecondary }}>
               <span>{p.fecha}</span>
               <span>
                 {p.carga}kg{p.reps !== "" && p.reps != null ? ` · ${p.reps} reps` : ""}
@@ -3836,12 +3783,12 @@ function HistorialReal({ onBack }) {
   return (
     <PantallaBase rol="entrenador" maxWidth={560}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>HISTORIAL</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Registro diario</h1>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
           {[
@@ -3855,10 +3802,10 @@ function HistorialReal({ onBack }) {
               style={{
                 fontSize: 12.5,
                 padding: "7px 12px",
-                borderRadius: 8,
-                border: `1px solid ${vista === v.id ? "#F5C518" : "#1A3050"}`,
-                background: vista === v.id ? "#F5C51822" : "transparent",
-                color: vista === v.id ? "#F5C518" : "#8BA4C0",
+                borderRadius: dsR.md,
+                border: `1px solid ${vista === v.id ? ds.accent : ds.border}`,
+                background: vista === v.id ? ds.accentSubtle : "transparent",
+                color: vista === v.id ? ds.accent : ds.inkSecondary,
                 cursor: "pointer",
               }}
             >
@@ -3885,38 +3832,38 @@ function HistorialReal({ onBack }) {
 
 function TareaVisualReal({ tarea }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#122440", border: "1px solid #1A3050", borderRadius: 8, padding: "8px 10px" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
       {tarea.gif ? (
-        <div style={{ position: "relative", width: 42, height: 42, borderRadius: 7, flexShrink: 0, background: "#0E1E35", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "relative", width: 42, height: 42, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {miniaturaTarea(tarea.gif) && (
-            <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: 7, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
           )}
           {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 7 }}>
-              <Play size={13} color={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} fill={miniaturaTarea(tarea.gif) ? "#fff" : "#F5C518"} />
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+              <Play size={13} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
             </div>
           )}
         </div>
       ) : (
-        <div style={{ width: 42, height: 42, borderRadius: 7, background: "#0E1E35", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ width: 42, height: 42, borderRadius: dsR.md, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
           VÍDEO
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 12.5, color: "#F0F4FF" }}>{tarea.nombre}</div>
-        <div style={{ fontSize: 10.5, color: "#4A6680", fontFamily: "'IBM Plex Mono', monospace" }}>{tarea.detalle}</div>
+        <div style={{ fontSize: 12.5, color: ds.ink }}>{tarea.nombre}</div>
+        <div style={{ fontSize: 10.5, color: ds.inkMuted, fontFamily: dsF.mono }}>{tarea.detalle}</div>
         {tarea.materiales && tarea.materiales.length > 0 && (
           <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
             {tarea.materiales.map((m) => (
-              <span key={m} style={{ fontSize: 9.5, color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace" }}>
+              <span key={m} style={{ fontSize: 9.5, color: ds.accent, fontFamily: dsF.mono }}>
                 {m}
               </span>
             ))}
           </div>
         )}
         {tarea.nota && (
-          <div style={{ display: "flex", gap: 4, marginTop: 3, fontSize: 10, color: "#8BA4C0" }}>
-            <span style={{ color: "#F97316" }}>📝</span>
+          <div style={{ display: "flex", gap: 4, marginTop: 3, fontSize: 10, color: ds.inkSecondary }}>
+            <span style={{ color: ds.warning }}>📝</span>
             <span>{tarea.nota}</span>
           </div>
         )}
@@ -3976,54 +3923,54 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
   });
 
   return (
-    <div style={{ background: "#0E1E35", border: `1px solid ${esHoy ? "#F5C51866" : "#1A3050"}`, borderRadius: 12, overflow: "hidden" }}>
+    <div style={{ background: ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: dsR.lg, overflow: "hidden" }}>
       <div onClick={() => setAbierta((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", cursor: "pointer" }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          {sesion.nombre && <div style={{ fontSize: 13.5, fontWeight: 700, color: "#F5C518", marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sesion.nombre}</div>}
+          {sesion.nombre && <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.accent, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sesion.nombre}</div>}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             {esHoy && (
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, letterSpacing: "0.05em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 6px" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>
                 HOY
               </span>
             )}
             {(sesion.fechas || []).map((f) => (
-              <span key={f} style={{ fontSize: 13, fontWeight: 600, color: "#F0F4FF" }}>
+              <span key={f} style={{ fontSize: 13, fontWeight: 600, color: ds.ink }}>
                 {fmtDateShort(f)}
               </span>
             ))}
-            {!(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: "#4A6680" }}>Sin fecha todavía</span>}
+            {!(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: ds.inkMuted }}>Sin fecha todavía</span>}
             {sesion.md && (
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#8BA4C0", border: "1px solid #1A3050", borderRadius: 4, padding: "1px 6px" }}>{sesion.md}</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 6px" }}>{sesion.md}</span>
             )}
             {sesion.enviada ? (
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#22C55E", border: "1px solid #22C55E55", borderRadius: 4, padding: "1px 6px" }}>✓ ENVIADA</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.success, border: `1px solid ${ds.successBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>✓ ENVIADA</span>
             ) : (
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F97316", border: "1px solid #F9731655", borderRadius: 4, padding: "1px 6px" }}>BORRADOR</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.warning, border: `1px solid ${ds.warning}55`, borderRadius: 4, padding: "1px 6px" }}>BORRADOR</span>
             )}
           </div>
-          <div style={{ fontSize: 11.5, color: "#4A6680", marginTop: 3 }}>
+          <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 3 }}>
             {!sesion.jugadores_destino || !sesion.jugadores_destino.length ? "Todo el equipo" : `${sesion.jugadores_destino.length} jugador(es)`}
             {(sesion.fechas || []).length > 1 && ` · lote de ${sesion.fechas.length} fechas`}
           </div>
         </div>
-        <span style={{ color: "#4A6680", fontSize: 12, transform: abierta ? "rotate(90deg)" : "none" }}>›</span>
+        <span style={{ color: ds.inkMuted, fontSize: 12, transform: abierta ? "rotate(90deg)" : "none" }}>›</span>
       </div>
       {abierta && (
-        <div style={{ borderTop: "1px solid #1A3050", padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ borderTop: `1px solid ${ds.border}`, padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
           {sesion.objetivo && (
-            <div style={{ fontSize: 12, color: "#8BA4C0" }}>
-              <strong style={{ color: "#F0F4FF" }}>Objetivo:</strong> {sesion.objetivo}
+            <div style={{ fontSize: 12, color: ds.inkSecondary }}>
+              <strong style={{ color: ds.ink }}>Objetivo:</strong> {sesion.objetivo}
             </div>
           )}
           {Object.entries(bloques).map(([nombreBloque, items]) => (
             <div key={nombreBloque}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: "#8BA4C0", marginBottom: 6 }}>{nombreBloque}</div>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 6 }}>{nombreBloque}</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {items.map((item) =>
                   item.tipo === "circuito" ? (
-                    <div key={item.circuitoId} style={{ border: "1.5px solid #F5C51855", borderRadius: 8, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: "#0E1E3540" }}>
+                    <div key={item.circuitoId} style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: `${ds.surface}40` }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, letterSpacing: "0.05em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 6px" }}>CIRCUITO</span>
+                        <span style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>CIRCUITO</span>
                       </div>
                       {item.tareas.map((t, i) => (
                         <TareaVisualReal
@@ -4054,23 +4001,17 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
               </div>
             </div>
           ))}
-          <button
-            onClick={() => onEditar(sesion)}
-            style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer", fontWeight: 600 }}
-          >
+          <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} style={{ alignSelf: "flex-start" }}>
             Editar esta sesión
-          </button>
+          </DsButton>
           {onReutilizar && (
-            <button
-              onClick={() => onReutilizar(sesion)}
-              style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #F5C51855", background: "transparent", color: "#F5C518", cursor: "pointer", fontWeight: 600 }}
-            >
+            <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ alignSelf: "flex-start", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
               Reutilizar como nueva
-            </button>
+            </DsButton>
           )}
           {confirmando ? (
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: "#EF4444" }}>
+              <span style={{ fontSize: 12, color: ds.danger }}>
                 {sesion.enviada ? "Esta sesión ya se envió — ¿eliminarla igualmente?" : "¿Eliminar esta sesión? No se puede deshacer."}
               </span>
               <button
@@ -4079,21 +4020,18 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
                   await onEliminar(sesion.id);
                 }}
                 disabled={borrando}
-                style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #EF4444", background: "#EF444422", color: "#EF4444", cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
+                style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.danger}`, background: `${ds.danger}22`, color: ds.danger, cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
               >
                 {borrando ? "Eliminando..." : "Sí, eliminar"}
               </button>
-              <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: 7, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer" }}>
+              <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>
                 Cancelar
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => setConfirmando(true)}
-              style={{ alignSelf: "flex-start", fontSize: 12.5, padding: "8px 14px", borderRadius: 8, border: "1px solid #EF444455", background: "transparent", color: "#EF4444", cursor: "pointer", fontWeight: 600 }}
-            >
+            <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ alignSelf: "flex-start" }}>
               Eliminar sesión
-            </button>
+            </DsButton>
           )}
         </div>
       )}
@@ -4225,18 +4163,18 @@ function ProgramacionReal({ players, onBack }) {
   return (
     <PantallaBase rol="entrenador" maxWidth={560}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>PROGRAMACIÓN</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Sesiones</h1>
-          <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>PROGRAMACIÓN</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
         </div>
-        {errorBorrado && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
+        {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
         {hoy.length > 0 && (
           <div style={{ marginBottom: 20 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>HOY</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8 }}>HOY</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {hoy.map((s) => (
                 <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
@@ -4245,33 +4183,33 @@ function ProgramacionReal({ players, onBack }) {
           </div>
         )}
         <div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.05em", color: "#4A6680", marginBottom: 8 }}>PRÓXIMAS</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8 }}>PRÓXIMAS</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {futuras.map((s) => (
               <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
             ))}
-            {futuras.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>No hay más sesiones programadas</div>}
+            {futuras.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>No hay más sesiones programadas</div>}
           </div>
         </div>
 
         <div style={{ marginTop: 24 }}>
           <button
             onClick={() => setVerBiblioteca((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "1px solid #F5C51855", borderRadius: 8, padding: "10px 14px", cursor: "pointer", color: "#F0F4FF", fontSize: 13, fontWeight: 600 }}
+            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}
           >
-            <BookOpen size={14} color="#F5C518" />
+            <BookOpen size={14} color={ds.accent} />
             Biblioteca de sesiones{plantillas.length || busquedaBiblioteca ? ` (${plantillas.length})` : ""}
-            <span style={{ marginLeft: "auto", color: "#4A6680", fontSize: 12, transform: verBiblioteca ? "rotate(90deg)" : "none" }}>›</span>
+            <span style={{ marginLeft: "auto", color: ds.inkMuted, fontSize: 12, transform: verBiblioteca ? "rotate(90deg)" : "none" }}>›</span>
           </button>
           {verBiblioteca && (
             <div style={{ marginTop: 10 }}>
               <div style={{ position: "relative", marginBottom: 10 }}>
-                <Search size={14} color="#4A6680" style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-                <input
+                <Search size={14} color={ds.inkMuted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
+                <DsInput
                   value={busquedaBiblioteca}
                   onChange={(e) => setBusquedaBiblioteca(e.target.value)}
                   placeholder="Buscar por nombre..."
-                  style={{ width: "100%", boxSizing: "border-box", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "9px 10px 9px 32px" }}
+                  style={{ paddingLeft: 32 }}
                 />
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -4279,7 +4217,7 @@ function ProgramacionReal({ players, onBack }) {
                   <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
                 ))}
                 {plantillas.length === 0 && (
-                  <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>
+                  <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
                     {busquedaBiblioteca ? "Ninguna plantilla coincide con esa búsqueda." : 'Todavía no has puesto nombre a ninguna sesión. Ponle uno al diseñarla para que aparezca aquí.'}
                   </div>
                 )}
@@ -4291,25 +4229,22 @@ function ProgramacionReal({ players, onBack }) {
         <div style={{ marginTop: 14 }}>
           <button
             onClick={() => setVerHistorial((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: "1px solid #1A3050", borderRadius: 8, padding: "10px 14px", cursor: "pointer", color: "#F0F4FF", fontSize: 13, fontWeight: 600 }}
+            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}
           >
-            <History size={14} color="#8BA4C0" />
+            <History size={14} color={ds.inkSecondary} />
             Historial de sesiones{pasadas.length ? ` (${pasadas.length})` : ""}
-            <span style={{ marginLeft: "auto", color: "#4A6680", fontSize: 12, transform: verHistorial ? "rotate(90deg)" : "none" }}>›</span>
+            <span style={{ marginLeft: "auto", color: ds.inkMuted, fontSize: 12, transform: verHistorial ? "rotate(90deg)" : "none" }}>›</span>
           </button>
           {verHistorial && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
               {pasadas.slice(0, historialVisible).map((s) => (
                 <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
               ))}
-              {pasadas.length === 0 && <div style={{ color: "#4A6680", fontSize: 13, padding: "16px 0", textAlign: "center" }}>Todavía no hay sesiones pasadas</div>}
+              {pasadas.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>Todavía no hay sesiones pasadas</div>}
               {pasadas.length > historialVisible && (
-                <button
-                  onClick={() => setHistorialVisible((v) => v + 15)}
-                  style={{ alignSelf: "center", fontSize: 12.5, padding: "8px 16px", borderRadius: 8, border: "1px solid #1A3050", background: "transparent", color: "#8BA4C0", cursor: "pointer" }}
-                >
+                <DsButton variant="secondary" size="sm" onClick={() => setHistorialVisible((v) => v + 15)} style={{ alignSelf: "center" }}>
                   Mostrar más
-                </button>
+                </DsButton>
               )}
             </div>
           )}
@@ -5457,13 +5392,13 @@ function TagChipReal({ tag, activo, onClick }) {
     <button
       onClick={onClick}
       style={{
-        fontFamily: "'IBM Plex Mono', monospace",
+        fontFamily: dsF.mono,
         fontSize: 11,
         letterSpacing: "0.02em",
-        color: activo ? "#060D1A" : "#8BA4C0",
-        background: activo ? "#F5C518" : "transparent",
-        border: `1px solid ${activo ? "#F5C518" : "#1A3050"}`,
-        borderRadius: 6,
+        color: activo ? ds.accentInk : ds.inkSecondary,
+        background: activo ? ds.accent : "transparent",
+        border: `1px solid ${activo ? ds.accent : ds.border}`,
+        borderRadius: dsR.sm,
         padding: "4px 9px",
         cursor: "pointer",
         whiteSpace: "nowrap",
@@ -5475,45 +5410,45 @@ function TagChipReal({ tag, activo, onClick }) {
 }
 
 function campoSelectReal(extra = {}) {
-  return { background: "#122440", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 9px", ...extra };
+  return { background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.ink, fontSize: 13, padding: "8px 9px", ...extra };
 }
 
-const btnIconoReal = { background: "transparent", border: "1px solid #1A3050", borderRadius: 6, color: "#4A6680", width: 26, height: 26, cursor: "pointer", fontSize: 12.5 };
+const btnIconoReal = { background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.inkMuted, width: 26, height: 26, cursor: "pointer", fontSize: 12.5 };
 
 function TarjetaEjercicioReal({ ejercicio, categorias, esVariante, onEditar, onEliminar, onCrearVariante }) {
   const nombreCategoria = categorias.find((c) => c.id === ejercicio.categoria_preventiva_id)?.nombre;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginLeft: esVariante ? 20 : 0, background: esVariante ? "#0B1A2E" : "#0E1E35", border: `1px solid ${esVariante ? "#1A305088" : "#1A3050"}`, borderRadius: 10 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginLeft: esVariante ? 20 : 0, background: esVariante ? ds.canvas : ds.surface, border: `1px solid ${esVariante ? `${ds.border}88` : ds.border}`, borderRadius: dsR.lg }}>
       {ejercicio.gif_url ? (
-        <div style={{ position: "relative", width: 40, height: 40, borderRadius: 7, flexShrink: 0, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ position: "relative", width: 40, height: 40, borderRadius: dsR.md, flexShrink: 0, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
           {miniaturaTarea(ejercicio.gif_url) && (
-            <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: 7, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
           )}
           {(extractYouTubeId(ejercicio.gif_url) || esVideoDirecto(ejercicio.gif_url)) && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(ejercicio.gif_url) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: 7 }}>
-              <Play size={13} color={miniaturaTarea(ejercicio.gif_url) ? "#fff" : "#F5C518"} fill={miniaturaTarea(ejercicio.gif_url) ? "#fff" : "#F5C518"} />
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(ejercicio.gif_url) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+              <Play size={13} color={miniaturaTarea(ejercicio.gif_url) ? "#fff" : ds.accent} fill={miniaturaTarea(ejercicio.gif_url) ? "#fff" : ds.accent} />
             </div>
           )}
         </div>
       ) : (
-        <div style={{ width: 40, height: 40, borderRadius: 7, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#4A6680", fontSize: 9, fontFamily: "'IBM Plex Mono', monospace" }}>
+        <div style={{ width: 40, height: 40, borderRadius: dsR.md, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
           —
         </div>
       )}
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {esVariante && <span style={{ color: "#4A6680", fontSize: 12 }}>↳</span>}
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: "#F0F4FF" }}>{ejercicio.nombre}</div>
+          {esVariante && <span style={{ color: ds.inkMuted, fontSize: 12 }}>↳</span>}
+          <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink }}>{ejercicio.nombre}</div>
         </div>
         <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
           {esVariante && (
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#8BA4C0", border: "1px solid #1A3050", borderRadius: 4, padding: "1px 5px" }}>VARIANTE</span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 5px" }}>VARIANTE</span>
           )}
           {nombreCategoria && (
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "1px 5px" }}>{nombreCategoria}</span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 5px" }}>{nombreCategoria}</span>
           )}
           {(ejercicio.tags_descriptivos || []).map((t) => (
-            <span key={t} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9.5, color: "#4A6680", border: "1px solid #1A3050", borderRadius: 4, padding: "1px 5px" }}>
+            <span key={t} style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 5px" }}>
               {t}
             </span>
           ))}
@@ -5571,14 +5506,14 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
 
   return (
     <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: "#0E1E35", border: "1px solid #1A3050", borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14, maxHeight: "85vh", overflowY: "auto" }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: "#F0F4FF" }}>{ejercicioEditar ? "Editar ejercicio" : "Nuevo ejercicio"}</div>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14, maxHeight: "85vh", overflowY: "auto" }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>{ejercicioEditar ? "Editar ejercicio" : "Nuevo ejercicio"}</div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE</span>
           <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Sentadilla frontal" style={campoSelectReal()} />
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>VARIANTE DE (OPCIONAL — SOLO PARA AGRUPARLO EN LA BIBLIOTECA)</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VARIANTE DE (OPCIONAL — SOLO PARA AGRUPARLO EN LA BIBLIOTECA)</span>
           <select value={ejercicioBaseId} onChange={(e) => setEjercicioBaseId(e.target.value)} style={campoSelectReal()}>
             <option value="">Ninguno — es un ejercicio matriz</option>
             {(ejercicios || [])
@@ -5592,7 +5527,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           </select>
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>BLOQUE (único, obligatorio)</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BLOQUE (único, obligatorio)</span>
           <select value={bloque} onChange={(e) => setBloque(e.target.value)} style={campoSelectReal()}>
             {BLOQUES_BIBLIOTECA.map((b) => (
               <option key={b} value={b}>
@@ -5603,7 +5538,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         {esPreventivo && (
           <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>CATEGORÍA PREVENTIVA (obligatoria, solo aplica a este bloque)</span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>CATEGORÍA PREVENTIVA (obligatoria, solo aplica a este bloque)</span>
             <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} style={campoSelectReal()}>
               {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
                 <optgroup key={tipo} label={tipo}>
@@ -5620,7 +5555,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           </label>
         )}
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>ZONA CORPORAL (obligatoria)</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
               <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => seleccionarZona(t)} />
@@ -5633,35 +5568,35 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
               width: 18,
               height: 18,
               borderRadius: 5,
-              border: `1.5px solid ${sinLateralidad ? "#F5C518" : "#1A3050"}`,
-              background: sinLateralidad ? "#F5C518" : "transparent",
+              border: `1.5px solid ${sinLateralidad ? ds.accent : ds.border}`,
+              background: sinLateralidad ? ds.accent : "transparent",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               flexShrink: 0,
-              color: "#060D1A",
+              color: ds.accentInk,
               fontSize: 12,
             }}
           >
             {sinLateralidad ? "✓" : ""}
           </span>
-          <span style={{ fontSize: 12.5, color: "#8BA4C0" }}>Sin lateralidad (ej. bici estática — no mostrar etiqueta Bilateral/Unilateral)</span>
+          <span style={{ fontSize: 12.5, color: ds.inkSecondary }}>Sin lateralidad (ej. bici estática — no mostrar etiqueta Bilateral/Unilateral)</span>
         </div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>VÍDEO GENÉRICO (respaldo si una variante no tiene el suyo propio)</span>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VÍDEO GENÉRICO (respaldo si una variante no tiene el suyo propio)</span>
           <input
             value={videoUrl}
             onChange={(e) => setVideoUrl(e.target.value)}
             placeholder="https://youtu.be/... o https://pub-xxxx.r2.dev/....mp4"
-            style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? "#EF4444" : undefined }}
+            style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? ds.danger : undefined }}
           />
           {enlaceNoReconocido && (
-            <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace — debe ser de YouTube o terminar en .mp4/.webm/.mov.</span>
+            <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace — debe ser de YouTube o terminar en .mp4/.webm/.mov.</span>
           )}
           {enlaceReconocido && <VideoEmbed url={videoUrl} />}
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>
             VÍDEOS POR VARIANTE (opcional — para cuando el gesto cambia según el material)
           </span>
           {filasVariantes.map((f) => {
@@ -5670,7 +5605,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
             const reconocido = !!idValido || directoValido;
             const noReconocido = f.url.trim().length > 0 && !reconocido;
             return (
-              <div key={f.key} style={{ border: "1px solid #1A3050", borderRadius: 8, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+              <div key={f.key} style={{ border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
                 <div style={{ display: "flex", gap: 6 }}>
                   <select value={f.material} onChange={(e) => actualizarFila(f.key, { material: e.target.value })} style={{ ...campoSelectReal(), flex: 1 }}>
                     <option value="">— Material —</option>
@@ -5685,17 +5620,17 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                     style={{
                       fontSize: 11,
                       padding: "0 10px",
-                      borderRadius: 6,
-                      border: `1px solid ${f.unilateral ? "#F5C518" : "#1A3050"}`,
-                      background: f.unilateral ? "#F5C51822" : "transparent",
-                      color: f.unilateral ? "#F5C518" : "#8BA4C0",
+                      borderRadius: dsR.sm,
+                      border: `1px solid ${f.unilateral ? ds.accent : ds.border}`,
+                      background: f.unilateral ? ds.accentSubtle : "transparent",
+                      color: f.unilateral ? ds.accent : ds.inkSecondary,
                       cursor: "pointer",
                       whiteSpace: "nowrap",
                     }}
                   >
                     {f.unilateral ? "Unilateral" : "Bilateral"}
                   </button>
-                  <button onClick={() => quitarFila(f.key)} style={{ background: "transparent", border: "1px solid #1A3050", color: "#EF4444", borderRadius: 6, padding: "0 10px", cursor: "pointer" }}>
+                  <button onClick={() => quitarFila(f.key)} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.danger, borderRadius: dsR.sm, padding: "0 10px", cursor: "pointer" }}>
                     <Trash2 size={14} />
                   </button>
                 </div>
@@ -5703,26 +5638,24 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                   value={f.url}
                   onChange={(e) => actualizarFila(f.key, { url: e.target.value })}
                   placeholder="https://youtu.be/... de esta variante"
-                  style={{ ...campoSelectReal(), borderColor: noReconocido ? "#EF4444" : undefined }}
+                  style={{ ...campoSelectReal(), borderColor: noReconocido ? ds.danger : undefined }}
                 />
-                {noReconocido && <span style={{ fontSize: 11, color: "#EF4444" }}>No reconozco este enlace.</span>}
+                {noReconocido && <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace.</span>}
                 {reconocido && <VideoEmbed url={f.url} />}
               </div>
             );
           })}
           <button
             onClick={anadirFila}
-            style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", background: "transparent", border: "1px dashed #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
+            style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", background: "transparent", border: `1px dashed ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
           >
             <Plus size={13} /> Añadir variante
           </button>
         </div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-          {error && <div style={{ color: "#EF4444", fontSize: 12, flex: 1, alignSelf: "center" }}>{error}</div>}
-          <button onClick={onCerrar} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>
-            Cancelar
-          </button>
-          <button
+          {error && <div style={{ color: ds.danger, fontSize: 12, flex: 1, alignSelf: "center" }}>{error}</div>}
+          <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
+          <DsButton
             disabled={guardando}
             onClick={async () => {
               if (!nombre.trim() || tagsSel.length === 0) return;
@@ -5743,10 +5676,9 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
               });
               setGuardando(false);
             }}
-            style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
           >
             {guardando ? "Guardando..." : ejercicioEditar ? "Guardar cambios" : "Guardar ejercicio"}
-          </button>
+          </DsButton>
         </div>
       </div>
     </div>
@@ -5771,7 +5703,7 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
   return (
     <div>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 16 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>CATEGORÍA PREVENTIVA</span>
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>CATEGORÍA PREVENTIVA</span>
         <select value={categoriaSel} onChange={(e) => setCategoriaSel(e.target.value)} style={campoSelectReal({ maxWidth: 240 })}>
           {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
             <optgroup key={tipo} label={tipo}>
@@ -5786,15 +5718,15 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
           ))}
         </select>
       </label>
-      <div style={{ fontSize: 11.5, color: "#4A6680", marginBottom: 10 }}>
+      <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 10 }}>
         Solo ejercicios con bloque "Preventivo" y esa categoría. Este orden queda guardado en cada ejercicio, listo para cuando la selección automática por rotación esté conectada.
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {lista.length === 0 && <div style={{ color: "#4A6680", fontSize: 12.5, padding: "12px 0" }}>Sin ejercicios en esta categoría todavía.</div>}
+        {lista.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "12px 0" }}>Sin ejercicios en esta categoría todavía.</div>}
         {lista.map((e, i) => (
-          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#4A6680", width: 16 }}>{i + 1}</span>
-            <span style={{ flex: 1, fontSize: 13, color: "#F0F4FF" }}>{e.nombre}</span>
+          <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, width: 16 }}>{i + 1}</span>
+            <span style={{ flex: 1, fontSize: 13, color: ds.ink }}>{e.nombre}</span>
             <button onClick={() => mover(i, -1)} style={btnIconoReal} disabled={i === 0}>
               ↑
             </button>
@@ -5874,14 +5806,14 @@ function BibliotecaEjerciciosReal({ onBack }) {
   return (
     <PantallaBase rol="entrenador" maxWidth={560}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>BIBLIOTECA</div>
-            <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>Ejercicios</h1>
-            <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>{ejercicios.length} ejercicios creados</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>BIBLIOTECA</div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ejercicios</h1>
+            <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{ejercicios.length} ejercicios creados</div>
           </div>
           <button
             onClick={() => {
@@ -5892,10 +5824,10 @@ function BibliotecaEjerciciosReal({ onBack }) {
             style={{
               width: 42,
               height: 42,
-              borderRadius: "50%",
-              background: "#F5C518",
+              borderRadius: dsR.full,
+              background: ds.accent,
               border: "none",
-              color: "#060D1A",
+              color: ds.accentInk,
               fontSize: 22,
               fontWeight: 700,
               display: "flex",
@@ -5903,7 +5835,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
               justifyContent: "center",
               cursor: "pointer",
               flexShrink: 0,
-              boxShadow: "0 4px 14px rgba(245,197,24,0.35)",
+              boxShadow: dsSh.accentGlow,
             }}
           >
             +
@@ -5920,10 +5852,10 @@ function BibliotecaEjerciciosReal({ onBack }) {
               style={{
                 fontSize: 12.5,
                 padding: "7px 12px",
-                borderRadius: 8,
-                border: `1px solid ${vista === v.id ? "#F5C518" : "#1A3050"}`,
-                background: vista === v.id ? "#F5C51822" : "transparent",
-                color: vista === v.id ? "#F5C518" : "#8BA4C0",
+                borderRadius: dsR.md,
+                border: `1px solid ${vista === v.id ? ds.accent : ds.border}`,
+                background: vista === v.id ? ds.accentSubtle : "transparent",
+                color: vista === v.id ? ds.accent : ds.inkSecondary,
                 cursor: "pointer",
               }}
             >
@@ -5933,14 +5865,14 @@ function BibliotecaEjerciciosReal({ onBack }) {
         </div>
         {vista === "lista" ? (
           <>
-            <input
+            <DsInput
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               placeholder="Buscar ejercicio..."
-              style={{ width: "100%", boxSizing: "border-box", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 8, color: "#F0F4FF", fontSize: 13, padding: "9px 10px", marginBottom: 10 }}
+              style={{ marginBottom: 10 }}
             />
             <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>FILTRAR POR BLOQUE</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>FILTRAR POR BLOQUE</span>
               <select value={bloqueFiltro} onChange={(e) => setBloqueFiltro(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
                 <option value="Todos">Todos</option>
                 {BLOQUES_BIBLIOTECA.map((b) => (
@@ -5951,7 +5883,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
               </select>
             </label>
             <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-              <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>FILTRAR POR CATEGORÍA PREVENTIVA</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>FILTRAR POR CATEGORÍA PREVENTIVA</span>
               <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
                 <option value="Todas">Todas</option>
                 {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
@@ -5968,7 +5900,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
               </select>
             </label>
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {errorBorrado && <div style={{ color: "#EF4444", fontSize: 12.5, background: "#EF444418", border: "1px solid #EF444450", borderRadius: 8, padding: "8px 10px" }}>{errorBorrado}</div>}
+              {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px" }}>{errorBorrado}</div>}
               {(() => {
                 // Agrupa matriz + variantes para que la lista deje de ser 60
                 // ejercicios sueltos y pase a ser familias de movimiento: la
@@ -5989,7 +5921,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
                   .filter((f) => idsVisibles.has(f.matriz.id) || f.variantes.some((v) => idsVisibles.has(v.id)));
 
                 if (familias.length === 0) {
-                  return <div style={{ color: "#4A6680", fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
+                  return <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
                 }
                 return familias.map(({ matriz, variantes }) => (
                   <React.Fragment key={matriz.id}>
@@ -6130,13 +6062,13 @@ function IconoBloqueDiseno({ id }) {
 
 function EtiquetaModoDiseno({ modo }) {
   const map = {
-    rotativo: { texto: "ROTATIVO AUTO", color: "#F5C518" },
-    "rotativo-categoria": { texto: "ROTATIVO · POR CATEGORÍA", color: "#F5C518" },
-    manual: { texto: "MANUAL", color: "#F97316" },
+    rotativo: { texto: "ROTATIVO AUTO", color: ds.accent },
+    "rotativo-categoria": { texto: "ROTATIVO · POR CATEGORÍA", color: ds.accent },
+    manual: { texto: "MANUAL", color: ds.warning },
   };
   const cfg = map[modo];
   return (
-    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, letterSpacing: "0.06em", color: cfg.color, border: `1px solid ${cfg.color}55`, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
+    <span style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.06em", color: cfg.color, border: `1px solid ${cfg.color}55`, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
       {cfg.texto}
     </span>
   );
@@ -6145,17 +6077,17 @@ function EtiquetaModoDiseno({ modo }) {
 function CampoEtiquetadoDiseno({ etiqueta, children, w }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 3, width: w }}>
-      <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.04em", color: "#4A6680", whiteSpace: "nowrap" }}>{etiqueta}</span>
+      <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, whiteSpace: "nowrap" }}>{etiqueta}</span>
       {children}
     </label>
   );
 }
 
 function campoStyleDiseno(w) {
-  return { width: w, background: "#122440", border: "1px solid #1A3050", borderRadius: 5, color: "#F0F4FF", fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, padding: "5px 6px", textAlign: "center", boxSizing: "border-box" };
+  return { width: w, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 5, color: ds.ink, fontFamily: dsF.mono, fontSize: 12, padding: "5px 6px", textAlign: "center", boxSizing: "border-box" };
 }
 
-const botonMiniStyleDiseno = { background: "none", border: "1px solid #1A3050", borderRadius: 6, color: "#4A6680", cursor: "pointer", fontSize: 12, lineHeight: 1, width: 24, height: 24, flexShrink: 0 };
+const botonMiniStyleDiseno = { background: "none", border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.inkMuted, cursor: "pointer", fontSize: 12, lineHeight: 1, width: 24, height: 24, flexShrink: 0 };
 
 function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregarMaterial }) {
   const [abierto, setAbierto] = useState(false);
@@ -6164,34 +6096,34 @@ function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregar
 
   return (
     <div style={{ position: "relative", flex: "1 1 140px", minWidth: 130 }}>
-      <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.04em", color: "#4A6680", marginBottom: 3 }}>MATERIAL</div>
+      <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 3 }}>MATERIAL</div>
       <button
         onClick={() => setAbierto((v) => !v)}
-        style={{ width: "100%", textAlign: "left", fontSize: 11.5, color: seleccionados.length ? "#F0F4FF" : "#4A6680", background: "#122440", border: "1px solid #1A3050", borderRadius: 5, padding: "5px 8px", cursor: "pointer" }}
+        style={{ width: "100%", textAlign: "left", fontSize: 11.5, color: seleccionados.length ? ds.ink : ds.inkMuted, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 5, padding: "5px 8px", cursor: "pointer" }}
       >
         {seleccionados.length ? seleccionados.join(", ") : "Ninguno"}
       </button>
       {abierto && (
         <CerrablePorFuera onCerrar={() => setAbierto(false)}>
-        <div style={{ position: "absolute", zIndex: 15, top: "100%", left: 0, marginTop: 4, width: 220, maxHeight: 260, overflowY: "auto", background: "#122440", border: "1px solid #1A3050", borderRadius: 8, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 6 }}>
+        <div style={{ position: "absolute", zIndex: 15, top: "100%", left: 0, marginTop: 4, width: 220, maxHeight: 260, overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 8, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 6 }}>
           {disponibles.map((m) => {
             const activo = seleccionados.includes(m);
             return (
               <div
                 key={m}
                 onClick={() => toggle(m)}
-                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12, color: activo ? "#F5C518" : "#8BA4C0" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#1A3050")}
+                style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12, color: activo ? ds.accent : ds.inkSecondary }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
-                <span style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${activo ? "#F5C518" : "#1A3050"}`, background: activo ? "#F5C518" : "transparent", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <span style={{ width: 13, height: 13, borderRadius: 3, border: `1.5px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accent : "transparent", fontSize: 9, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                   {activo ? "✓" : ""}
                 </span>
                 {m}
               </div>
             );
           })}
-          <div style={{ display: "flex", gap: 5, marginTop: 6, paddingTop: 6, borderTop: "1px solid #1A3050" }}>
+          <div style={{ display: "flex", gap: 5, marginTop: 6, paddingTop: 6, borderTop: `1px solid ${ds.border}` }}>
             <input
               value={nuevoMaterial}
               onChange={(e) => setNuevoMaterial(e.target.value)}
@@ -6202,7 +6134,7 @@ function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregar
                 }
               }}
               placeholder="Añadir material..."
-              style={{ flex: 1, background: "#122440", border: "1px dashed #1A3050", borderRadius: 5, color: "#F0F4FF", fontSize: 11, padding: "5px 6px" }}
+              style={{ flex: 1, background: ds.bgElevated, border: `1px dashed ${ds.border}`, borderRadius: 5, color: ds.ink, fontSize: 11, padding: "5px 6px" }}
             />
             <button
               onClick={() => {
@@ -6211,7 +6143,7 @@ function SelectorMaterialReal({ seleccionados, disponibles, onCambiar, onAgregar
                   setNuevoMaterial("");
                 }
               }}
-              style={{ background: "transparent", border: "1px solid #F5C51866", color: "#F5C518", borderRadius: 5, padding: "0 10px", cursor: "pointer", fontSize: 12 }}
+              style={{ background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 5, padding: "0 10px", cursor: "pointer", fontSize: 12 }}
             >
               +
             </button>
@@ -6227,7 +6159,7 @@ function NotaTareaReal({ nota, onCambiar }) {
   const [abierta, setAbierta] = useState(!!nota);
   if (!abierta) {
     return (
-      <button onClick={() => setAbierta(true)} style={{ alignSelf: "flex-start", fontSize: 11, color: "#4A6680", background: "transparent", border: "1px dashed #1A3050", borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
+      <button onClick={() => setAbierta(true)} style={{ alignSelf: "flex-start", fontSize: 11, color: ds.inkMuted, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>
         + Nota
       </button>
     );
@@ -6235,9 +6167,9 @@ function NotaTareaReal({ nota, onCambiar }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.04em", color: "#4A6680" }}>NOTA PARA ESTA TAREA</span>
+        <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>NOTA PARA ESTA TAREA</span>
         {!nota && (
-          <button onClick={() => setAbierta(false)} style={{ background: "none", border: "none", color: "#4A6680", cursor: "pointer", fontSize: 11 }}>
+          <button onClick={() => setAbierta(false)} style={{ background: "none", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 11 }}>
             cancelar
           </button>
         )}
@@ -6247,7 +6179,7 @@ function NotaTareaReal({ nota, onCambiar }) {
         onChange={(e) => onCambiar(e.target.value)}
         placeholder="Ej. Baja el ritmo si nota molestia..."
         rows={2}
-        style={{ width: "100%", boxSizing: "border-box", background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12, padding: "6px 8px", fontFamily: "'Inter', sans-serif", resize: "vertical" }}
+        style={{ width: "100%", boxSizing: "border-box", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12, padding: "6px 8px", fontFamily: dsF.sans, resize: "vertical" }}
       />
     </div>
   );
@@ -6263,14 +6195,14 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   const tipoResistencia = tarea.tipoResistencia || "Peso libre";
 
   return (
-    <div style={{ padding: "10px 12px", background: "#122440", borderRadius: 8, border: "1px solid #1A3050", display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {orden != null && (
-          <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#1A3050", color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
-        <div style={{ color: "#F0F4FF", fontSize: 13.5, fontWeight: 500, flex: 1, minWidth: 0 }}>{tarea.nombre}</div>
+        <div style={{ color: ds.ink, fontSize: 13.5, fontWeight: 500, flex: 1, minWidth: 0 }}>{tarea.nombre}</div>
         {onSubir && (
           <button onClick={onSubir} style={botonMiniStyleDiseno} title="Mover antes">
             ↑
@@ -6287,13 +6219,13 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
       </div>
       {mostrarCarga && (
         <div>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.04em", color: "#4A6680", marginBottom: 4 }}>TIPO DE RESISTENCIA</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 4 }}>TIPO DE RESISTENCIA</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
             {["Peso libre", "Elástica", "Peso corporal"].map((t) => (
               <button
                 key={t}
                 onClick={() => onCambiar({ ...tarea, tipoResistencia: t })}
-                style={{ fontSize: 11, padding: "5px 9px", borderRadius: 6, border: `1px solid ${tipoResistencia === t ? "#F5C518" : "#1A3050"}`, background: tipoResistencia === t ? "#F5C51822" : "transparent", color: tipoResistencia === t ? "#F5C518" : "#8BA4C0", cursor: "pointer" }}
+                style={{ fontSize: 11, padding: "5px 9px", borderRadius: 6, border: `1px solid ${tipoResistencia === t ? ds.accent : ds.border}`, background: tipoResistencia === t ? ds.accentSubtle : "transparent", color: tipoResistencia === t ? ds.accent : ds.inkSecondary, cursor: "pointer" }}
               >
                 {t}
               </button>
@@ -6303,7 +6235,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <CampoEtiquetadoDiseno etiqueta="MODO" w={50}>
-          <button onClick={ciclarModo} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, color: "#8BA4C0", background: "#1A3050", border: "1px solid #1A3050", borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }} title="Alternar reps / seg / min / metros">
+          <button onClick={ciclarModo} style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }} title="Alternar reps / seg / min / metros">
             {etiquetaModo[tarea.modo]}
           </button>
         </CampoEtiquetadoDiseno>
@@ -6311,11 +6243,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
           <button
             onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })}
             style={{
-              fontFamily: "'IBM Plex Mono', monospace",
+              fontFamily: dsF.mono,
               fontSize: 10.5,
-              color: tarea.lateralidad === "unilateral" ? "#F5C518" : "#8BA4C0",
-              background: tarea.lateralidad === "unilateral" ? "#F5C51822" : "#1A3050",
-              border: `1px solid ${tarea.lateralidad === "unilateral" ? "#F5C518" : "#1A3050"}`,
+              color: tarea.lateralidad === "unilateral" ? ds.accent : ds.inkSecondary,
+              background: tarea.lateralidad === "unilateral" ? ds.accentSubtle : ds.border,
+              border: `1px solid ${tarea.lateralidad === "unilateral" ? ds.accent : ds.border}`,
               borderRadius: 5,
               padding: "5px 4px",
               width: "100%",
@@ -6340,8 +6272,8 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
               <input value={tarea.rir} onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
             </CampoEtiquetadoDiseno>
             <div style={{ flex: "1 1 100px", minWidth: 100 }}>
-              <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.04em", color: "#4A6680", marginBottom: 3 }}>REF. ANTERIOR (informativo)</div>
-              <div style={{ fontSize: 11, color: "#8BA4C0", lineHeight: 1.3 }}>{tarea.referencia ? tarea.referencia : "Sin registro previo"}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 3 }}>REF. ANTERIOR (informativo)</div>
+              <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.3 }}>{tarea.referencia ? tarea.referencia : "Sin registro previo"}</div>
             </div>
           </>
         )}
@@ -6365,7 +6297,7 @@ function CampoTiempoConUnidadDiseno({ etiqueta, valor, unidad, onCambiarValor, o
     <CampoEtiquetadoDiseno etiqueta={etiqueta} w={w}>
       <div style={{ display: "flex", gap: 4 }}>
         <input value={valor} onChange={(e) => onCambiarValor(e.target.value)} placeholder="—" style={{ ...campoStyleDiseno("100%"), flex: 1, minWidth: 0 }} />
-        <select value={unidad || "seg"} onChange={(e) => onCambiarUnidad(e.target.value)} style={{ background: "#1A3050", border: "1px solid #1A3050", borderRadius: 6, color: "#8BA4C0", fontSize: 10.5, padding: "0 3px" }}>
+        <select value={unidad || "seg"} onChange={(e) => onCambiarUnidad(e.target.value)} style={{ background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.inkSecondary, fontSize: 10.5, padding: "0 3px" }}>
           <option value="min">min</option>
           <option value="seg">seg</option>
         </select>
@@ -6379,14 +6311,14 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   const set = (campo) => (valor) => onCambiar({ ...tarea, [campo]: valor });
 
   return (
-    <div style={{ padding: "10px 12px", background: "#122440", borderRadius: 8, border: "1px solid #1A3050", display: "flex", flexDirection: "column", gap: 10 }}>
+    <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {orden != null && (
-          <span style={{ width: 20, height: 20, borderRadius: "50%", background: "#1A3050", color: "#F5C518", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
-        <div style={{ color: "#F0F4FF", fontSize: 13.5, fontWeight: 500, flex: 1, minWidth: 0 }}>{tarea.nombre}</div>
+        <div style={{ color: ds.ink, fontSize: 13.5, fontWeight: 500, flex: 1, minWidth: 0 }}>{tarea.nombre}</div>
         {onSubir && (
           <button onClick={onSubir} style={botonMiniStyleDiseno} title="Mover antes">
             ↑
@@ -6413,9 +6345,9 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
               fontWeight: 600,
               padding: "8px 0",
               borderRadius: 7,
-              border: `1px solid ${tipo === op.id ? "#F5C518" : "#1A3050"}`,
-              background: tipo === op.id ? "#F5C51822" : "transparent",
-              color: tipo === op.id ? "#F5C518" : "#8BA4C0",
+              border: `1px solid ${tipo === op.id ? ds.accent : ds.border}`,
+              background: tipo === op.id ? ds.accentSubtle : "transparent",
+              color: tipo === op.id ? ds.accent : ds.inkSecondary,
               cursor: "pointer",
             }}
           >
@@ -6424,7 +6356,7 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
         ))}
       </div>
 
-      {!tipo && <div style={{ fontSize: 11.5, color: "#4A6680" }}>Elige el tipo de trabajo para configurar los campos.</div>}
+      {!tipo && <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Elige el tipo de trabajo para configurar los campos.</div>}
 
       {tipo === "continuo" && (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -6534,12 +6466,12 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
 
   return (
     <div style={{ position: "relative" }}>
-      <button onClick={() => setAbierto((v) => !v)} style={{ fontSize: 12.5, color: "#F5C518", background: "transparent", border: "1px dashed #F5C51866", borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}>
+      <button onClick={() => setAbierto((v) => !v)} style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}>
         + Añadir tarea desde biblioteca
       </button>
       {abierto && (
         <CerrablePorFuera onCerrar={cerrarTodo}>
-        <div style={{ position: "absolute", zIndex: 10, top: "110%", left: 0, width: 260, background: "#122440", border: "1px solid #1A3050", borderRadius: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 8 }}>
+        <div style={{ position: "absolute", zIndex: 10, top: "110%", left: 0, width: 260, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 8 }}>
           {!pendienteZona && (
             <>
               <input
@@ -6547,10 +6479,10 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
                 value={filtro}
                 onChange={(e) => setFiltro(e.target.value)}
                 placeholder="Buscar ejercicio..."
-                style={{ width: "100%", background: "#122440", border: "1px solid #1A3050", borderRadius: 6, color: "#F0F4FF", fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
+                style={{ width: "100%", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
               />
               <div style={{ maxHeight: 220, overflowY: "auto" }}>
-                {opciones.length === 0 && <div style={{ color: "#4A6680", fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
+                {opciones.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
                 {opciones.map((e) => (
                   <div
                     key={e.id}
@@ -6563,20 +6495,20 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
                       cerrarTodo();
                     }}
                     style={{ padding: "7px 8px", paddingLeft: e.esVariante ? 18 : 8, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
-                    onMouseEnter={(ev) => (ev.currentTarget.style.background = "#1A3050")}
+                    onMouseEnter={(ev) => (ev.currentTarget.style.background = ds.border)}
                     onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
                   >
-                    <span style={{ color: e.esVariante ? "#C7D4E5" : "#F0F4FF", fontSize: e.esVariante ? 12.5 : 13 }}>
+                    <span style={{ color: e.esVariante ? ds.inkSecondary : ds.ink, fontSize: e.esVariante ? 12.5 : 13 }}>
                       {e.esVariante && "↳ "}
                       {e.nombre}
                     </span>
-                    <span style={{ color: "#4A6680", fontSize: 10.5, fontFamily: "'IBM Plex Mono', monospace" }}>{(e.tags_descriptivos || []).join(" · ")}</span>
+                    <span style={{ color: ds.inkMuted, fontSize: 10.5, fontFamily: dsF.mono }}>{(e.tags_descriptivos || []).join(" · ")}</span>
                   </div>
                 ))}
                 {filtro.trim() && (
                   <div
                     onClick={() => setPendienteZona({ nombre: filtro.trim(), nuevo: true })}
-                    style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: "#F5C518", fontSize: 12.5, borderTop: "1px solid #1A3050", marginTop: 4 }}
+                    style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: ds.accent, fontSize: 12.5, borderTop: `1px solid ${ds.border}`, marginTop: 4 }}
                   >
                     + Crear "{filtro.trim()}" como nuevo ejercicio
                   </div>
@@ -6586,7 +6518,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
           )}
           {pendienteZona && (
             <div style={{ padding: 4 }}>
-              <div style={{ fontSize: 11.5, color: "#F5C518", marginBottom: 8, lineHeight: 1.4 }}>
+              <div style={{ fontSize: 11.5, color: ds.accent, marginBottom: 8, lineHeight: 1.4 }}>
                 "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -6597,7 +6529,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
               <button
                 onClick={() => setPendienteZona(null)}
                 disabled={guardandoZona}
-                style={{ marginTop: 8, fontSize: 11, color: "#8BA4C0", background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
+                style={{ marginTop: 8, fontSize: 11, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
               >
                 {guardandoZona ? "Guardando..." : "Cancelar"}
               </button>
@@ -6653,36 +6585,36 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
   };
 
   return (
-    <div style={{ border: "1.5px solid #F5C51855", borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, background: "#0E1E3540" }}>
+    <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, letterSpacing: "0.06em", color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
-        <span style={{ fontSize: 11, color: "#4A6680", flex: 1 }}>
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.06em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
+        <span style={{ fontSize: 11, color: ds.inkMuted, flex: 1 }}>
           {tareas.length} {tareas.length === 1 ? "ejercicio" : "ejercicios"} · en orden
         </span>
         <button onClick={onEliminarCircuito} style={botonMiniStyleDiseno} title="Eliminar circuito completo">
           ×
         </button>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, background: "#122440", border: "1px solid #F5C51840", borderRadius: 8, padding: "8px 10px" }}>
-        <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.06em", color: "#F5C518", fontWeight: 600 }}>RONDAS</span>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, background: ds.bgElevated, border: `1px solid ${ds.accentSubtle}`, borderRadius: 8, padding: "8px 10px" }}>
+        <span style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.06em", color: ds.accent, fontWeight: 600 }}>RONDAS</span>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <button
             type="button"
             onClick={() => onCambiarRondas(Math.max(1, rondas - 1))}
-            style={{ width: 26, height: 26, borderRadius: 6, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+            style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
           >
             −
           </button>
-          <span style={{ fontSize: 16, fontWeight: 700, color: "#F0F4FF", minWidth: 22, textAlign: "center" }}>{rondas}</span>
+          <span style={{ fontSize: 16, fontWeight: 700, color: ds.ink, minWidth: 22, textAlign: "center" }}>{rondas}</span>
           <button
             type="button"
             onClick={() => onCambiarRondas(rondas + 1)}
-            style={{ width: 26, height: 26, borderRadius: 6, background: "#0E1E35", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+            style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
           >
             +
           </button>
         </div>
-        <span style={{ fontSize: 11.5, color: "#8BA4C0" }}>{rondas === 1 ? "vuelta al circuito" : "vueltas al circuito"}</span>
+        <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{rondas === 1 ? "vuelta al circuito" : "vueltas al circuito"}</span>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
@@ -7317,33 +7249,33 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   return (
     <PantallaBase rol="entrenador" maxWidth={640}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
         {readOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F5C51818", border: "1px solid #F5C51850", borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: "#F5C518" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
             <Lock size={13} style={{ flexShrink: 0 }} />
             Un jugador ya registró datos de esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#F5C518" }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
             <input
               value={nombre}
               onChange={(e) => setNombre(e.target.value)}
               placeholder='Ej. "Fuerza tren inferior — pretemporada"'
-              style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }}
+              style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }}
             />
           </label>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>OBJETIVO (OPCIONAL)</span>
-            <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }} />
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>OBJETIVO (OPCIONAL)</span>
+            <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }} />
           </label>
           <div style={{ marginBottom: 4 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>PARA</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>PARA</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               {[
                 { id: "equipo", label: "Todo el equipo" },
@@ -7356,12 +7288,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     flex: 1,
                     padding: "7px 0",
                     borderRadius: 8,
-                    border: "1px solid #1A3050",
+                    border: `1px solid ${ds.border}`,
                     cursor: "pointer",
                     fontSize: 12,
                     fontWeight: 600,
-                    background: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C51822" : "transparent",
-                    color: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C518" : "#8BA4C0",
+                    background: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accentSubtle : "transparent",
+                    color: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accent : ds.inkSecondary,
                   }}
                 >
                   {t.label}
@@ -7373,7 +7305,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 multiple
                 value={targetPlayerIds}
                 onChange={(e) => setTargetPlayerIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                style={{ width: "100%", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
+                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
               >
                 {players.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -7384,27 +7316,27 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
             )}
           </div>
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>FECHAS EN LAS QUE SE APLICA ESTA SESIÓN</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>FECHAS EN LAS QUE SE APLICA ESTA SESIÓN</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
               {fechas.map((f) => (
-                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 6, padding: "4px 8px" }}>
+                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
                   {f}
-                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: "#4A6680" }}>
+                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
                     ×
                   </span>
                 </span>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px" }} />
-              <button onClick={addFecha} style={{ background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
+              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }} />
+              <button onClick={addFecha} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
                 + Añadir fecha
               </button>
             </div>
           </div>
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>MD (OPCIONAL)</div>
-            <select value={md} onChange={(e) => setMd(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px", maxWidth: 160 }}>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>MD (OPCIONAL)</div>
+            <select value={md} onChange={(e) => setMd(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px", maxWidth: 160 }}>
               <option value="">Sin clasificar</option>
               {MD_TAGS.filter((t) => t !== "Sin MD").map((t) => (
                 <option key={t} value={t}>
@@ -7417,15 +7349,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 14, pointerEvents: readOnly ? "none" : undefined }}>
           {BLOQUES_DISENO.map((b) => (
-            <div key={b.id} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: "1px solid #1A3050" }}>
-                <div style={{ width: 26, height: 26, borderRadius: 7, background: "#122440", display: "flex", alignItems: "center", justifyContent: "center", color: "#8BA4C0", flexShrink: 0 }}>
+            <div key={b.id} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
+                <div style={{ width: 26, height: 26, borderRadius: 7, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
                   <IconoBloqueDiseno id={b.id} />
                 </div>
-                <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: "#4A6680", width: 14 }}>{String(b.numero).padStart(2, "0")}</div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, width: 14 }}>{String(b.numero).padStart(2, "0")}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{b.nombre}</div>
-                  <div style={{ fontSize: 11.5, color: "#4A6680" }}>{b.descripcion}</div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{b.descripcion}</div>
                 </div>
                 <EtiquetaModoDiseno modo={b.modo} />
               </div>
@@ -7433,22 +7365,22 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 {b.id === "activacion" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div onClick={() => setActivacionActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                      <span style={{ width: 34, height: 20, borderRadius: 10, background: activacionActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
-                        <span style={{ position: "absolute", top: 2, left: activacionActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
+                      <span style={{ width: 34, height: 20, borderRadius: 10, background: activacionActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
+                        <span style={{ position: "absolute", top: 2, left: activacionActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
                       </span>
-                      <span style={{ fontSize: 13, color: activacionActiva ? "#F0F4FF" : "#4A6680" }}>{activacionActiva ? "Activada para esta sesión" : "Sin acceso a activación — sesión empieza en Movilidad"}</span>
+                      <span style={{ fontSize: 13, color: activacionActiva ? ds.ink : ds.inkMuted }}>{activacionActiva ? "Activada para esta sesión" : "Sin acceso a activación — sesión empieza en Movilidad"}</span>
                     </div>
                     {activacionActiva && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicio</span>
-                          <span style={{ fontSize: 13, color: activacionEjercicioNombre ? "#F0F4FF" : "#4A6680", fontWeight: activacionEjercicioNombre ? 600 : 400 }}>
+                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicio</span>
+                          <span style={{ fontSize: 13, color: activacionEjercicioNombre ? ds.ink : ds.inkMuted, fontWeight: activacionEjercicioNombre ? 600 : 400 }}>
                             {activacionEjercicioNombre || "Sin elegir todavía"}
                           </span>
                         </div>
                         <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} onAsignarZona={asignarZonaYActualizar} />
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 13, color: "#8BA4C0" }}>Duración</span>
+                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Duración</span>
                           <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
                           <button
                             onClick={() => setUnidadActivacion((u) => (u === "minutos" ? "segundos" : "minutos"))}
@@ -7456,9 +7388,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                               fontSize: 11,
                               padding: "6px 10px",
                               borderRadius: 6,
-                              border: "1px solid #1A3050",
-                              background: "#1A3050",
-                              color: "#F5C518",
+                              border: `1px solid ${ds.border}`,
+                              background: ds.border,
+                              color: ds.accent,
                               cursor: "pointer",
                             }}
                           >
@@ -7472,7 +7404,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 {b.id === "movilidad" && (() => {
                   const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
                   return (
-                    <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>
+                    <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
                       {poolMov.length
                         ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
                         : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
@@ -7482,27 +7414,27 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 {b.id === "preventivo" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 13, color: "#8BA4C0" }}>Ejercicios ese día</span>
+                      <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicios ese día</span>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <button
                           type="button"
                           onClick={() => setPreventivoCantidad((v) => Math.max(0, v - 1))}
-                          style={{ width: 26, height: 26, borderRadius: 6, background: "#122440", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
                         >
                           −
                         </button>
-                        <span style={{ width: 24, textAlign: "center", fontFamily: "'IBM Plex Mono', monospace", fontSize: 14, color: preventivoCantidad > 0 ? "#F5C518" : "#4A6680" }}>
+                        <span style={{ width: 24, textAlign: "center", fontFamily: dsF.mono, fontSize: 14, color: preventivoCantidad > 0 ? ds.accent : ds.inkMuted }}>
                           {preventivoCantidad}
                         </span>
                         <button
                           type="button"
                           onClick={() => setPreventivoCantidad((v) => v + 1)}
-                          style={{ width: 26, height: 26, borderRadius: 6, background: "#122440", border: "1px solid #1A3050", color: "#F0F4FF", fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                          style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
                         >
                           +
                         </button>
                       </div>
-                      <span style={{ fontSize: 12, color: "#4A6680" }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
+                      <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
                     </div>
                     {preventivoCantidad > 0 &&
                       (() => {
@@ -7510,7 +7442,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
                         if (!cat) {
                           return (
-                            <div style={{ fontSize: 11.5, color: "#F97316" }}>
+                            <div style={{ fontSize: 11.5, color: ds.warning }}>
                               No hay una única categoría preventiva común a todos los jugadores destinatarios — este bloque se omitirá al guardar. Dirige la sesión a jugadores que compartan una sola categoría para que se aplique.
                             </div>
                           );
@@ -7518,10 +7450,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         const poolPrev = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId);
                         return (
                           <>
-                            <div style={{ fontSize: 12.5, color: "#8BA4C0" }}>
-                              Categoría detectada para este roster: <span style={{ color: "#F5C518", fontWeight: 500 }}>{cat.nombre}</span>
+                            <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                              Categoría detectada para este roster: <span style={{ color: ds.accent, fontWeight: 500 }}>{cat.nombre}</span>
                             </div>
-                            <div style={{ fontSize: 11.5, color: poolPrev.length ? "#4A6680" : "#F97316" }}>
+                            <div style={{ fontSize: 11.5, color: poolPrev.length ? ds.inkMuted : ds.warning }}>
                               {poolPrev.length
                                 ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
                                 : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
@@ -7565,7 +7497,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
                       </button>
@@ -7621,7 +7553,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       />
                       <button
                         onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
                       </button>
@@ -7630,10 +7562,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 )}
                 {b.id === "cmj" && (
                   <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                    <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? "#F5C518" : "#1A3050", position: "relative", flexShrink: 0 }}>
-                      <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: "#060D1A" }} />
+                    <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
                     </span>
-                    <span style={{ fontSize: 13, color: cmjActiva ? "#F0F4FF" : "#4A6680" }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
+                    <span style={{ fontSize: 13, color: cmjActiva ? ds.ink : ds.inkMuted }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
                   </div>
                 )}
                 {b.id === "fuerza" && (
@@ -7691,7 +7623,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
                       >
                         + Añadir circuito
                       </button>
@@ -7703,10 +7635,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           ))}
         </div>
 
-        {!readOnly && error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? "Guardado como borrador." : "Guardado y enviado."}</div>}
+        {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
+        {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? "Guardado como borrador." : "Guardado y enviado."}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-          <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
+          <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
           </button>
           {!readOnly && (
@@ -7715,14 +7647,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                 onClick={() => guardar(true)}
                 disabled={guardando}
                 title="Se guarda tal cual está, sin fecha obligatoria, y no se envía al jugador hasta que la publiques"
-                style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+                style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
                 {guardando ? "Guardando..." : "Guardar borrador"}
               </button>
               <button
                 onClick={() => guardar(false)}
                 disabled={guardando}
-                style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+                style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
                 {guardando ? "Guardando..." : "Guardar y enviar"}
               </button>
@@ -7987,25 +7919,25 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   return (
     <PantallaBase rol="entrenador" maxWidth={640}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
         {readOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "#F5C51818", border: "1px solid #F5C51850", borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: "#F5C518" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
             <Lock size={13} style={{ flexShrink: 0 }} />
             Un jugador ya registró datos de esta dinámica — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680" }}>NOMBRE DE LA DINÁMICA</span>
-            <input value={nombreBloque} onChange={(e) => setNombreBloque(e.target.value)} placeholder="Ej. Miembro Superior" style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: "8px 10px" }} />
-            <span style={{ fontSize: 11, color: "#4A6680" }}>Es lo que verá el jugador como título de este bloque en su pantalla.</span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE DE LA DINÁMICA</span>
+            <input value={nombreBloque} onChange={(e) => setNombreBloque(e.target.value)} placeholder="Ej. Miembro Superior" style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }} />
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Es lo que verá el jugador como título de este bloque en su pantalla.</span>
           </label>
           <div style={{ marginBottom: 4 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>PARA</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>PARA</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
               {[
                 { id: "equipo", label: "Todo el equipo" },
@@ -8018,12 +7950,12 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                     flex: 1,
                     padding: "7px 0",
                     borderRadius: 8,
-                    border: "1px solid #1A3050",
+                    border: `1px solid ${ds.border}`,
                     cursor: "pointer",
                     fontSize: 12,
                     fontWeight: 600,
-                    background: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C51822" : "transparent",
-                    color: (t.id === "equipo") === (targetPlayerIds === null) ? "#F5C518" : "#8BA4C0",
+                    background: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accentSubtle : "transparent",
+                    color: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accent : ds.inkSecondary,
                   }}
                 >
                   {t.label}
@@ -8035,7 +7967,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 multiple
                 value={targetPlayerIds}
                 onChange={(e) => setTargetPlayerIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                style={{ width: "100%", background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
+                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
               >
                 {players.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -8046,27 +7978,27 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
             )}
           </div>
           <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: "#4A6680", marginBottom: 6 }}>DÍAS EN LOS QUE SE ACTIVA</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>DÍAS EN LOS QUE SE ACTIVA</div>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
               {fechas.map((f) => (
-                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11.5, color: "#F5C518", border: "1px solid #F5C51855", borderRadius: 6, padding: "4px 8px" }}>
+                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
                   {f}
-                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: "#4A6680" }}>
+                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
                     ×
                   </span>
                 </span>
               ))}
             </div>
             <div style={{ display: "flex", gap: 8 }}>
-              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 7, color: "#F0F4FF", fontSize: 12.5, padding: "7px 9px" }} />
-              <button onClick={addFecha} style={{ background: "transparent", border: "1px dashed #F5C51866", color: "#F5C518", borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
+              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }} />
+              <button onClick={addFecha} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
                 + Añadir fecha
               </button>
             </div>
           </div>
         </div>
 
-        <div style={{ background: "#0E1E35", border: "1px solid #1A3050", borderRadius: 12, padding: 14, pointerEvents: readOnly ? "none" : undefined }}>
+        <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 14, pointerEvents: readOnly ? "none" : undefined }}>
           <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 10 }}>Tareas</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {tareasBloque.map((t) => (
@@ -8101,7 +8033,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
               <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} onAsignarZona={asignarZonaYActualizar} />
               <button
                 onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                style={{ fontSize: 12.5, color: "#8BA4C0", background: "transparent", border: "1px dashed #1A3050", borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
               >
                 + Añadir circuito
               </button>
@@ -8109,17 +8041,17 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </div>
         </div>
 
-        {!readOnly && error && <div style={{ color: "#EF4444", fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {!readOnly && ok && <div style={{ color: "#22C55E", fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
+        {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
+        {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-          <button onClick={onBack} style={{ background: "transparent", border: "1px solid #1A3050", color: "#8BA4C0", borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
+          <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
           </button>
           {!readOnly && (
             <button
               onClick={guardar}
               disabled={guardando}
-              style={{ background: "#F5C518", border: "1px solid #F5C518", color: "#060D1A", borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+              style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
             >
               {guardando ? "Guardando..." : "Guardar y enviar"}
             </button>
@@ -8171,7 +8103,7 @@ export default function App() {
           asomar. PantallaBase, además, usa position:fixed en vez de depender
           del alto del documento, así que ya no compite con este reset. */}
       <style>{`
-        html, body { background: #060D1A; margin: 0; padding: 0; height: 100%; overscroll-behavior: none; }
+        html, body { background: ${ds.canvas}; margin: 0; padding: 0; height: 100%; overscroll-behavior: none; }
         #root { height: 100%; }
       `}</style>
       <AppRouter
@@ -8254,13 +8186,13 @@ function HistorialJugadorModuloReal({ jugador, onBack }) {
       <div>
         <button
           onClick={onBack}
-          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: "#8BA4C0", fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
         >
           ← Volver al Roster
         </button>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, letterSpacing: "0.08em", color: "#F5C518", marginBottom: 4 }}>HISTORIAL</div>
-          <h1 style={{ fontFamily: "'Space Grotesk', sans-serif", fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>{jugador?.name || "Jugador"}</h1>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>{jugador?.name || "Jugador"}</h1>
         </div>
         <HistorialPorJugador players={players} jugadorInicial={jugador?.id} />
       </div>
