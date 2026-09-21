@@ -4961,6 +4961,24 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
+  // Qué exige cada tipo de tarea, tal como me lo has descrito:
+  // - Resistencia y CMJ tienen su propio registro (no reps/carga) -> fuera de esta comprobación.
+  // - Corporal con banda de asistencia (resistencia elástica): exige reps, no carga (la banda no es un número de kg).
+  // - Corporal con lastre: sí es peso añadido -> exige carga (el lastre) y reps.
+  // - Corporal sin equipo (peso del propio cuerpo, sin lastre): no es peso libre -> exige reps, no carga.
+  // - Cualquier otra (peso libre, con o sin elegir equipo): exige carga y reps.
+  const registroIncompleto = (t) => {
+    if (t.esResistencia || t.esCmj) return false;
+    const r = getRegistro(t.id);
+    if (t.esCorporal) {
+      if (r.subtipo === "lastre") return !r.carga || !r.reps;
+      return !r.reps;
+    }
+    return !r.carga || !r.reps;
+  };
+  const tareasSinRegistroCompleto = todasLasTareas.filter((t) => hechoDraft[t.id] && registroIncompleto(t));
+
+
   // Marcar/desmarcar hecho es SOLO local mientras no se confirme el envío —
   // así una tarea tocada pero nunca enviada no genera ningún registro real
   // en el backend, y la sesión no se bloquea para el entrenador antes de
@@ -5346,6 +5364,15 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                     <span style={{ color: ds.warning, flexShrink: 0 }}>⚠</span>
                     <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
                       Vas a enviar la sesión con {totalTareas - totalHechas} tarea{totalTareas - totalHechas === 1 ? "" : "s"} sin hacer. Tu entrenador la verá como incompleta.
+                    </span>
+                  </div>
+                )}
+                {tareasSinRegistroCompleto.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
+                    <span style={{ color: ds.warning, flexShrink: 0 }}>⚠</span>
+                    <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
+                      {tareasSinRegistroCompleto.length === 1 ? "Esta tarea está marcada como hecha pero le falta" : "Estas tareas están marcadas como hechas pero les falta"} registrar carga o repeticiones:{" "}
+                      {tareasSinRegistroCompleto.map((t) => t.nombre).join(", ")}.
                     </span>
                   </div>
                 )}
@@ -6772,6 +6799,46 @@ function categoriaComunEntreJugadores(targetPlayerIds, allPlayers) {
   return interseccion.length === 1 ? interseccion[0] : null;
 }
 
+function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
+  const alternar = (id) => {
+    onCambiar(seleccionados.includes(id) ? seleccionados.filter((x) => x !== id) : [...seleccionados, id]);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 8 }}>
+      {players.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted, padding: "8px 4px" }}>No hay jugadores para elegir.</div>}
+      {players.map((p) => {
+        const activo = seleccionados.includes(p.id);
+        return (
+          <div
+            key={p.id}
+            onClick={() => alternar(p.id)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 8px", borderRadius: dsR.sm, cursor: "pointer", background: activo ? ds.accentSubtle : "transparent" }}
+          >
+            <span
+              style={{
+                width: 20,
+                height: 20,
+                borderRadius: 5,
+                border: `1.5px solid ${activo ? ds.accent : ds.border}`,
+                background: activo ? ds.accent : "transparent",
+                color: ds.accentInk,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 13,
+                flexShrink: 0,
+              }}
+            >
+              {activo ? "✓" : ""}
+            </span>
+            <span style={{ fontSize: 13.5, color: ds.ink }}>{p.name}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
   // Reutilizar: misma configuración base que editar (destinatarios, objetivo,
@@ -7375,18 +7442,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
               ))}
             </div>
             {targetPlayerIds !== null && (
-              <select
-                multiple
-                value={targetPlayerIds}
-                onChange={(e) => setTargetPlayerIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
-              >
-                {players.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
             )}
           </div>
           <div style={{ marginTop: 14 }}>
@@ -8037,18 +8093,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
               ))}
             </div>
             {targetPlayerIds !== null && (
-              <select
-                multiple
-                value={targetPlayerIds}
-                onChange={(e) => setTargetPlayerIds(Array.from(e.target.selectedOptions).map((o) => o.value))}
-                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: 6, height: Math.min(160, 36 + players.length * 26) }}
-              >
-                {players.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
+              <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
             )}
           </div>
           <div style={{ marginTop: 14 }}>
