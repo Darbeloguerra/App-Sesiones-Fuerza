@@ -4312,108 +4312,122 @@ function resumenRegistroReal(tarea, registro) {
 
 function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
   const videoEfectivo = videoEfectivoTarea(tarea, registro);
+  const [expandido, setExpandido] = useState(false);
   // Con la tarea ya hecha, los campos de registro se colapsan en una línea
   // de resumen — verlos vacíos otra vez, ya rellenados, es lo que hacía que
   // una sesión a medio hacer pareciera siempre un formulario sin terminar.
-  const mostrarFormulario = mostrarRegistro && !hecho;
+  // Mientras no está hecha, el formulario solo se ve si tocas la tarjeta
+  // para desplegarla — colapsada, la tarjeta es solo nombre + meta + check.
+  const puedeDesplegar = mostrarRegistro && !hecho;
+  const mostrarFormulario = puedeDesplegar && expandido;
   return (
-    <DsCard status={hecho ? "done" : "default"} style={{ padding: 18, gap: 16, borderRadius: dsR.xxl, borderColor: hecho ? ds.successBorderSubtle : "transparent", boxShadow: dsSh.elevation3 }}>
-      <div style={{ display: "flex", gap: 13, alignItems: "center" }}>
+    <DsCard status={hecho ? "done" : "default"} style={{ padding: 14, gap: 12, borderRadius: dsR.xl, borderColor: hecho ? ds.successBorderSubtle : "transparent", boxShadow: dsSh.elevation2 }}>
+      <div
+        onClick={() => puedeDesplegar && setExpandido((v) => !v)}
+        style={{ display: "flex", gap: 11, alignItems: "center", cursor: puedeDesplegar ? "pointer" : "default" }}
+      >
         {orden != null && (
-          <span style={{ width: 22, height: 22, borderRadius: dsR.full, background: ds.bgElevated, color: ds.accent, fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 19, height: 19, borderRadius: dsR.full, background: ds.bgElevated, color: ds.accent, fontFamily: dsF.mono, fontSize: 10, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
         {videoEfectivo ? (
-          <div onClick={onAmpliarGif} style={{ position: "relative", width: 56, height: 56, borderRadius: dsR.lg, flexShrink: 0, cursor: "pointer", background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={(e) => { e.stopPropagation(); onAmpliarGif(); }} style={{ position: "relative", width: 44, height: 44, borderRadius: dsR.md, flexShrink: 0, cursor: "pointer", background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {miniaturaTarea(videoEfectivo) && (
-              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 56, height: 56, borderRadius: dsR.lg, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 44, height: 44, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
             {(extractYouTubeId(videoEfectivo) || esVideoDirecto(videoEfectivo)) && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.lg }}>
-                <Play size={18} color={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} fill={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} />
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+                <Play size={14} color={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} fill={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} />
               </div>
             )}
           </div>
         ) : tarea.eligeEquipo ? (
-          <div style={{ width: 56, height: 56, borderRadius: dsR.lg, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 8.5, fontFamily: dsF.mono, textAlign: "center", lineHeight: 1.25, padding: 4 }}>
-            ELIGE MATERIAL
+          <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 7, fontFamily: dsF.mono, textAlign: "center", lineHeight: 1.2, padding: 3 }}>
+            MATERIAL
           </div>
         ) : (
-          <div style={{ width: 56, height: 56, borderRadius: dsR.lg, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 9.5, fontFamily: dsF.mono }}>
+          <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 8.5, fontFamily: dsF.mono }}>
             VÍDEO
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {tarea.esResistencia ? (
             <>
-              <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 12, color: hecho ? ds.success : ds.inkSecondary, marginTop: 4, fontWeight: hecho ? 700 : 400 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: hecho ? ds.success : ds.inkSecondary, marginTop: 3, fontWeight: hecho ? 700 : 400 }}>
                 {hecho ? resumenRegistroReal(tarea, registro) : tarea.objetivoResistencia}
               </div>
             </>
           ) : tarea.esCmj ? (
             <>
-              <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
-              <div style={{ fontFamily: hecho ? dsF.mono : dsF.sans, fontSize: hecho ? 12 : 11.5, fontWeight: hecho ? 700 : 400, color: hecho ? ds.success : ds.inkMuted, marginTop: 4 }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: hecho ? dsF.mono : dsF.sans, fontSize: hecho ? 11.5 : 11, fontWeight: hecho ? 700 : 400, color: hecho ? ds.success : ds.inkMuted, marginTop: 3 }}>
                 {hecho
                   ? resumenRegistroReal(tarea, registro)
                   : tarea.referenciaCmj
-                  ? `Último salto registrado ${tarea.referenciaCmj.altura} cm${tarea.referenciaCmj.md ? ` (${tarea.referenciaCmj.md})` : ""}`
+                  ? `Último salto ${tarea.referenciaCmj.altura} cm${tarea.referenciaCmj.md ? ` (${tarea.referenciaCmj.md})` : ""}`
                   : "Sin registro previo"}
               </div>
             </>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
                 {tarea.mostrarLateralidad !== false && (
                   <DsBadge tone={tarea.unilateral ? "accent" : "neutral"}>{tarea.unilateral ? "Unilateral" : "Bilateral"}</DsBadge>
                 )}
               </div>
               {hecho && mostrarRegistro ? (
-                <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.success, marginTop: 4, fontWeight: 700 }}>{resumenRegistroReal(tarea, registro)}</div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 12, color: ds.success, marginTop: 3, fontWeight: 700 }}>{resumenRegistroReal(tarea, registro)}</div>
               ) : (
-                <>
-                  <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkSecondary, marginTop: 4 }}>
-                    {tarea.series ? `${tarea.series} × ` : ""}
-                    {tarea.cantidad} {tarea.unidad}
-                    {tarea.unilateral ? " · cada lado" : ""}
-                    {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 4 }}>
-                    {tarea.eligeEquipo
-                      ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
-                        ? tarea.referenciasPorEquipo?.[registro.subtipo]
-                          ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
-                          : `Sin registro previo con ${registro.subtipo}`
-                        : "Elige qué material vas a utilizar"
-                      : tarea.referencia
-                      ? `Última vez: ${tarea.referencia}`
-                      : "Sin registro previo"}
-                  </div>
-                </>
+                <div style={{ fontFamily: dsF.mono, fontSize: 12, color: ds.inkSecondary, marginTop: 3 }}>
+                  {tarea.series ? `${tarea.series} × ` : ""}
+                  {tarea.cantidad} {tarea.unidad}
+                  {tarea.unilateral ? " · cada lado" : ""}
+                  {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
+                </div>
               )}
             </>
           )}
         </div>
-        <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
+        {puedeDesplegar && (
+          <span style={{ color: ds.inkMuted, fontSize: 13, transform: expandido ? "rotate(90deg)" : "none", transition: "transform 140ms ease-out", flexShrink: 0 }}>
+            ›
+          </span>
+        )}
+        <div onClick={(e) => e.stopPropagation()}>
+          <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
+        </div>
       </div>
+      {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
+        <div style={{ fontSize: 11.5, color: ds.inkMuted, marginLeft: 55 }}>
+          {tarea.eligeEquipo
+            ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
+              ? tarea.referenciasPorEquipo?.[registro.subtipo]
+                ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
+                : `Sin registro previo con ${registro.subtipo}`
+              : "Elige qué material vas a utilizar"
+            : tarea.referencia
+            ? `Última vez: ${tarea.referencia}`
+            : "Sin registro previo"}
+        </div>
+      )}
       {tarea.materiales && tarea.materiales.length > 0 && (
-        <div style={{ marginLeft: 68, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ marginLeft: 55, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {tarea.materiales.map((m) => (
             <DsBadge key={m} tone="accent">{m}</DsBadge>
           ))}
         </div>
       )}
       {tarea.nota && (
-        <div style={{ marginLeft: 68, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
+        <div style={{ marginLeft: 55, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
           <span style={{ color: ds.warning, fontSize: 12, flexShrink: 0 }}>📝</span>
           <span style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.4 }}>{tarea.nota}</span>
         </div>
       )}
       {mostrarFormulario && tarea.esResistencia && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 68 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 55 }}>
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { v: "completo", label: "Cumplido completo" },
@@ -4438,7 +4452,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         </div>
       )}
       {mostrarFormulario && tarea.esCmj && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 68 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 55 }}>
           <EtiquetaCampoReal>ALTURA DEL SALTO (CM)</EtiquetaCampoReal>
           <DsInput
             value={registro.carga}
@@ -4450,7 +4464,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         </div>
       )}
       {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 68 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 55 }}>
           {tarea.eligeEquipo && (
             <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <EtiquetaCampoReal color={ds.accent}>¿QUÉ MATERIAL VAS A UTILIZAR?</EtiquetaCampoReal>
