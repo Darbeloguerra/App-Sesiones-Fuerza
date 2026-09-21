@@ -5340,35 +5340,47 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
             )}
             {pidiendoConfirmacion ? (
-              <div style={{ display: "flex", gap: 8, marginTop: 22 }}>
-                <DsButton variant="secondary" onClick={() => setPidiendoConfirmacion(false)} disabled={enviando} style={{ flex: 1 }}>
-                  Cancelar
-                </DsButton>
-                <button
-                  onClick={confirmarEnvio}
-                  disabled={enviando}
-                  style={{ flex: 2, background: ds.success, border: `1px solid ${ds.success}`, color: ds.accentInk, borderRadius: dsR.lg, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}
-                >
-                  {enviando ? "Enviando..." : "Confirmar envío"}
-                </button>
+              <div style={{ marginTop: 22 }}>
+                {totalHechas < totalTareas && (
+                  <div style={{ display: "flex", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
+                    <span style={{ color: ds.warning, flexShrink: 0 }}>⚠</span>
+                    <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
+                      Vas a enviar la sesión con {totalTareas - totalHechas} tarea{totalTareas - totalHechas === 1 ? "" : "s"} sin hacer. Tu entrenador la verá como incompleta.
+                    </span>
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <DsButton variant="secondary" onClick={() => setPidiendoConfirmacion(false)} disabled={enviando} style={{ flex: 1 }}>
+                    Cancelar
+                  </DsButton>
+                  <button
+                    onClick={confirmarEnvio}
+                    disabled={enviando}
+                    style={{ flex: 2, background: ds.success, border: `1px solid ${ds.success}`, color: ds.accentInk, borderRadius: dsR.lg, padding: "13px 16px", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: enviando ? 0.6 : 1 }}
+                  >
+                    {enviando ? "Enviando..." : totalHechas < totalTareas ? "Enviar de todos modos" : "Confirmar envío"}
+                  </button>
+                </div>
               </div>
             ) : (
               <button
                 onClick={() => setPidiendoConfirmacion(true)}
+                disabled={totalHechas === 0}
                 style={{
                   width: "100%",
                   marginTop: 22,
-                  background: totalHechas === totalTareas ? ds.success : ds.bgElevated,
+                  background: totalHechas === totalTareas ? ds.success : totalHechas > 0 ? ds.bgElevated : ds.bgElevated,
                   border: `1px solid ${totalHechas === totalTareas ? ds.success : ds.border}`,
-                  color: totalHechas === totalTareas ? ds.accentInk : ds.inkMuted,
+                  color: totalHechas === totalTareas ? ds.accentInk : totalHechas > 0 ? ds.ink : ds.inkMuted,
                   borderRadius: dsR.lg,
                   padding: "13px 16px",
                   fontSize: 14,
                   fontWeight: 600,
-                  cursor: "pointer",
+                  cursor: totalHechas === 0 ? "not-allowed" : "pointer",
+                  opacity: totalHechas === 0 ? 0.6 : 1,
                 }}
               >
-                {totalHechas === totalTareas ? "Enviar sesión completada" : "Enviar progreso"}
+                {totalHechas === totalTareas ? "Enviar sesión completada" : totalHechas > 0 ? `Enviar progreso (${totalHechas}/${totalTareas})` : "Marca al menos una tarea para enviar"}
               </button>
             )}
           </>
