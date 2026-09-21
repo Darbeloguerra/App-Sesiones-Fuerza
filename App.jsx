@@ -91,7 +91,7 @@ function GlobalStyles() {
       .ds-card--interactive { cursor: pointer; }
       .ds-card--interactive:hover { box-shadow: ${dsSh.elevation3}; border-color: ${ds.borderMuted}; transform: translateY(-1px); }
       .ds-card--interactive:active { transform: translateY(0) scale(0.995); }
-      .ds-card--done { border-color: ${ds.successBorderSubtle}; }
+      .ds-card--done { border-color: ${ds.successBorderSubtle}; background: linear-gradient(180deg, ${ds.success}0d, ${ds.surface} 40%); }
       .ds-card--error { border-color: ${ds.dangerBorderSubtle}; }
 
       .ds-input {
@@ -129,8 +129,8 @@ function GlobalStyles() {
       .ds-badge--danger { color: ${ds.danger}; border-color: ${ds.dangerBorderSubtle}; background: rgba(239,68,68,0.1); }
 
       .ds-toggle {
-        width: 30px; height: 30px; border-radius: 50%; border: 1.5px solid ${ds.border}; background: transparent;
-        color: ${ds.inkMuted}; font-size: 15px; display: inline-flex; align-items: center; justify-content: center;
+        width: 34px; height: 34px; border-radius: 50%; border: 1.5px solid ${ds.border}; background: transparent;
+        color: ${ds.inkMuted}; font-size: 17px; display: inline-flex; align-items: center; justify-content: center;
         cursor: pointer; flex-shrink: 0; outline: none;
         transition: transform 160ms cubic-bezier(0.34,1.56,0.64,1), background-color 160ms ease-out,
           border-color 160ms ease-out, box-shadow 160ms ease-out;
@@ -1310,7 +1310,7 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
           display: centrarContenido ? "flex" : "block",
           flexDirection: "column",
           justifyContent: centrarContenido ? "center" : "flex-start",
-          padding: centrarContenido ? "24px" : "24px 16px 40px",
+          padding: centrarContenido ? "24px" : rol === "jugador" ? "22px 20px 40px" : "24px 16px 40px",
         }}
       >
         {children}
@@ -4291,96 +4291,129 @@ function EtiquetaCampoReal({ children, color }) {
   );
 }
 
+// Texto de una línea con lo registrado, para cuando la tarea ya está
+// marcada como hecha — sustituye a los campos editables, que no aportan
+// nada una vez rellenados y solo dan sensación de formulario a medias.
+function resumenRegistroReal(tarea, registro) {
+  if (tarea.esResistencia) {
+    return registro.subtipo === "parcial" ? `Hizo menos: ${registro.carga || "sin detalle"}` : "Cumplido completo";
+  }
+  if (tarea.esCmj) {
+    return registro.carga !== "" && registro.carga != null ? `${registro.carga} cm` : "Registrado";
+  }
+  const partes = [];
+  if (registro.reps !== "" && registro.reps != null) partes.push(`${registro.reps} ${tarea.unidad || "reps"}`);
+  if (registro.carga !== "" && registro.carga != null) {
+    partes.push(registro.subtipo === "asistencia" ? `banda ${registro.carga}` : `${registro.carga}kg`);
+  }
+  if (registro.rir !== "" && registro.rir != null) partes.push(`RIR ${registro.rir}`);
+  return partes.length ? partes.join(" · ") : "Registrado";
+}
+
 function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
   const videoEfectivo = videoEfectivoTarea(tarea, registro);
+  // Con la tarea ya hecha, los campos de registro se colapsan en una línea
+  // de resumen — verlos vacíos otra vez, ya rellenados, es lo que hacía que
+  // una sesión a medio hacer pareciera siempre un formulario sin terminar.
+  const mostrarFormulario = mostrarRegistro && !hecho;
   return (
-    <DsCard status={hecho ? "done" : "default"} style={{ padding: 12, gap: 10 }}>
-      <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+    <DsCard status={hecho ? "done" : "default"} style={{ padding: 18, gap: 16, borderRadius: dsR.xxl, borderColor: hecho ? ds.successBorderSubtle : "transparent", boxShadow: dsSh.elevation3 }}>
+      <div style={{ display: "flex", gap: 13, alignItems: "center" }}>
         {orden != null && (
-          <span style={{ width: 20, height: 20, borderRadius: dsR.full, background: ds.bgElevated, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 22, height: 22, borderRadius: dsR.full, background: ds.bgElevated, color: ds.accent, fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
         {videoEfectivo ? (
-          <div onClick={onAmpliarGif} style={{ position: "relative", width: 46, height: 46, borderRadius: dsR.md, flexShrink: 0, cursor: "pointer", background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div onClick={onAmpliarGif} style={{ position: "relative", width: 56, height: 56, borderRadius: dsR.lg, flexShrink: 0, cursor: "pointer", background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {miniaturaTarea(videoEfectivo) && (
-              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 46, height: 46, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+              <img src={miniaturaTarea(videoEfectivo)} alt={`Demostración: ${tarea.nombre}`} style={{ width: 56, height: 56, borderRadius: dsR.lg, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
             {(extractYouTubeId(videoEfectivo) || esVideoDirecto(videoEfectivo)) && (
-              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
-                <Play size={16} color={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} fill={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} />
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(videoEfectivo) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.lg }}>
+                <Play size={18} color={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} fill={miniaturaTarea(videoEfectivo) ? "#fff" : ds.accent} />
               </div>
             )}
           </div>
         ) : tarea.eligeEquipo ? (
-          <div style={{ width: 46, height: 46, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 8, fontFamily: dsF.mono, textAlign: "center", lineHeight: 1.2, padding: 3 }}>
+          <div style={{ width: 56, height: 56, borderRadius: dsR.lg, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 8.5, fontFamily: dsF.mono, textAlign: "center", lineHeight: 1.25, padding: 4 }}>
             ELIGE MATERIAL
           </div>
         ) : (
-          <div style={{ width: 46, height: 46, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
+          <div style={{ width: 56, height: 56, borderRadius: dsR.lg, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 9.5, fontFamily: dsF.mono }}>
             VÍDEO
           </div>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           {tarea.esResistencia ? (
             <>
-              <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, marginTop: 2 }}>{tarea.objetivoResistencia}</div>
+              <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 12, color: hecho ? ds.success : ds.inkSecondary, marginTop: 4, fontWeight: hecho ? 700 : 400 }}>
+                {hecho ? resumenRegistroReal(tarea, registro) : tarea.objetivoResistencia}
+              </div>
             </>
           ) : tarea.esCmj ? (
             <>
-              <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
-              <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 3 }}>
-                {tarea.referenciaCmj
+              <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+              <div style={{ fontFamily: hecho ? dsF.mono : dsF.sans, fontSize: hecho ? 12 : 11.5, fontWeight: hecho ? 700 : 400, color: hecho ? ds.success : ds.inkMuted, marginTop: 4 }}>
+                {hecho
+                  ? resumenRegistroReal(tarea, registro)
+                  : tarea.referenciaCmj
                   ? `Último salto registrado ${tarea.referenciaCmj.altura} cm${tarea.referenciaCmj.md ? ` (${tarea.referenciaCmj.md})` : ""}`
                   : "Sin registro previo"}
               </div>
             </>
           ) : (
             <>
-              <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{tarea.nombre}</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <div style={{ fontSize: 15.5, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
                 {tarea.mostrarLateralidad !== false && (
                   <DsBadge tone={tarea.unilateral ? "accent" : "neutral"}>{tarea.unilateral ? "Unilateral" : "Bilateral"}</DsBadge>
                 )}
               </div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, marginTop: 2 }}>
-                {tarea.series ? `${tarea.series} × ` : ""}
-                {tarea.cantidad} {tarea.unidad}
-                {tarea.unilateral ? " · cada lado" : ""}
-                {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
-              </div>
-              <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 3 }}>
-                {tarea.eligeEquipo
-                  ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
-                    ? tarea.referenciasPorEquipo?.[registro.subtipo]
-                      ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
-                      : `Sin registro previo con ${registro.subtipo}`
-                    : "Elige qué material vas a utilizar"
-                  : tarea.referencia
-                  ? `Última vez: ${tarea.referencia}`
-                  : "Sin registro previo"}
-              </div>
+              {hecho && mostrarRegistro ? (
+                <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.success, marginTop: 4, fontWeight: 700 }}>{resumenRegistroReal(tarea, registro)}</div>
+              ) : (
+                <>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkSecondary, marginTop: 4 }}>
+                    {tarea.series ? `${tarea.series} × ` : ""}
+                    {tarea.cantidad} {tarea.unidad}
+                    {tarea.unilateral ? " · cada lado" : ""}
+                    {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 4 }}>
+                    {tarea.eligeEquipo
+                      ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
+                        ? tarea.referenciasPorEquipo?.[registro.subtipo]
+                          ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
+                          : `Sin registro previo con ${registro.subtipo}`
+                        : "Elige qué material vas a utilizar"
+                      : tarea.referencia
+                      ? `Última vez: ${tarea.referencia}`
+                      : "Sin registro previo"}
+                  </div>
+                </>
+              )}
             </>
           )}
         </div>
         <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
       </div>
       {tarea.materiales && tarea.materiales.length > 0 && (
-        <div style={{ marginLeft: 56, display: "flex", gap: 6, flexWrap: "wrap" }}>
+        <div style={{ marginLeft: 68, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {tarea.materiales.map((m) => (
             <DsBadge key={m} tone="accent">{m}</DsBadge>
           ))}
         </div>
       )}
       {tarea.nota && (
-        <div style={{ marginLeft: 56, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "6px 8px" }}>
-          <span style={{ color: ds.warning, fontSize: 11.5, flexShrink: 0 }}>📝</span>
-          <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>{tarea.nota}</span>
+        <div style={{ marginLeft: 68, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
+          <span style={{ color: ds.warning, fontSize: 12, flexShrink: 0 }}>📝</span>
+          <span style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.4 }}>{tarea.nota}</span>
         </div>
       )}
-      {mostrarRegistro && tarea.esResistencia && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
+      {mostrarFormulario && tarea.esResistencia && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 68 }}>
           <div style={{ display: "flex", gap: 6 }}>
             {[
               { v: "completo", label: "Cumplido completo" },
@@ -4392,34 +4425,34 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             ))}
           </div>
           {registro.subtipo === "parcial" && (
-            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 4 }}>
               <EtiquetaCampoReal>¿CUÁNTO HAS HECHO?</EtiquetaCampoReal>
               <DsInput
                 value={registro.carga}
                 onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
                 placeholder="ej. 2 de 3 series, 8 min..."
-                style={{ padding: "7px 9px", fontSize: 12.5 }}
+                style={{ padding: "9px 11px", fontSize: 13 }}
               />
             </label>
           )}
         </div>
       )}
-      {mostrarRegistro && tarea.esCmj && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 3, paddingLeft: 56 }}>
+      {mostrarFormulario && tarea.esCmj && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 68 }}>
           <EtiquetaCampoReal>ALTURA DEL SALTO (CM)</EtiquetaCampoReal>
           <DsInput
             value={registro.carga}
             onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
             placeholder="—"
             inputMode="decimal"
-            style={{ width: 90, fontFamily: dsF.mono, fontSize: 13, padding: "6px 9px", textAlign: "center" }}
+            style={{ width: 100, fontFamily: dsF.mono, fontSize: 14, padding: "9px 11px", textAlign: "center" }}
           />
         </div>
       )}
-      {mostrarRegistro && !tarea.esResistencia && !tarea.esCmj && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 8, paddingLeft: 56 }}>
+      {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 68 }}>
           {tarea.eligeEquipo && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <EtiquetaCampoReal color={ds.accent}>¿QUÉ MATERIAL VAS A UTILIZAR?</EtiquetaCampoReal>
               <div style={{ display: "flex", gap: 6 }}>
                 {(tarea.equiposElegibles || []).map((op) => (
@@ -4443,21 +4476,23 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               ))}
             </div>
           )}
-          <EtiquetaCampoReal>Registra tu carga máxima del día</EtiquetaCampoReal>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <EtiquetaCampoReal>{(tarea.unidad || "reps").toUpperCase()}</EtiquetaCampoReal>
-              <DsInput
-                value={registro.reps}
-                onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
-                placeholder="—"
-                style={{ width: 46, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-              />
-            </label>
+          <div style={{ background: ds.bgElevated, borderRadius: dsR.lg, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <EtiquetaCampoReal>Registra tu carga máxima del día</EtiquetaCampoReal>
+            <div style={{ display: "flex", gap: 0, alignItems: "stretch" }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                <EtiquetaCampoReal>{(tarea.unidad || "reps").toUpperCase()}</EtiquetaCampoReal>
+                <input
+                  value={registro.reps}
+                  onChange={(e) => onCambiarRegistro({ ...registro, reps: e.target.value })}
+                  placeholder="—"
+                  style={{ background: "transparent", border: "none", borderBottom: `2px solid ${ds.border}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
+                />
+              </label>
+              <div style={{ width: 1, background: ds.border, margin: "0 12px" }} />
             {registro.subtipo === "asistencia" ? (
-              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1.3 }}>
                 <EtiquetaCampoReal>BANDA</EtiquetaCampoReal>
-                <div style={{ display: "flex", gap: 5 }}>
+                <div style={{ display: "flex", gap: 5, paddingTop: 4 }}>
                   {["Ligera", "Media", "Dura"].map((r) => (
                     <ChipSeleccionableReal key={r} activo={registro.carga === r} onClick={() => onCambiarRegistro({ ...registro, carga: r })}>
                       {r}
@@ -4465,8 +4500,10 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   ))}
                 </div>
               </label>
-            ) : tarea.esCorporal && registro.subtipo === "" ? null : (
-              <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+            ) : tarea.esCorporal && registro.subtipo === "" ? (
+              <div style={{ flex: 1.3 }} />
+            ) : (
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1.3 }}>
                 <EtiquetaCampoReal>
                   {registro.subtipo === "lastre"
                     ? "KG LASTRE"
@@ -4478,23 +4515,25 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                     ? `KG (${tarea.equipoUnico.toUpperCase()})`
                     : "CARGA KG"}
                 </EtiquetaCampoReal>
-                <DsInput
+                <input
                   value={registro.carga}
                   onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
                   placeholder="—"
-                  style={{ width: 60, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
+                  style={{ background: "transparent", border: "none", borderBottom: `2px solid ${ds.accent}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
                 />
               </label>
             )}
-            <label style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
-              <DsInput
-                value={registro.rir}
-                onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
-                placeholder="—"
-                style={{ width: 46, fontFamily: dsF.mono, fontSize: 13, padding: "6px 7px", textAlign: "center" }}
-              />
-            </label>
+              <div style={{ width: 1, background: ds.border, margin: "0 12px" }} />
+              <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
+                <input
+                  value={registro.rir}
+                  onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
+                  placeholder="—"
+                  style={{ background: "transparent", border: "none", borderBottom: `2px solid ${ds.border}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
+                />
+              </label>
+            </div>
           </div>
         </div>
       )}
@@ -4504,7 +4543,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
 
 function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
   return (
-    <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.lg, padding: 10, display: "flex", flexDirection: "column", gap: 8, background: `${ds.surface}40` }}>
+    <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.xl, padding: 14, display: "flex", flexDirection: "column", gap: 12, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
         <DsBadge tone="accent">CIRCUITO</DsBadge>
         <span style={{ fontSize: 11, color: ds.inkMuted }}>seguir orden</span>
@@ -4524,7 +4563,7 @@ function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegi
           {rondas} {rondas === 1 ? "RONDA" : "RONDAS"}
         </span>
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {tareas.map((t, i) => (
           <TareaCardReal
             key={t.id}
@@ -5210,17 +5249,25 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </button>
         )}
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIÓN DE HOY</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
-          <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>
+            HOY · {fmtDateLabel(date).toUpperCase()}
+          </div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>Sesión de hoy</h1>
           {totalTareas > 0 && (
-            <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8 }}>
-              <div style={{ flex: 1, height: 4, background: ds.border, borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ height: "100%", width: `${(totalHechas / totalTareas) * 100}%`, background: ds.accent, transition: "width 0.25s ease" }} />
+            <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 16 }}>
+              <DsProgressRing value={totalTareas ? (totalHechas / totalTareas) * 100 : 0} size={72} strokeWidth={7} />
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 600 }}>
+                  {totalHechas} de {totalTareas} tarea{totalTareas === 1 ? "" : "s"} completada{totalTareas === 1 ? "" : "s"}
+                </div>
+                {(sesionActual?.objetivo || sesionActual?.md) && (
+                  <div style={{ marginTop: 6 }}>
+                    <DsBadge tone="accent">
+                      {[sesionActual?.objetivo, sesionActual?.md].filter(Boolean).join(" · ").toUpperCase()}
+                    </DsBadge>
+                  </div>
+                )}
               </div>
-              <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted }}>
-                {totalHechas}/{totalTareas}
-              </span>
             </div>
           )}
         </div>
@@ -5233,13 +5280,14 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </div>
         ) : (
           <>
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
               {Object.entries(bloques).map(([nombreBloque, tareasBloque]) => (
                 <div key={nombreBloque}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, paddingLeft: 2 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 600, color: ds.inkSecondary }}>{nombreBloque}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingLeft: 2 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: ds.accent, flexShrink: 0 }} />
+                    <span style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: ds.inkSecondary, textTransform: "uppercase" }}>{nombreBloque}</span>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                     {tareasBloque.map((item, idx) =>
                       item.tipo === "circuito" ? (
                         <CircuitoJugadorReal
