@@ -667,6 +667,18 @@ const fmtDateShort = (d) => {
   return dt.toLocaleDateString("es-ES", { day: "numeric", month: "short", year: "numeric" });
 };
 
+// "hace N días" en vez de una fecha absoluta — para cajones compactos
+// (dashboard del jugador) donde el dato relevante es "qué tan reciente es
+// esto", no la fecha exacta.
+const fmtHaceDias = (fecha) => {
+  const dt = new Date(normalizarFecha(fecha) + "T00:00:00");
+  const hoy = new Date(todayStr() + "T00:00:00");
+  const dias = Math.round((hoy - dt) / 86400000);
+  if (dias <= 0) return "hoy";
+  if (dias === 1) return "hace 1 día";
+  return `hace ${dias} días`;
+};
+
 const genPin = () => String(Math.floor(1000 + Math.random() * 9000));
 
 function genUniquePin(existingPins) {
@@ -3552,6 +3564,27 @@ function cmjParseCSV(text) {
 }
 
 function cmjPct(a, b) { return b ? ((a - b) / b) * 100 : null; }
+
+// Compara el último test de un día de medida (tag: "inicio"/"md2"/"md1")
+// contra el mismo día de medida del microciclo anterior en el que exista
+// ese dato — evita la trampa de comparar linealmente test contra test sin
+// mirar qué día de medida era cada uno (un MD-2 no es comparable con un
+// Inicio: son estímulos distintos, no una caída de rendimiento real).
+function cmjDeltaMismoDiaCicloAnterior(cmjPlayer, cmjMicroList, tag, metric) {
+  if (!cmjPlayer) return null;
+  const conValor = cmjMicroList
+    .map((m) => {
+      const r = cmjPlayer.microResults.get(m.id);
+      const fila = r ? r[tag] : null;
+      const val = fila ? metric.get(fila) : null;
+      return val != null ? { microId: m.id, val } : null;
+    })
+    .filter(Boolean);
+  if (conValor.length < 2) return null;
+  const prev = conValor[conValor.length - 2];
+  const curr = conValor[conValor.length - 1];
+  return { pct: cmjPct(curr.val, prev.val), actual: curr.val };
+}
 function cmjFmt(v, d = 1) { return v === null || v === undefined ? "—" : v.toFixed(d); }
 function cmjSigned(v, d = 1) { return v == null ? "—" : `${v > 0 ? "+" : ""}${cmjFmt(v, d)}%`; }
 function cmjSdMuestral(arr) {
@@ -6027,7 +6060,10 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   // una sesión a medio hacer pareciera siempre un formulario sin terminar.
   // Mientras no está hecha, el formulario solo se ve si tocas la tarjeta
   // para desplegarla — colapsada, la tarjeta es solo nombre + meta + check.
-  const puedeDesplegar = mostrarRegistro && !hecho;
+  // El CMJ ya no se despliega para editar nada: la altura ya no la
+  // introduce el jugador (viene del CSV que sube el entrenador), así que no
+  // hay campo que rellenar — solo queda marcarla como hecha cuando la haga.
+  const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj;
   const mostrarFormulario = puedeDesplegar && expandido;
   return (
     <DsCard status={hecho ? "done" : "default"} style={{ padding: 14, gap: 12, borderRadius: dsR.xl, borderColor: hecho ? ds.successBorderSubtle : "transparent", boxShadow: dsSh.elevation2 }}>
@@ -6158,18 +6194,6 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               />
             </label>
           )}
-        </div>
-      )}
-      {mostrarFormulario && tarea.esCmj && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingLeft: 55 }}>
-          <EtiquetaCampoReal>ALTURA DEL SALTO (CM)</EtiquetaCampoReal>
-          <DsInput
-            value={registro.carga}
-            onChange={(e) => onCambiarRegistro({ ...registro, carga: e.target.value })}
-            placeholder="—"
-            inputMode="decimal"
-            style={{ width: 100, fontFamily: dsF.mono, fontSize: 14, padding: "9px 11px", textAlign: "center" }}
-          />
         </div>
       )}
       {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
@@ -6418,6 +6442,27 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
+  // Datos reales de salto (altura/potencia/fuerza/velocidad), vinculados por
+  // jugador_id — el mismo pipeline que ya usa el entrenador en la ficha de
+  // jugador (CmjFichaJugadorReal): no se recalcula nada nuevo, se reutiliza
+  // cmjBuildPlayers para tener la comparación "mismo día de medida, ciclo
+  // anterior" ya validada ahí, en vez de reinventar el cálculo aquí.
+  const [cmjSaltos, setCmjSaltos] = useState([]);
+  const [cmjMicrociclos, setCmjMicrociclos] = useState([]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!player?.id) return;
+    Promise.all([
+      supabase.from("cmj_saltos").select("*").eq("jugador_id", player.id),
+      supabase.from("cmj_microciclos").select("*"),
+    ]).then(([saltosRes, microRes]) => {
+      if (cancelled) return;
+      setCmjSaltos(saltosRes.error ? [] : saltosRes.data || []);
+      setCmjMicrociclos(microRes.error ? [] : microRes.data || []);
+    });
+    return () => { cancelled = true; };
+  }, [player?.id]);
+
   // Cuando hoy hay más de una sesión distinta enviada a este jugador, se
   // tratan como unidades independientes — cada una con su propio progreso y
   // su propio envío — en vez de mezclar sus tareas en una sola lista donde
@@ -6520,40 +6565,76 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // jugador marcó (subtipo_corporal, reaprovechado aquí igual que para
   // asistencia/lastre) — no basta con mirar el material de la tarea, porque
   // ese campo dice qué estaba disponible, no cuál se usó.
-  // Último salto de CMJ registrado, sea cual sea el MD de hoy — no se
-  // compara MD con MD, solo se recuerda el dato más reciente y de qué MD
-  // venía (si aquella sesión tenía uno puesto).
-  const ultimoCmj = [...historyItems]
-    .filter((it) => it.bloque === "CMJ" && it.date < date && it.cargaReal !== "")
-    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-
   // ---- Datos reales para el Dashboard y la pestaña CMJ ----
-  // Historial completo de saltos (no solo "antes de hoy" como ultimoCmj,
-  // que es para la referencia dentro de la tarea) — con esto se puede
-  // mostrar tendencia y mejor marca, no solo el último dato.
-  const historialCmj = [...historyItems]
-    .filter((it) => it.bloque === "CMJ" && it.cargaReal !== "" && it.cargaReal != null)
-    .sort((a, b) => (a.date < b.date ? -1 : 1))
-    .map((it) => ({ date: it.date, value: Number(it.cargaReal) }));
-  const cmjResumen = historialCmj.length
+  // Única fuente: cmj_saltos (el CSV del dispositivo que sube el
+  // entrenador). El jugador ya no introduce el salto a mano dentro de una
+  // sesión, así que ya no existe un histórico "por sesión" en paralelo —
+  // habría dos números de altura distintos conviviendo, y solo uno es el
+  // real. Todo (altura, potencia, fuerza, velocidad, récord y comparativas)
+  // sale de aquí.
+  const filasCmjMotor = cmjSaltos.map((s) => ({
+    jugadorId: s.jugador_id,
+    nombre: player?.name,
+    dateKey: s.fecha,
+    date: s.fecha_hora,
+    peso: s.peso,
+    hp0: s.hp0,
+    altura: s.altura,
+    fuerza: s.fuerza,
+    potencia: s.potencia,
+    velocidad: s.velocidad,
+    kineticsValid: s.kinetics_valid,
+    pesoValid: s.peso_valid,
+    hp0Valid: s.hp0_valid,
+  }));
+  const { players: cmjBuiltPlayers, microList: cmjMicroList } = cmjBuildPlayers(
+    filasCmjMotor,
+    cmjMicrociclos,
+    CMJ_UMBRAL_DEFECTO.ambarPct,
+    CMJ_UMBRAL_DEFECTO.rojoPct,
+    CMJ_UMBRAL_DEFECTO.individualizar,
+    CMJ_UMBRAL_DEFECTO.protocoloDesde
+  );
+  const cmjPlayer = cmjBuiltPlayers[0] || null;
+  const mejorDeMetrica = (metric) => {
+    if (!cmjPlayer) return null;
+    const valores = cmjPlayer.sorted.map((r) => metric.get(r)).filter((v) => v != null);
+    return valores.length ? Math.max(...valores) : null;
+  };
+  const cmjMejores = cmjPlayer
+    ? { altura: mejorDeMetrica(CMJ_METRICS.altura), potenciaRel: mejorDeMetrica(CMJ_METRICS.potenciaRel), fuerzaRel: mejorDeMetrica(CMJ_METRICS.fuerzaRel), velocidad: mejorDeMetrica(CMJ_METRICS.velocidad) }
+    : null;
+  const ultimoTestCmj = cmjPlayer && cmjPlayer.sorted.length ? cmjPlayer.sorted[cmjPlayer.sorted.length - 1] : null;
+  const ultimoTestCmjTag = ultimoTestCmj ? ultimoTestCmj.tag : null;
+  // Para la referencia dentro de la tarea de sesión ("Último salto X cm"):
+  // el último test ANTES de hoy, no el de hoy mismo si ya se hubiera subido
+  // — es una referencia de lo anterior, no el dato que se está a punto de
+  // registrar.
+  const ultimoTestCmjAntesDeHoy = cmjPlayer
+    ? [...cmjPlayer.sorted].filter((r) => r.date < date).sort((a, b) => (a.date < b.date ? 1 : -1))[0] || null
+    : null;
+  const cmjComparativaCicloAnterior = ultimoTestCmjTag ? cmjDeltaMismoDiaCicloAnterior(cmjPlayer, cmjMicroList, ultimoTestCmjTag, CMJ_METRICS.altura) : null;
+  const cmjDashboardDelta = ultimoTestCmj
     ? {
-        lastValue: historialCmj[historialCmj.length - 1].value,
-        bestValue: Math.max(...historialCmj.map((p) => p.value)),
-        deltaLabel:
-          historialCmj.length > 1
-            ? `${historialCmj[historialCmj.length - 1].value - historialCmj[historialCmj.length - 2].value > 0 ? "+" : ""}${(
-                historialCmj[historialCmj.length - 1].value - historialCmj[historialCmj.length - 2].value
-              ).toFixed(1).replace(/\.0$/, "")}cm`
-            : null,
-        direction: historialCmj.length > 1 ? (historialCmj[historialCmj.length - 1].value >= historialCmj[historialCmj.length - 2].value ? "up" : "down") : "neutral",
-        history: historialCmj,
+        valor: CMJ_METRICS.altura.get(ultimoTestCmj),
+        fechaLabel: fmtHaceDias(ultimoTestCmj.date),
+        tagLabel: ultimoTestCmjTag && CMJ_TAG_META[ultimoTestCmjTag] ? CMJ_TAG_META[ultimoTestCmjTag].label : null,
+        pct: cmjComparativaCicloAnterior ? cmjComparativaCicloAnterior.pct : null,
+        color:
+          !cmjComparativaCicloAnterior || cmjComparativaCicloAnterior.pct == null
+            ? ds.inkMuted
+            : cmjComparativaCicloAnterior.pct > 0
+            ? ds.success
+            : cmjComparativaCicloAnterior.pct < 0
+            ? ds.danger
+            : ds.accent,
       }
     : null;
 
-  // "Esta semana destaca" y "Tendencia por zona corporal": ventana corrediza
-  // de 7 días naturales (hoy + 6 anteriores) contra los 7 días previos a
-  // esa — es nuestra definición de "semana" para este cálculo, no tiene por
-  // qué coincidir con tu semana de trabajo real (p. ej. lunes-domingo o tu
+  // "Esta semana destaca" y "récord de carga": ventana corrediza de 7 días
+  // naturales (hoy + 6 anteriores) contra los 7 días previos a esa — es
+  // nuestra definición de "semana" para este cálculo, no tiene por qué
+  // coincidir con tu semana de trabajo real (p. ej. lunes-domingo o tu
   // propio microciclo); si prefieres esa referencia en vez de esta ventana
   // corrediza, se cambia solo aquí.
   const haceDias = (dias) => {
@@ -6562,21 +6643,45 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   };
   const inicioSemanaActual = haceDias(6);
-  const inicioSemanaAnterior = haceDias(13);
-  const finSemanaAnterior = haceDias(7);
 
   const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
-  // Tarea que más ha mejorado esta semana frente a su propia media
-  // histórica (la semana actual no entra en el cálculo de esa media, para
-  // no comparar la semana consigo misma).
+  // Récord de carga: se agrupa por NOMBRE de ejercicio (no por diseño exacto
+  // de tarea) porque un PR es del ejercicio, no de una variante concreta de
+  // reps/RIR — y se destaca el PR más reciente, con el % sobre el máximo
+  // anterior a ese PR: 110kg de sentadilla no es "más logro" que 90kg de
+  // press banca, así que el kg en bruto no es comparable entre ejercicios,
+  // el % sobre el propio récord anterior sí.
+  const registrosPorEjercicio = new Map();
+  registrosConCarga.forEach((it) => {
+    if (!registrosPorEjercicio.has(it.name)) registrosPorEjercicio.set(it.name, []);
+    registrosPorEjercicio.get(it.name).push(it);
+  });
+  let recordCarga = null;
+  registrosPorEjercicio.forEach((regs, nombre) => {
+    const ordenados = [...regs].sort((a, b) => Number(b.cargaReal) - Number(a.cargaReal));
+    const maxActual = ordenados[0];
+    const maxAnterior = ordenados.find((it) => it.id !== maxActual.id && Number(it.cargaReal) < Number(maxActual.cargaReal));
+    const pctSobreAnterior = maxAnterior ? ((Number(maxActual.cargaReal) - Number(maxAnterior.cargaReal)) / Number(maxAnterior.cargaReal)) * 100 : null;
+    if (!recordCarga || maxActual.date > recordCarga.fecha) {
+      recordCarga = { nombre, valor: Number(maxActual.cargaReal), fecha: maxActual.date, pctSobreAnterior };
+    }
+  });
+
+  // Cambios de carga esta semana frente a la propia media histórica de cada
+  // tarea, agrupando por diseño exacto (ejercicio + material + lateralidad +
+  // reps + RIR objetivo — igual criterio que cambioPctPorId en el
+  // historial). No nos quedamos solo con el mayor: se guardan todos los
+  // deltas (positivos, negativos y empatados) para poder mostrar el mayor de
+  // cada signo + cuántos más se movieron en la misma dirección, en vez de
+  // una tendencia por zona corporal que mezclaba ejercicios distintos.
   const historialPorClave = new Map();
   registrosConCarga.forEach((it) => {
     const clave = claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir);
     if (!historialPorClave.has(clave)) historialPorClave.set(clave, []);
     historialPorClave.get(clave).push(it);
   });
-  let tareaConMasMejora = null;
+  const cambiosSemana = [];
   historialPorClave.forEach((regs) => {
     const deEstaSemana = regs.filter((it) => it.date >= inicioSemanaActual);
     const deAntes = regs.filter((it) => it.date < inicioSemanaActual);
@@ -6584,35 +6689,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const mediaAntes = deAntes.reduce((s, it) => s + Number(it.cargaReal), 0) / deAntes.length;
     if (mediaAntes <= 0) return;
     const ultimoEstaSemana = [...deEstaSemana].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-    const delta = Number(ultimoEstaSemana.cargaReal) - mediaAntes;
-    if (!tareaConMasMejora || delta > tareaConMasMejora.delta) {
-      tareaConMasMejora = { nombre: ultimoEstaSemana.name, delta, deltaLabel: `${delta > 0 ? "+" : ""}${delta.toFixed(1).replace(/\.0$/, "")}kg` };
-    }
+    const pct = ((Number(ultimoEstaSemana.cargaReal) - mediaAntes) / mediaAntes) * 100;
+    cambiosSemana.push({ nombre: ultimoEstaSemana.name, pct });
   });
-  const highlights =
-    tareaConMasMejora && tareaConMasMejora.delta > 0
-      ? [{ id: "mejora-semana", text: `${tareaConMasMejora.nombre} es la tarea que más ha mejorado esta semana: ${tareaConMasMejora.deltaLabel} sobre tu media histórica.` }]
-      : [];
-
-  // Tendencia por zona corporal: Zona media queda fuera (no maneja cargas);
-  // Global cuenta para las dos zonas a la vez, porque implica a ambas.
-  const perteneceAZona = (it, zona) => (it.tipos || []).includes(zona) || (it.tipos || []).includes("Global");
-  const mediaEnVentana = (zona, desde, hasta) => {
-    const regs = registrosConCarga.filter((it) => perteneceAZona(it, zona) && it.date >= desde && it.date <= hasta);
-    if (!regs.length) return null;
-    return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
-  };
-  const regionTrends = [];
-  [
-    { id: "superior", label: "Tren superior", zona: "Miembro superior" },
-    { id: "inferior", label: "Tren inferior", zona: "Miembro inferior" },
-  ].forEach(({ id, label, zona }) => {
-    const actual = mediaEnVentana(zona, inicioSemanaActual, date);
-    const anterior = mediaEnVentana(zona, inicioSemanaAnterior, finSemanaAnterior);
-    if (actual == null || anterior == null || anterior === 0) return;
-    const pct = ((actual - anterior) / anterior) * 100;
-    regionTrends.push({ id, label, deltaLabel: `${pct > 0 ? "+" : ""}${pct.toFixed(0)}%`, direction: pct >= 0 ? "up" : "down" });
-  });
+  const mejorasSemana = cambiosSemana.filter((c) => c.pct > 0).sort((a, b) => b.pct - a.pct);
+  const descensosSemana = cambiosSemana.filter((c) => c.pct < 0).sort((a, b) => a.pct - b.pct);
+  const sinCambioSemana = cambiosSemana.filter((c) => c.pct === 0);
 
   const lastValueByName = {};
   [...historyItems]
@@ -6684,9 +6766,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       unilateral: t.lateralidad === "unilateral",
       esCmj: t.bloque_sesion === "CMJ",
       // El MD de la sesión de hoy no importa aquí — se recuerda el último
-      // salto registrado, sea de cuando sea, con su propio MD entre
-      // paréntesis si aquella sesión tenía uno (si no, sin paréntesis).
-      referenciaCmj: t.bloque_sesion === "CMJ" && ultimoCmj ? { md: ultimoCmj.md || "", altura: ultimoCmj.cargaReal } : null,
+      // test CMJ del CSV, sea de cuando sea, con su día de medida entre
+      // paréntesis. Ya no es un dato que metiera el jugador: es solo
+      // contexto de lo último que se le midió con el dispositivo.
+      referenciaCmj:
+        t.bloque_sesion === "CMJ" && ultimoTestCmjAntesDeHoy
+          ? { md: ultimoTestCmjAntesDeHoy.tag && CMJ_TAG_META[ultimoTestCmjAntesDeHoy.tag] ? CMJ_TAG_META[ultimoTestCmjAntesDeHoy.tag].label : "", altura: CMJ_METRICS.altura.get(ultimoTestCmjAntesDeHoy) }
+          : null,
       // Ahora que Activación admite cualquier ejercicio de la biblioteca (no
       // solo la bici estática), ya no se asume automáticamente por bloque —
       // depende solo de si el propio ejercicio se marcó como "sin lateralidad".
@@ -6896,51 +6982,136 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             </div>
           )}
 
-          {highlights.length > 0 && (
+          {(recordCarga || (cmjMejores && cmjMejores.altura != null)) && (
             <div style={{ marginTop: 20 }}>
-              <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Esta semana destaca</div>
-              {highlights.map((h) => (
-                <div key={h.id} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", gap: 10 }}>
-                  <span style={{ color: ds.success, flexShrink: 0 }}>↗</span>
-                  <div style={{ fontSize: 13, color: ds.ink, lineHeight: 1.45 }}>{h.text}</div>
-                </div>
-              ))}
+              <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Tus récords</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                {recordCarga && (
+                  <div style={{ flex: 1, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                    <Dumbbell size={16} color={ds.accent} strokeWidth={1.75} />
+                    <div style={{ fontFamily: dsF.display, fontSize: 19, fontWeight: 700, marginTop: 6 }}>
+                      {recordCarga.valor}<span style={{ fontSize: 12.5, fontWeight: 400, color: ds.inkSecondary }}> kg</span>
+                    </div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginTop: 2 }}>{recordCarga.nombre} · récord</div>
+                    {recordCarga.pctSobreAnterior != null && (
+                      <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.success, marginTop: 4 }}>
+                        +{recordCarga.pctSobreAnterior.toFixed(0)}% sobre tu récord anterior
+                      </div>
+                    )}
+                  </div>
+                )}
+                {cmjMejores && cmjMejores.altura != null && (
+                  <div style={{ flex: 1, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                    <Dumbbell size={16} color={ds.accent} strokeWidth={1.75} />
+                    <div style={{ fontFamily: dsF.display, fontSize: 19, fontWeight: 700, marginTop: 6 }}>
+                      {cmjMejores.altura.toFixed(1)}<span style={{ fontSize: 12.5, fontWeight: 400, color: ds.inkSecondary }}> cm</span>
+                    </div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginTop: 2 }}>Salto CMJ · mejor</div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, marginTop: 4, letterSpacing: "0.02em" }}>
+                      P {cmjMejores.potenciaRel != null ? cmjMejores.potenciaRel.toFixed(1) : "—"} · F {cmjMejores.fuerzaRel != null ? cmjMejores.fuerzaRel.toFixed(1) : "—"} · V {cmjMejores.velocidad != null ? cmjMejores.velocidad.toFixed(2) : "—"}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
-          {regionTrends.length > 0 && (
+          {mejorasSemana.length > 0 && (
             <div style={{ marginTop: 20 }}>
-              <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Tendencia por zona corporal</div>
-              <div style={{ display: "flex", gap: 8 }}>
-                {regionTrends.map((r) => (
-                  <div key={r.id} style={{ flex: 1, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px" }}>
-                    <div style={{ fontSize: 12, color: ds.inkSecondary, fontWeight: 600, marginBottom: 6 }}>{r.label}</div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 4, color: r.direction === "up" ? ds.success : ds.danger, fontFamily: dsF.mono, fontSize: 15, fontWeight: 700 }}>
-                      {r.direction === "up" ? "↑" : "↓"} {r.deltaLabel}
+              <details style={{ background: `${ds.success}1A`, border: `1px solid ${ds.success}55`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                <summary style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", listStyle: "none" }}>
+                  <span style={{ color: ds.success, flexShrink: 0 }}>↗</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Mejora destacada</div>
+                    <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
+                      {mejorasSemana[0].nombre}: <b style={{ color: ds.success, fontWeight: 700 }}>+{mejorasSemana[0].pct.toFixed(0)}%</b> respecto a tu media reciente.
                     </div>
+                    {mejorasSemana.length > 1 && (
+                      <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.success, marginTop: 6 }}>
+                        y {mejorasSemana.length - 1} ejercicio{mejorasSemana.length - 1 === 1 ? "" : "s"} más {mejorasSemana.length - 1 === 1 ? "mejoró" : "mejoraron"} esta semana ▾
+                      </div>
+                    )}
                   </div>
-                ))}
+                </summary>
+                {mejorasSemana.length > 1 && (
+                  <div style={{ margin: "10px 0 0 26px", display: "flex", flexDirection: "column", gap: 6 }}>
+                    {mejorasSemana.slice(1).map((c, i) => (
+                      <div key={`${c.nombre}-${i}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: ds.ink }}>{c.nombre}</span>
+                        <span style={{ color: ds.success, fontWeight: 600 }}>+{c.pct.toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </details>
+            </div>
+          )}
+
+          {descensosSemana.length > 0 && (
+            <div style={{ marginTop: mejorasSemana.length > 0 ? 8 : 20 }}>
+              <details style={{ background: `${ds.danger}1A`, border: `1px solid ${ds.danger}55`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                <summary style={{ display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer", listStyle: "none" }}>
+                  <span style={{ color: ds.danger, flexShrink: 0 }}>↘</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 600 }}>Descenso destacado</div>
+                    <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
+                      {descensosSemana[0].nombre}: <b style={{ color: ds.danger, fontWeight: 700 }}>{descensosSemana[0].pct.toFixed(0)}%</b> respecto a tu media reciente.
+                    </div>
+                    {descensosSemana.length > 1 && (
+                      <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.danger, marginTop: 6 }}>
+                        y {descensosSemana.length - 1} ejercicio{descensosSemana.length - 1 === 1 ? "" : "s"} más {descensosSemana.length - 1 === 1 ? "bajó" : "bajaron"} ▾
+                      </div>
+                    )}
+                  </div>
+                </summary>
+                {descensosSemana.length > 1 && (
+                  <div style={{ margin: "10px 0 0 26px", display: "flex", flexDirection: "column", gap: 6 }}>
+                    {descensosSemana.slice(1).map((c, i) => (
+                      <div key={`${c.nombre}-${i}`} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: ds.ink }}>{c.nombre}</span>
+                        <span style={{ color: ds.danger, fontWeight: 600 }}>{c.pct.toFixed(0)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </details>
+            </div>
+          )}
+
+          {mejorasSemana.length === 0 && descensosSemana.length === 0 && sinCambioSemana.length > 0 && (
+            <div style={{ marginTop: 20 }}>
+              <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", gap: 10 }}>
+                <span style={{ color: ds.accent, flexShrink: 0 }}>–</span>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 600 }}>Sin cambios esta semana</div>
+                  <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>{sinCambioSemana[0].nombre}: misma carga que tu media reciente.</div>
+                </div>
               </div>
             </div>
           )}
 
           <div style={{ marginTop: 20 }}>
             <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Salto (CMJ)</div>
-            {cmjResumen ? (
-              <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            {cmjDashboardDelta ? (
+              <div
+                onClick={() => setVistaJugador("cmj")}
+                style={{ background: `${cmjDashboardDelta.color}1A`, border: `1px solid ${cmjDashboardDelta.color}55`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, cursor: "pointer" }}
+              >
                 <div>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{cmjResumen.lastValue} cm</div>
-                  <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, marginTop: 2 }}>último salto registrado</div>
-                </div>
-                {cmjResumen.deltaLabel && (
-                  <div style={{ display: "flex", alignItems: "center", gap: 4, color: cmjResumen.direction === "up" ? ds.success : ds.danger, fontFamily: dsF.mono, fontSize: 12.5, fontWeight: 700 }}>
-                    {cmjResumen.direction === "up" ? "↑" : "↓"} {cmjResumen.deltaLabel}
+                  <div style={{ fontSize: 14, fontWeight: 600 }}>
+                    {cmjDashboardDelta.valor} cm <span style={{ color: ds.inkSecondary, fontWeight: 400, fontSize: 12 }}>· {cmjDashboardDelta.fechaLabel}</span>
                   </div>
-                )}
+                  <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: cmjDashboardDelta.color, marginTop: 3 }}>
+                    {cmjDashboardDelta.pct == null
+                      ? "aún sin ciclo anterior con el que comparar"
+                      : `${cmjDashboardDelta.pct >= 0 ? "▲" : "▼"} ${Math.abs(cmjDashboardDelta.pct).toFixed(1)}% vs tu último ${cmjDashboardDelta.tagLabel || "test"}`}
+                  </div>
+                </div>
+                <span style={{ fontSize: 12, color: ds.accent, flexShrink: 0 }}>Ver →</span>
               </div>
             ) : (
               <div style={{ background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", color: ds.inkMuted, fontSize: 12.5, lineHeight: 1.4 }}>
-                Próximamente: seguimiento de tu salto (CMJ) a lo largo del tiempo.
+                Aún no hay tests CMJ vinculados a ti. En cuanto tu entrenador suba un CSV con tus saltos, aparecerán aquí.
               </div>
             )}
           </div>
@@ -6953,6 +7124,37 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   }
 
   if (vistaJugador === "cmj") {
+    // Comparativas de la pestaña, ambas sobre "altura" (la métrica que ya
+    // "drivesStatus" como principal en toda la app):
+    // 1) dentro del propio microciclo, MD-2/MD+1 contra el Inicio de esa
+    //    semana — reutiliza el cálculo que ya hace cmjBuildPlayers para el
+    //    entrenador (metrics.altura.md2Delta/md1Delta), no se recalcula.
+    // 2) mismo día de medida (p. ej. MD-2 contra MD-2), microciclo anterior
+    //    contra el actual — cmjDeltaMismoDiaCicloAnterior, arriba.
+    const microActualCmj = cmjPlayer && ultimoTestCmj && ultimoTestCmj.microId != null ? cmjPlayer.microResults.get(ultimoTestCmj.microId) : null;
+    const withinCicloDeltaCmj =
+      microActualCmj && microActualCmj.metrics && microActualCmj.metrics.altura
+        ? ultimoTestCmjTag === "md2"
+          ? microActualCmj.metrics.altura.md2Delta
+          : ultimoTestCmjTag === "md1"
+          ? microActualCmj.metrics.altura.md1Delta
+          : null
+        : null;
+
+    // Tendencia: solo los puntos con el MISMO día de medida que el último
+    // test (p. ej. solo MD-2 de cada microciclo) — comparar entre sí
+    // microciclos distintos con el mismo estímulo, no mezclar MD-2 con
+    // Inicio en la misma línea.
+    const tendenciaMismoDiaCmj = ultimoTestCmjTag
+      ? cmjMicroList
+          .map((m) => {
+            const r = cmjPlayer.microResults.get(m.id);
+            const fila = r ? r[ultimoTestCmjTag] : null;
+            return fila ? { date: fila.date, valor: CMJ_METRICS.altura.get(fila), rir: "" } : null;
+          })
+          .filter((p) => p && p.valor != null)
+      : [];
+
     return (
       <>
       <PantallaBase rol="jugador" maxWidth={480}>
@@ -6966,25 +7168,78 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               ⟳
             </button>
           </div>
-          <div style={{ marginBottom: 8, marginTop: 18, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Historial de saltos</div>
-          {cmjResumen ? (
-            <DsCard>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, letterSpacing: "-0.01em" }}>
-                  {cmjResumen.lastValue}
-                  <span style={{ fontSize: 13, color: ds.inkSecondary, fontWeight: 600 }}>cm</span>
-                </div>
-                {cmjResumen.deltaLabel && (
-                  <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: cmjResumen.direction === "up" ? ds.success : ds.danger }}>{cmjResumen.deltaLabel}</div>
-                )}
+
+          {cmjPlayer && ultimoTestCmj ? (
+            <>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.05em", color: ds.accent, marginTop: 14, marginBottom: 10, textTransform: "uppercase" }}>
+                Última medición{ultimoTestCmjTag && CMJ_TAG_META[ultimoTestCmjTag] ? ` · ${CMJ_TAG_META[ultimoTestCmjTag].label}` : ""} · {fmtHaceDias(ultimoTestCmj.date)}
               </div>
-              <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Mejor marca: {cmjResumen.bestValue}cm</div>
-              <GraficaProgresoCargaReal puntos={cmjResumen.history.map((p) => ({ date: p.date, valor: p.value, rir: "" }))} unidad="cm" />
-            </DsCard>
+
+              {/* 4 tiles con la marca cruda de cada variable + su mejor marca — sin
+                  necesitar una tarjeta de PR aparte, cada tile lleva la suya. */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                {CMJ_METRIC_LIST.map((m) => {
+                  const valor = m.get(ultimoTestCmj);
+                  const mejor = cmjMejores ? cmjMejores[m.key] : null;
+                  const esMejorMarca = valor != null && mejor != null && Math.abs(valor - mejor) < 1e-9;
+                  return (
+                    <div key={m.key} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px" }}>
+                      <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, textTransform: "uppercase" }}>{m.label}</div>
+                      <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginTop: 6 }}>
+                        {valor != null ? valor.toFixed(m.decimals) : "—"}
+                        <span style={{ fontSize: 12, color: ds.inkSecondary, fontWeight: 400 }}> {m.unit}</span>
+                      </div>
+                      {esMejorMarca ? (
+                        <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.success, marginTop: 4 }}>★ Es tu mejor marca</div>
+                      ) : (
+                        <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, marginTop: 4 }}>{mejor != null ? `Mejor: ${mejor.toFixed(m.decimals)} ${m.unit}` : "Sin dato aún"}</div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Dos comparativas, no una — cada una responde una pregunta distinta
+                  y mezclarlas en un solo % induce a error (ver mockup/discusión). */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+                <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.inkMuted, textTransform: "uppercase" }}>Dentro de ese microciclo</div>
+                    <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 3 }}>vs. el Inicio de ese microciclo</div>
+                  </div>
+                  <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700, color: ds.inkSecondary }}>
+                    {withinCicloDeltaCmj == null ? "—" : `${withinCicloDeltaCmj >= 0 ? "▲" : "▼"} ${Math.abs(withinCicloDeltaCmj).toFixed(1)}%`}
+                  </div>
+                </div>
+                <div style={{ background: `${ds.success}1A`, border: `1px solid ${ds.success}55`, borderRadius: dsR.md, padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.inkSecondary, textTransform: "uppercase" }}>
+                      Frente a tu último {ultimoTestCmjTag && CMJ_TAG_META[ultimoTestCmjTag] ? CMJ_TAG_META[ultimoTestCmjTag].label : "test"}
+                    </div>
+                    <div style={{ fontSize: 12, color: ds.ink, marginTop: 3 }}>Mismo punto del microciclo anterior</div>
+                  </div>
+                  <div style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 700, color: cmjComparativaCicloAnterior == null ? ds.inkMuted : cmjComparativaCicloAnterior.pct >= 0 ? ds.success : ds.danger }}>
+                    {cmjComparativaCicloAnterior == null ? "—" : `${cmjComparativaCicloAnterior.pct >= 0 ? "▲" : "▼"} ${Math.abs(cmjComparativaCicloAnterior.pct).toFixed(1)}%`}
+                  </div>
+                </div>
+              </div>
+
+              {tendenciaMismoDiaCmj.length >= 2 && (
+                <div style={{ marginTop: 16 }}>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, textTransform: "uppercase", marginBottom: 2 }}>
+                    Altura en {ultimoTestCmjTag && CMJ_TAG_META[ultimoTestCmjTag] ? CMJ_TAG_META[ultimoTestCmjTag].label : "el mismo día"} · últimos microciclos
+                  </div>
+                  <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 8 }}>Compara siempre el mismo día de medida — no se mezcla con otros días.</div>
+                  <DsCard>
+                    <GraficaProgresoCargaReal puntos={tendenciaMismoDiaCmj} unidad="cm" />
+                  </DsCard>
+                </div>
+              )}
+            </>
           ) : (
-            <div style={{ border: `1px dashed ${ds.border}`, borderRadius: dsR.lg, padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 10, color: ds.inkMuted }}>
-              <div style={{ fontSize: 13.5, color: ds.ink, fontWeight: 600 }}>Aún no hay tendencia de salto que mostrar</div>
-              <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>En cuanto registres tu primer CMJ en una sesión, empezará a verse aquí.</div>
+            <div style={{ border: `1px dashed ${ds.border}`, borderRadius: dsR.lg, padding: "32px 20px", display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", gap: 10, color: ds.inkMuted, marginTop: 18 }}>
+              <div style={{ fontSize: 13.5, color: ds.ink, fontWeight: 600 }}>Aún no hay tests CMJ vinculados</div>
+              <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>En cuanto tu entrenador suba un CSV con tus saltos y queden vinculados a ti, aparecerán aquí.</div>
             </div>
           )}
           <div style={{ height: 100 }} />
