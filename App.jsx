@@ -4622,16 +4622,21 @@ function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegi
   );
 }
 
-// Barra de navegación inferior del jugador — sustituye al selector de
-// pestañas de arriba (DsTabSwitcher: una fila de píldoras pegada a la
-// izquierda, sin repartir el ancho) por una barra fija al fondo de la
-// pantalla, icono + etiqueta a partes iguales, como en las apps de
-// referencia del sector (My Jump Lab, Hevy). Solo se usa dentro de
-// PantallaJugadorReal — no toca PantallaBase ni ninguna pantalla de
-// entrenador. Position:fixed funciona aquí igual dentro que fuera del
-// contenedor con scroll de PantallaBase porque ese contenedor no tiene
-// transform/filter (lo que sí rompería el fixed); se comprobará de todos
-// modos en el dispositivo real.
+// Barra de navegación inferior del jugador — flotante, separada de los tres
+// bordes (no incrustada a ras de pantalla), con esquinas redondeadas y
+// sombra, y un resalte redondeado detrás del icono activo — igual que la
+// referencia (My Jump Lab) que enseñó David, no la versión "a ras" de la
+// primera pasada. Solo se usa dentro de PantallaJugadorReal — no toca
+// PantallaBase ni ninguna pantalla de entrenador.
+//
+// Adaptación a iOS: el margen inferior sale de env(safe-area-inset-bottom)
+// para no quedar tapada por (ni pegada a) la barra de gestos del home de
+// iPhone. Esto SOLO funciona si el <meta name="viewport"> de index.html
+// incluye viewport-fit=cover — si no lo tiene, env() siempre devuelve 0 y la
+// barra se ve bien mientras no revisemos ese archivo aparte (no vive en
+// App.jsx, lo edita David directamente). El wrapper exterior no bloquea
+// toques fuera de la píldora (pointerEvents: "none", solo la píldora en sí
+// los recibe) para no interferir con el contenido de detrás.
 const PLAYER_TAB_ICONS = { dashboard: Home, progreso: TrendingUp, cmj: Activity };
 
 function BarraInferiorJugadorReal({ tabs, active, onChange }) {
@@ -4645,12 +4650,23 @@ function BarraInferiorJugadorReal({ tabs, active, onChange }) {
         zIndex: 30,
         display: "flex",
         justifyContent: "center",
-        background: ds.bgElevated,
-        borderTop: `1px solid ${ds.border}`,
-        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+        padding: "0 16px calc(16px + env(safe-area-inset-bottom, 0px))",
+        pointerEvents: "none",
       }}
     >
-      <div style={{ width: "100%", maxWidth: 420, display: "flex" }}>
+      <div
+        style={{
+          pointerEvents: "auto",
+          width: "100%",
+          maxWidth: 420,
+          display: "flex",
+          background: ds.bgElevated,
+          border: `1px solid ${ds.border}`,
+          borderRadius: 26,
+          boxShadow: dsSh.elevation3,
+          padding: 6,
+        }}
+      >
         {tabs.map((t) => {
           const Icono = PLAYER_TAB_ICONS[t.id];
           const activo = active === t.id;
@@ -4665,16 +4681,18 @@ function BarraInferiorJugadorReal({ tabs, active, onChange }) {
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 4,
-                background: "transparent",
+                justifyContent: "center",
+                gap: 3,
+                background: activo ? ds.accentSubtle : "transparent",
                 border: "none",
-                padding: "9px 4px 8px",
+                borderRadius: 20,
+                padding: "8px 4px 7px",
                 color: activo ? ds.accent : ds.inkMuted,
                 cursor: "pointer",
               }}
             >
-              {Icono && <Icono size={20} strokeWidth={activo ? 2.4 : 2} />}
-              <span style={{ fontSize: 10.5, fontWeight: activo ? 700 : 500 }}>{t.label}</span>
+              {Icono && <Icono size={19} strokeWidth={activo ? 2.4 : 2} />}
+              <span style={{ fontSize: 10, fontWeight: activo ? 700 : 500 }}>{t.label}</span>
             </button>
           );
         })}
@@ -5240,7 +5258,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               </div>
             )}
           </div>
-          <div style={{ height: 76 }} />
+          <div style={{ height: 100 }} />
         </div>
       </PantallaBase>
       <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="dashboard" onChange={setVistaJugador} />
@@ -5283,7 +5301,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>En cuanto registres tu primer CMJ en una sesión, empezará a verse aquí.</div>
             </div>
           )}
-          <div style={{ height: 76 }} />
+          <div style={{ height: 100 }} />
         </div>
       </PantallaBase>
       <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="cmj" onChange={setVistaJugador} />
@@ -5312,7 +5330,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </div>
           <div style={{ marginTop: 18 }} />
           <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
-          <div style={{ height: 76 }} />
+          <div style={{ height: 100 }} />
         </div>
       </PantallaBase>
       <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="progreso" onChange={setVistaJugador} />
