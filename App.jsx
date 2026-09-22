@@ -2467,7 +2467,7 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
   );
 }
 
-function GestionRosterReal({ onBack, onOpenHistory }) {
+function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, saveGrupos, gruposLoaded] = useEntityList("grupos");
@@ -2555,14 +2555,8 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
   const independientes = players.filter((j) => (j.gruposIds || []).length === 0).length;
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={560}>
+    <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <button
-          onClick={onBack}
-          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
-        >
-          ← Volver a Dashboard
-        </button>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>USUARIOS</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
@@ -2625,7 +2619,7 @@ function GestionRosterReal({ onBack, onOpenHistory }) {
       {panelGrupoAbierto && (
         <PanelGestionGruposReal grupos={grupos} onCrear={crearGrupo} onEliminar={eliminarGrupo} onCerrar={() => setPanelGrupoAbierto(false)} />
       )}
-    </PantallaBase>
+    </PantallaEntrenadorAncha>
   );
 }
 
@@ -2870,6 +2864,69 @@ function sumarDiasFecha(fechaStr, dias) {
   return fechaISO(d);
 }
 
+function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
+  const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Dashboard", icono: "grid" }, ...MODULOS_DASHBOARD];
+  return (
+    <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⚡</div>
+        <div>
+          <div style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 14, letterSpacing: "-0.01em" }}>FUERZA</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, letterSpacing: "0.06em" }}>PANEL DE ENTRENADOR</div>
+        </div>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+        {SIDEBAR_ITEMS.map((m) => (
+          <DsNavItem key={m.id} active={m.id === activo} onClick={() => onAbrirModulo(m.id)} icon={m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}>
+            {m.nombre}
+          </DsNavItem>
+        ))}
+      </div>
+      <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <DsAvatar size={30}>D</DsAvatar>
+          <div>
+            <div style={{ fontSize: 12.5, fontWeight: 600 }}>David</div>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Entrenador</div>
+          </div>
+        </div>
+        <DsButton variant="secondary" size="sm" onClick={onCerrarSesion}>Cerrar sesión</DsButton>
+      </div>
+    </div>
+  );
+}
+
+// Envoltorio para las pantallas "sueltas" del entrenador (Programación,
+// Biblioteca, Historial, Usuarios): en escritorio/iPad (≥1000px) llevan la
+// misma barra lateral fija que el Dashboard, para que se sienta como un
+// panel de verdad al moverte entre secciones — no una pantalla aparte con
+// un enlace de "volver" cada vez. Por debajo de eso, se queda con la
+// pantalla estrecha de móvil de siempre (con su propio botón de volver).
+function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWidthCompacto = 560, children }) {
+  const ancho = useAnchoVentana();
+  if (ancho < 1000) {
+    return (
+      <PantallaBase rol="entrenador" maxWidth={maxWidthCompacto}>
+        <div>
+          <button onClick={() => onAbrirModulo("dashboard")} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+            ← Volver a Dashboard
+          </button>
+          {children}
+        </div>
+      </PantallaBase>
+    );
+  }
+  return (
+    <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
+      <GlobalStyles />
+      <SidebarEntrenadorReal activo={activo} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+      <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px 48px" }}>
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>{children}</div>
+      </div>
+    </div>
+  );
+}
+
 function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
   const [players, , playersLoaded] = usePlayers();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
@@ -2958,38 +3015,10 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
     .sort((a, b) => a.pct - b.pct);
   const jugadorEnRiesgo = variaciones.find((v) => v.pct <= -10) || null;
 
-  const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Dashboard", icono: "grid" }, ...MODULOS_DASHBOARD];
-
   return (
     <div style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
       <GlobalStyles />
-      {/* ---------- Barra lateral ---------- */}
-      <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
-          <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⚡</div>
-          <div>
-            <div style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 14, letterSpacing: "-0.01em" }}>FUERZA</div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, letterSpacing: "0.06em" }}>PANEL DE ENTRENADOR</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-          {SIDEBAR_ITEMS.map((m) => (
-            <DsNavItem key={m.id} active={m.id === "dashboard"} onClick={() => onAbrirModulo(m.id)} icon={m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}>
-              {m.nombre}
-            </DsNavItem>
-          ))}
-        </div>
-        <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <DsAvatar size={30}>D</DsAvatar>
-            <div>
-              <div style={{ fontSize: 12.5, fontWeight: 600 }}>David</div>
-              <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Entrenador</div>
-            </div>
-          </div>
-          <DsButton variant="secondary" size="sm" onClick={onCerrarSesion}>Cerrar sesión</DsButton>
-        </div>
-      </div>
+      <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
 
       {/* ---------- Contenido ---------- */}
       <div style={{ flex: 1, overflowY: "auto", padding: "22px 28px 40px" }}>
@@ -3776,16 +3805,13 @@ function GraficoProgresionCarga({ puntos }) {
   );
 }
 
-function HistorialReal({ onBack }) {
+function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [players, , playersLoaded] = usePlayers();
   const [vista, setVista] = useState("jugador");
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={560}>
+    <PantallaEntrenadorAncha activo="historial" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Volver a Dashboard
-        </button>
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
@@ -3823,7 +3849,7 @@ function HistorialReal({ onBack }) {
           <HistorialPorTarea players={players} />
         )}
       </div>
-    </PantallaBase>
+    </PantallaEntrenadorAncha>
   );
 }
 
@@ -4039,7 +4065,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
   );
 }
 
-function ProgramacionReal({ players, onBack }) {
+function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
   // Antes: sesiones -> tareas en cadena (ejercicios en paralelo) — 2
   // peticiones encadenadas. Ahora: 1 sola, con las 3 cosas ya juntas.
   const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
@@ -4161,11 +4187,8 @@ function ProgramacionReal({ players, onBack }) {
   };
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={560}>
+    <PantallaEntrenadorAncha activo="programacion" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Volver a Dashboard
-        </button>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>PROGRAMACIÓN</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
@@ -4250,7 +4273,7 @@ function ProgramacionReal({ players, onBack }) {
           )}
         </div>
       </div>
-    </PantallaBase>
+    </PantallaEntrenadorAncha>
   );
 }
 
@@ -4392,9 +4415,26 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           )}
         </div>
         {puedeDesplegar && (
-          <span style={{ color: ds.inkMuted, fontSize: 13, transform: expandido ? "rotate(90deg)" : "none", transition: "transform 140ms ease-out", flexShrink: 0 }}>
-            ›
-          </span>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 3,
+              flexShrink: 0,
+              color: ds.accent,
+              fontFamily: dsF.mono,
+              fontSize: 10,
+              fontWeight: 700,
+              letterSpacing: "0.02em",
+              border: `1px solid ${ds.accentBorderSubtle}`,
+              borderRadius: dsR.full,
+              padding: "5px 8px 5px 10px",
+              background: ds.accentSubtle,
+            }}
+          >
+            {expandido ? "CERRAR" : "REGISTRAR"}
+            <span style={{ fontSize: 11, transform: expandido ? "rotate(90deg)" : "none", transition: "transform 140ms ease-out" }}>›</span>
+          </div>
         )}
         <div onClick={(e) => e.stopPropagation()}>
           <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
@@ -5841,7 +5881,7 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
   );
 }
 
-function BibliotecaEjerciciosReal({ onBack }) {
+function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [bloqueFiltro, setBloqueFiltro] = useState("Todos");
@@ -5905,11 +5945,8 @@ function BibliotecaEjerciciosReal({ onBack }) {
   };
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={560}>
+    <PantallaEntrenadorAncha activo="biblioteca" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Volver a Dashboard
-        </button>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div>
             <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>BIBLIOTECA</div>
@@ -6079,7 +6116,7 @@ function BibliotecaEjerciciosReal({ onBack }) {
           }}
         />
       )}
-    </PantallaBase>
+    </PantallaEntrenadorAncha>
   );
 }
 
@@ -8265,13 +8302,13 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
     return <HistorialJugadorModuloReal jugador={historialJugador} onBack={() => setHistorialJugador(null)} />;
   }
   if (coachModulo === "roster") {
-    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} />;
+    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "historial") {
-    return <HistorialReal onBack={() => setCoachModulo(null)} />;
+    return <HistorialReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "biblioteca") {
-    return <BibliotecaEjerciciosReal onBack={() => setCoachModulo(null)} />;
+    return <BibliotecaEjerciciosReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "diseno") {
     return <DisenoSesionReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
@@ -8280,17 +8317,17 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
     return <DinamicaComplementariaReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
   }
   if (coachModulo === "programacion") {
-    return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} />;
+    return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
 
   return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
 }
 
 // Envoltorio: ProgramacionReal necesita la lista de jugadores para el editor de sesiones.
-function ProgramacionModuloReal({ onBack }) {
+function ProgramacionModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [players, , playersLoaded] = usePlayers();
   if (!playersLoaded) return <LoadingBlock />;
-  return <ProgramacionReal players={players} onBack={onBack} />;
+  return <ProgramacionReal players={players} onBack={onBack} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />;
 }
 
 // "Ver historial" de un jugador concreto desde el Roster: reutiliza
