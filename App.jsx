@@ -4875,12 +4875,12 @@ function CmjEstadoActualReal() {
         if (lista.length === 0) return null;
         const label = posKey ? cmjPosicionLabel(posKey) : "Sin posición";
         return (
-          <div key={posKey ?? "sin"} style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary }}>{label}</span>
-              <span style={{ fontSize: 11, color: ds.inkMuted }}>{lista.length}</span>
+          <div key={posKey ?? "sin"} style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${ds.borderSoft}` }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+              <span style={{ fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>{lista.length}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
               {lista
                 .sort((a, b) => a.jugador.name.localeCompare(b.jugador.name))
                 .map(({ p, hoy }) => {
@@ -4888,44 +4888,50 @@ function CmjEstadoActualReal() {
                   const cardOpen = expandedCards.has(cardId);
                   const statusMeta = CMJ_STATUS_META[hoy.status];
                   return (
-                    <DsCard key={cardId} style={{ padding: "10px 12px", borderColor: hoy.status !== "gray" ? statusMeta.color + "55" : ds.border }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nombre}</span>
-                        {hoy.nivel && <span style={{ fontSize: 11, color: ds.inkMuted }}>|</span>}
-                        {hoy.nivel && <span style={{ fontSize: 11, fontWeight: 600, color: statusMeta.color }}>{hoy.nivel}</span>}
-                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 13 }}>⚠</span>}
-                        <span style={{ marginLeft: "auto" }}>
-                          <DsBadge tone={hoy.status === "red" ? "danger" : hoy.status === "green" ? "success" : hoy.status === "amber" ? "accent" : "neutral"}>{statusMeta.label}</DsBadge>
-                        </span>
+                    <DsCard
+                      key={cardId}
+                      style={{
+                        padding: "11px 13px",
+                        gap: 6,
+                        background: hoy.status !== "gray" ? `linear-gradient(180deg, ${statusMeta.color}18 0%, ${ds.surface} 65%)` : undefined,
+                        borderColor: hoy.status !== "gray" ? statusMeta.color + "55" : ds.borderSoft,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{p.nombre}</span>
+                        {hoy.nivel && <span style={{ fontSize: 10.5, color: ds.inkMuted }}>|</span>}
+                        {hoy.nivel && <span style={{ fontSize: 10.5, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase" }}>{hoy.nivel}</span>}
+                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 12 }}>⚠</span>}
+                        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase", letterSpacing: "0.03em" }}>{statusMeta.label}</span>
                       </div>
 
                       {hoy.rows.length > 0 ? (
-                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           {hoy.rows.map((row) => {
                             const mkey = `${cardId}::${row.key}`;
                             const mOpen = expandedMetrics.has(mkey);
                             const rowMeta = CMJ_STATUS_META[row.status];
                             return (
                               <div key={row.key}>
-                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, cursor: "pointer", padding: "2px 0" }}>
-                                  <span style={{ color: ds.inkSecondary }}>{mOpen ? "▾" : "▸"} {row.label}</span>
-                                  <span style={{ color: rowMeta.color, fontWeight: 600 }}>{cmjSigned(row.delta)}</span>
+                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
+                                  <span style={{ color: ds.inkSecondary }}>› {row.label}</span>
+                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono }}>{cmjSigned(row.delta)}</span>
                                 </div>
-                                {mOpen && <div style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 14px" }}>{row.explicacion}</div>}
+                                {mOpen && <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 12px" }}>{row.explicacion}</div>}
                               </div>
                             );
                           })}
                         </div>
                       ) : (
-                        <div style={{ marginTop: 6, fontSize: 12, color: ds.inkMuted }}>Sin valores todavía</div>
+                        <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Sin valores todavía</div>
                       )}
 
                       {hoy.motivo && (
                         <>
-                          <div onClick={() => toggleCard(cardId)} style={{ marginTop: 6, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer" }}>
-                            {cardOpen ? "▾ ocultar recomendación" : "▸ ver recomendación"}
+                          <div onClick={() => toggleCard(cardId)} style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer" }}>
+                            {cardOpen ? "▾ ocultar recomendación" : "› ver recomendación"}
                           </div>
-                          {cardOpen && <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>{hoy.motivo}</div>}
+                          {cardOpen && <div style={{ fontSize: 11.5, lineHeight: 1.5, color: ds.inkSecondary }}>{hoy.motivo}</div>}
                         </>
                       )}
                     </DsCard>
