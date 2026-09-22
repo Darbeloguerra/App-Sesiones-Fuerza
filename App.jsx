@@ -34,6 +34,7 @@ const ds = {
   focusRing: "#F0B429",
   chart1: "#B8872B",
   chart2: "#2F8FBF",
+  chart3: "#9B6BC7",
 };
 const dsSp = { 1: 4, 2: 6, 3: 8, 4: 10, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28 };
 const dsR = { sm: 5, md: 8, lg: 10, xl: 14, xxl: 16, full: "50%" };
@@ -3635,7 +3636,7 @@ const CMJ_METRIC_LIST = Object.values(CMJ_METRICS);
 // Colores de línea por métrica en las gráficas — se usan los tokens de
 // gráfico que ya tiene la app (ds.accent/ds.chart1/ds.chart2), no colores
 // nuevos, para que encaje con el resto del sistema de diseño.
-const CMJ_METRIC_CHART_COLOR = { altura: ds.accent, potenciaRel: ds.chart2, fuerzaRel: ds.chart1, velocidad: ds.inkMuted };
+const CMJ_METRIC_CHART_COLOR = { altura: ds.accent, potenciaRel: ds.chart2, fuerzaRel: ds.chart3, velocidad: ds.inkMuted };
 const CMJ_STATUS_ORDER = { red: 0, amber: 1, green: 2, gray: 3 };
 
 // Filas de métrica (Altura / Potencia relativa / Fuerza relativa) para un
@@ -5164,32 +5165,47 @@ function CmjRankingReal() {
       {filas.length === 0 ? (
         <CmjProximamente titulo="Sin datos para este filtro" texto="Prueba a ampliar el momento, la posición o el periodo seleccionados." />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {filas.map((f, i) => {
-            const jugador = playersById.get(f.player.jugadorId);
-            const posLabel = jugador?.posicion ? cmjPosicionLabel(jugador.posicion) : "—";
-            return (
-              <DsCard
-                key={f.player.jugadorId}
-                style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 12px", flexWrap: "wrap", background: RANK_BG[i] || undefined, borderLeft: RANK_COLOR[i] ? `3px solid ${RANK_COLOR[i]}` : undefined }}
-              >
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: RANK_COLOR[i] || ds.inkMuted, minWidth: 22 }}>{i + 1}</div>
-                <div style={{ minWidth: 140, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{f.player.nombre}</div>
-                  <div style={{ fontSize: 11, color: ds.inkMuted }}>{posLabel}</div>
-                </div>
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: CMJ_METRIC_CHART_COLOR[metricKey] }}>
-                  {cmjFmt(f.valor, metric.decimals)} {metric.unit}
-                </div>
-                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 110 }}>
-                  {fmtDateShort(f.fecha)}
-                  {esReciente(f.fecha) && <span style={{ marginLeft: 6, color: ds.accent, fontWeight: 600 }}>▲ reciente</span>}
-                </div>
-                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 90 }}>{f.tag ? CMJ_TAG_META[f.tag].label : "—"}</div>
-              </DsCard>
-            );
-          })}
-        </div>
+        <DsCard style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 560 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 130px 130px 110px 100px", padding: "12px 16px", borderBottom: `1px solid ${ds.border}` }}>
+                {["Nº", "Jugador", "Posición", metric.label.toUpperCase(), "Fecha", "Momento"].map((h, hi) => (
+                  <div key={h} style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: hi >= 3 ? "right" : "left" }}>{h}</div>
+                ))}
+              </div>
+              {filas.map((f, i) => {
+                const jugador = playersById.get(f.player.jugadorId);
+                const posLabel = jugador?.posicion ? cmjPosicionLabel(jugador.posicion) : "—";
+                return (
+                  <div
+                    key={f.player.jugadorId}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "48px 1fr 130px 130px 110px 100px",
+                      padding: "11px 16px",
+                      alignItems: "center",
+                      borderBottom: `1px solid ${ds.borderSoft}`,
+                      borderLeft: RANK_COLOR[i] ? `3px solid ${RANK_COLOR[i]}` : "3px solid transparent",
+                      background: RANK_BG[i] || (i % 2 === 1 ? ds.bgElevated + "40" : "transparent"),
+                    }}
+                  >
+                    <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13.5, color: RANK_COLOR[i] || ds.inkMuted }}>{i + 1}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>{f.player.nombre}</div>
+                    <div style={{ fontSize: 12, color: ds.inkSecondary }}>{posLabel}</div>
+                    <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13.5, color: CMJ_METRIC_CHART_COLOR[metricKey], textAlign: "right" }}>
+                      {cmjFmt(f.valor, metric.decimals)} {metric.unit}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted, textAlign: "right" }}>
+                      {fmtDateShort(f.fecha)}
+                      {esReciente(f.fecha) && <span style={{ display: "block", color: ds.success, fontWeight: 600, fontSize: 10.5 }}>▲ reciente</span>}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted, textAlign: "right" }}>{f.tag ? CMJ_TAG_META[f.tag].label : "—"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DsCard>
       )}
 
       {sinDatos.length > 0 && (
@@ -10109,64 +10125,100 @@ function ResumenFichaJugadorReal({ jugador }) {
 }
 
 // Extiende el patrón de gráfica SVG de GraficaProgresoCargaReal (línea +
-// puntos, sin librería externa) a cualquier variable del motor CMJ, con su
-// propio color y decimales — misma estética que ya usa el resto de la app,
-// en vez de traer recharts (que usaba el panel original y que aquí no es
-// una dependencia).
-function CmjGraficaEvolucionReal({ puntos, color, decimales = 1 }) {
-  if (puntos.length < 2) {
+// puntos, sin librería externa) a varias variables del motor CMJ
+// SUPERPUESTAS en la misma gráfica (una línea de color por variable, con
+// leyenda debajo) — sin traer recharts (que usaba el panel original y que
+// aquí no es una dependencia). Todas las series comparten el mismo eje X
+// (mismos registros) y el mismo eje Y, igual que hacía el panel original en
+// su vista "valores reales".
+function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
+  const nPuntos = series[0]?.puntos.length || 0;
+  if (nPuntos < 2) {
     return (
       <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
-        {puntos.length === 0 ? "Sin registros para esta variable en este filtro." : "Hace falta al menos 2 registros para trazar la evolución."}
+        {nPuntos === 0 ? "Sin registros para esta selección de variables en este filtro." : "Hace falta al menos 2 registros para trazar la evolución."}
       </div>
     );
   }
-  const width = 320;
-  const height = 170;
-  const padX = 34;
+  const width = 640;
+  const height = 200;
+  const padX = 36;
   const padY = 20;
-  const valores = puntos.map((p) => p.valor);
-  const minV = Math.min(...valores);
-  const maxV = Math.max(...valores);
+  const allValores = series.flatMap((s) => s.puntos.map((p) => p.valorMostrado));
+  const minV = Math.min(...allValores);
+  const maxV = Math.max(...allValores);
   const rango = maxV - minV || 1;
-  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const stepX = (width - padX * 2) / (nPuntos - 1);
   const coordX = (i) => padX + i * stepX;
   const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
-  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
-      <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
-      <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(maxV, decimales)}</text>
-      <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(minV, decimales)}</text>
-      <path d={pathD} fill="none" stroke={color} strokeWidth={2} />
-      {puntos.map((p, i) => (
-        <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={color} />
-      ))}
-      <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>{fmtDateShort(puntos[0].date)}</text>
-      <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(puntos[puntos.length - 1].date)}</text>
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
+        <line x1={padX} y1={coordY(minV + rango / 2)} x2={width - padX} y2={coordY(minV + rango / 2)} stroke={ds.borderSoft} strokeWidth={1} strokeDasharray="3 4" />
+        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
+        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{maxV.toFixed(decimalesEje)}</text>
+        <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{minV.toFixed(decimalesEje)}</text>
+        {series.map((s) => {
+          const pathD = s.puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valorMostrado).toFixed(1)}`).join(" ");
+          return (
+            <g key={s.key}>
+              <path d={pathD} fill="none" stroke={s.color} strokeWidth={2.25} strokeLinejoin="round" />
+              {s.puntos.map((p, i) => (
+                <circle key={i} cx={coordX(i)} cy={coordY(p.valorMostrado)} r={3.25} fill={ds.canvas} stroke={s.color} strokeWidth={2} />
+              ))}
+            </g>
+          );
+        })}
+        <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
+        <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
+      </svg>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", marginTop: 10 }}>
+        {series.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: ds.inkSecondary, fontWeight: 600 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />
+            {s.label}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
-// Pestaña "CMJ" de la ficha de jugador: evolución de una variable a la vez
-// (Altura/Potencia relativa/Fuerza relativa/Velocidad), en temporada
-// completa, un rango de fechas o un microciclo concreto, con el mismo
-// filtro de Momento que Ranking. Cada registro muestra además el % de
-// cambio frente a su referencia (MD-2/MD+1 vs el Inicio de esa semana; un
-// Inicio vs el Inicio anterior) — igual criterio que usaba el panel
-// original. A diferencia de Ranking (que compara jugadores entre sí), aquí
-// solo se cargan los saltos de ESTE jugador, ya vinculados a su jugadorId.
+// Pestaña "CMJ" de la ficha de jugador: evolución de hasta 4 variables
+// SUPERPUESTAS en la misma gráfica (Altura/Potencia relativa/Fuerza
+// relativa/Velocidad), con vista "Valores reales" o "% respecto a su
+// media" (para comparar variables de unidades distintas en el mismo eje),
+// en temporada completa, un rango de fechas o un microciclo concreto, con
+// el mismo filtro de Momento que Ranking. La tabla de registros muestra
+// además el % de cambio frente a su referencia (MD-2/MD+1 vs el Inicio de
+// esa semana; un Inicio vs el Inicio anterior) — igual criterio que usaba
+// el panel original. A diferencia de Ranking (que compara jugadores entre
+// sí), aquí solo se cargan los saltos de ESTE jugador, ya vinculados a su
+// jugadorId.
 function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   const [saltos, setSaltos] = useState([]);
   const [microciclos, setMicrociclos] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [metricKey, setMetricKey] = useState("altura");
+  const [metricKeys, setMetricKeys] = useState(() => new Set(["altura", "potenciaRel", "fuerzaRel"]));
+  const [modoValores, setModoValores] = useState("reales"); // 'reales' | 'pct'
   const [periodo, setPeriodo] = useState("temporada"); // 'temporada' | 'rango' | 'microciclo'
   const [rango, setRango] = useState({ start: "", end: "" });
   const [microSel, setMicroSel] = useState(null);
   const [filtroTags, setFiltroTags] = useState(() => new Set(["inicio", "md2", "md1", "sin"]));
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
+
+  function toggleMetric(k) {
+    setMetricKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        if (next.size > 1) next.delete(k); // siempre queda al menos una variable seleccionada
+      } else {
+        next.add(k);
+      }
+      return next;
+    });
+  }
 
   const cargar = useCallback(async () => {
     const [saltosRes, microRes] = await Promise.all([
@@ -10220,7 +10272,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
     return <CmjProximamente titulo="Sin tests CMJ todavía" texto="En cuanto subas un CSV con saltos de este jugador y queden vinculados a él (pestaña Subir CSV, dentro de Control de fatiga), aparecerán aquí." />;
   }
 
-  const metric = CMJ_METRICS[metricKey];
+  const metricasSel = CMJ_METRIC_LIST.filter((m) => metricKeys.has(m.key));
   const microRows = microList.map((m) => ({ m, r: player.microResults.get(m.id) })).filter(({ r }) => r);
   const microSelActivo = microSel ?? (microRows.length ? microRows[microRows.length - 1].m.id : null);
 
@@ -10230,42 +10282,55 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
     return t >= new Date(rango.start).getTime() && t <= new Date(rango.end + "T23:59:59").getTime();
   };
 
-  let puntos = [];
+  // Registros base del periodo/filtro elegido (sin reducir todavía a una
+  // variable) — a diferencia de antes, aquí se parte de los registros
+  // crudos para poder superponer varias variables en la misma gráfica.
+  let registrosBase = [];
   if (periodo === "microciclo") {
     const sel = microRows.find(({ m }) => m.id === microSelActivo);
-    if (sel) {
-      puntos = CMJ_FIELDS.filter((k) => sel.r[k])
-        .map((k) => sel.r[k])
-        .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
-        .filter((p) => p.valor != null);
-    }
+    if (sel) registrosBase = CMJ_FIELDS.filter((k) => sel.r[k]).map((k) => sel.r[k]);
   } else {
-    puntos = player.sorted
-      .filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r))
-      .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
-      .filter((p) => p.valor != null);
+    registrosBase = player.sorted.filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r));
   }
+  // Solo entran a la gráfica y a la tabla los registros que tienen valor en
+  // TODAS las variables seleccionadas — así las líneas superpuestas y las
+  // filas de la tabla comparten siempre el mismo eje de fechas.
+  const registros = registrosBase.filter((r) => metricasSel.every((m) => m.get(r) != null));
 
   // Misma referencia que en el panel original: MD-2/MD+1 se comparan con el
   // Inicio de esa misma semana; un Inicio se compara con el Inicio anterior
   // (tendencia semana a semana). Sin ninguna referencia válida, no se
   // muestra ningún %.
-  function referenciaDelta(p) {
-    if (p.tag === "md2" || p.tag === "md1") {
-      if (p.microId == null) return null;
-      const mr = player.microResults.get(p.microId);
+  function referenciaDelta(r, metric) {
+    if (r.tag === "md2" || r.tag === "md1") {
+      if (r.microId == null) return null;
+      const mr = player.microResults.get(r.microId);
       if (!mr || !mr.inicio) return null;
       const baseVal = metric.get(mr.inicio);
-      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+      return baseVal != null ? cmjPct(metric.get(r), baseVal) : null;
     }
-    if (p.tag === "inicio") {
-      const idx = player.inicios.findIndex((x) => x.date === p.date);
+    if (r.tag === "inicio") {
+      const idx = player.inicios.findIndex((x) => x.date === r.date);
       if (idx <= 0) return null;
       const baseVal = metric.get(player.inicios[idx - 1]);
-      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+      return baseVal != null ? cmjPct(metric.get(r), baseVal) : null;
     }
     return null;
   }
+
+  const seriesGrafica = metricasSel.map((m) => {
+    const valoresReales = registros.map((r) => m.get(r));
+    const media = valoresReales.length ? valoresReales.reduce((a, b) => a + b, 0) / valoresReales.length : 0;
+    return {
+      key: m.key,
+      label: m.label,
+      color: CMJ_METRIC_CHART_COLOR[m.key],
+      puntos: registros.map((r, i) => ({
+        date: r.date,
+        valorMostrado: modoValores === "pct" ? (media ? (valoresReales[i] / media) * 100 : 0) : valoresReales[i],
+      })),
+    };
+  });
 
   const statusMeta = CMJ_STATUS_META[player.combinedStatus];
 
@@ -10287,8 +10352,34 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
       {mostrarFiltros && (
         <DsCard style={{ padding: 14, marginBottom: 16, display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
-            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variable</div>
-            <DsTabSwitcher tabs={CMJ_METRIC_LIST.map((m) => ({ id: m.key, label: m.label }))} active={metricKey} onChange={setMetricKey} />
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variables ({metricasSel.length} de {CMJ_METRIC_LIST.length})</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {CMJ_METRIC_LIST.map((m) => {
+                const activo = metricKeys.has(m.key);
+                const color = CMJ_METRIC_CHART_COLOR[m.key];
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => toggleMetric(m.key)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${activo ? color : ds.border}`, background: activo ? `${color}1E` : "transparent", color: activo ? color : ds.inkMuted, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, opacity: activo ? 1 : 0.35, flexShrink: 0 }} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Vista</div>
+            <DsTabSwitcher
+              tabs={[
+                { id: "reales", label: "Valores reales" },
+                { id: "pct", label: "% respecto a su media" },
+              ]}
+              active={modoValores}
+              onChange={setModoValores}
+            />
           </div>
           <div>
             <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Periodo</div>
@@ -10356,31 +10447,47 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
       )}
 
       <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>
-        {periodo === "microciclo" ? `Microciclo Nº ${microRows.find(({ m }) => m.id === microSelActivo)?.m.numero ?? "—"}` : "Evolución"} · {metric.label}
+        {periodo === "microciclo" ? `Microciclo Nº ${microRows.find(({ m }) => m.id === microSelActivo)?.m.numero ?? "—"}` : "Evolución"}
       </div>
 
       <DsCard style={{ padding: 14, marginBottom: 16 }}>
-        <CmjGraficaEvolucionReal puntos={puntos} color={CMJ_METRIC_CHART_COLOR[metricKey]} decimales={metric.decimals} />
+        <CmjGraficaEvolucionMultiReal series={seriesGrafica} decimalesEje={modoValores === "pct" ? 0 : 1} />
       </DsCard>
 
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>Registros ({metric.label})</div>
-      {puntos.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún registro coincide con el filtro seleccionado.</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>
+        Registros ({metricasSel.map((m) => m.label).join(" · ")})
+      </div>
+      {registros.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún registro coincide con el filtro seleccionado (o falta alguna de las variables elegidas en esos días).</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {[...puntos].reverse().map((p, i) => {
-            const delta = periodo !== "microciclo" ? referenciaDelta(p) : null;
-            return (
-              <DsCard key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: ds.inkMuted, minWidth: 100 }}>{fmtDateShort(p.date)}</div>
-                <div style={{ fontSize: 11.5, color: p.tag ? CMJ_TAG_META[p.tag].color : ds.inkMuted, minWidth: 90 }}>{p.tag ? CMJ_TAG_META[p.tag].label : "Sin etiqueta"}</div>
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13, color: CMJ_METRIC_CHART_COLOR[metricKey], marginLeft: "auto" }}>
-                  {cmjFmt(p.valor, metric.decimals)} {metric.unit}
-                  {delta != null && <span style={{ marginLeft: 8, fontWeight: 600, color: delta >= 0 ? ds.success : ds.danger }}>{cmjSigned(delta)}</span>}
-                </div>
-              </DsCard>
-            );
-          })}
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 280 + metricasSel.length * 130 }}>
+            <div style={{ display: "grid", gridTemplateColumns: `100px 96px repeat(${metricasSel.length}, minmax(120px, 1fr))`, padding: "0 10px 8px", borderBottom: `1px solid ${ds.border}` }}>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fecha</div>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Momento</div>
+              {metricasSel.map((m) => (
+                <div key={m.key} style={{ fontSize: 10.5, color: CMJ_METRIC_CHART_COLOR[m.key], textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>{m.label}</div>
+              ))}
+            </div>
+            {[...registros].reverse().map((r, i) => (
+              <div
+                key={i}
+                style={{ display: "grid", gridTemplateColumns: `100px 96px repeat(${metricasSel.length}, minmax(120px, 1fr))`, padding: "9px 10px", borderBottom: `1px solid ${ds.borderSoft}`, background: i % 2 === 0 ? "transparent" : ds.bgElevated + "55" }}
+              >
+                <div style={{ fontSize: 12, color: ds.ink }}>{fmtDateShort(r.date)}</div>
+                <div style={{ fontSize: 11.5, color: r.tag ? CMJ_TAG_META[r.tag].color : ds.inkMuted }}>{r.tag ? CMJ_TAG_META[r.tag].label : "—"}</div>
+                {metricasSel.map((m) => {
+                  const delta = periodo !== "microciclo" ? referenciaDelta(r, m) : null;
+                  return (
+                    <div key={m.key} style={{ textAlign: "right", fontFamily: dsF.mono, fontSize: 12.5, color: ds.ink }}>
+                      {cmjFmt(m.get(r), m.decimals)} <span style={{ color: ds.inkMuted, fontSize: 10.5 }}>{m.unit}</span>
+                      {delta != null && <span style={{ marginLeft: 6, fontWeight: 700, color: delta >= 0 ? ds.success : ds.danger }}>{cmjSigned(delta)}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
