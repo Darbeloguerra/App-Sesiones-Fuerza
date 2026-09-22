@@ -10106,11 +10106,292 @@ function ResumenFichaJugadorReal({ jugador }) {
   );
 }
 
+// Extiende el patrón de gráfica SVG de GraficaProgresoCargaReal (línea +
+// puntos, sin librería externa) a cualquier variable del motor CMJ, con su
+// propio color y decimales — misma estética que ya usa el resto de la app,
+// en vez de traer recharts (que usaba el panel original y que aquí no es
+// una dependencia).
+function CmjGraficaEvolucionReal({ puntos, color, decimales = 1 }) {
+  if (puntos.length < 2) {
+    return (
+      <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
+        {puntos.length === 0 ? "Sin registros para esta variable en este filtro." : "Hace falta al menos 2 registros para trazar la evolución."}
+      </div>
+    );
+  }
+  const width = 320;
+  const height = 170;
+  const padX = 34;
+  const padY = 20;
+  const valores = puntos.map((p) => p.valor);
+  const minV = Math.min(...valores);
+  const maxV = Math.max(...valores);
+  const rango = maxV - minV || 1;
+  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const coordX = (i) => padX + i * stepX;
+  const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
+      <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
+      <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(maxV, decimales)}</text>
+      <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(minV, decimales)}</text>
+      <path d={pathD} fill="none" stroke={color} strokeWidth={2} />
+      {puntos.map((p, i) => (
+        <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={color} />
+      ))}
+      <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>{fmtDateShort(puntos[0].date)}</text>
+      <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(puntos[puntos.length - 1].date)}</text>
+    </svg>
+  );
+}
+
+// Pestaña "CMJ" de la ficha de jugador: evolución de una variable a la vez
+// (Altura/Potencia relativa/Fuerza relativa/Velocidad), en temporada
+// completa, un rango de fechas o un microciclo concreto, con el mismo
+// filtro de Momento que Ranking. Cada registro muestra además el % de
+// cambio frente a su referencia (MD-2/MD+1 vs el Inicio de esa semana; un
+// Inicio vs el Inicio anterior) — igual criterio que usaba el panel
+// original. A diferencia de Ranking (que compara jugadores entre sí), aquí
+// solo se cargan los saltos de ESTE jugador, ya vinculados a su jugadorId.
+function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
+  const [saltos, setSaltos] = useState([]);
+  const [microciclos, setMicrociclos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [metricKey, setMetricKey] = useState("altura");
+  const [periodo, setPeriodo] = useState("temporada"); // 'temporada' | 'rango' | 'microciclo'
+  const [rango, setRango] = useState({ start: "", end: "" });
+  const [microSel, setMicroSel] = useState(null);
+  const [filtroTags, setFiltroTags] = useState(() => new Set(["inicio", "md2", "md1", "sin"]));
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
+
+  const cargar = useCallback(async () => {
+    const [saltosRes, microRes] = await Promise.all([
+      supabase.from("cmj_saltos").select("*").eq("jugador_id", jugadorId),
+      supabase.from("cmj_microciclos").select("*"),
+    ]);
+    if (!saltosRes.error) setSaltos(saltosRes.data || []);
+    if (!microRes.error) setMicrociclos(microRes.data || []);
+    setLoaded(true);
+  }, [jugadorId]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  function toggleTag(k) {
+    setFiltroTags((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+
+  if (!loaded) return <LoadingBlock />;
+
+  const filasParaMotor = saltos.map((s) => ({
+    jugadorId: s.jugador_id,
+    nombre: jugadorNombre,
+    dateKey: s.fecha,
+    date: s.fecha_hora,
+    peso: s.peso,
+    hp0: s.hp0,
+    altura: s.altura,
+    fuerza: s.fuerza,
+    potencia: s.potencia,
+    velocidad: s.velocidad,
+    kineticsValid: s.kinetics_valid,
+    pesoValid: s.peso_valid,
+    hp0Valid: s.hp0_valid,
+  }));
+
+  const { players: builtPlayers, microList } = cmjBuildPlayers(
+    filasParaMotor,
+    microciclos,
+    CMJ_UMBRAL_DEFECTO.ambarPct,
+    CMJ_UMBRAL_DEFECTO.rojoPct,
+    CMJ_UMBRAL_DEFECTO.individualizar,
+    CMJ_UMBRAL_DEFECTO.protocoloDesde
+  );
+  const player = builtPlayers[0] || null;
+
+  if (!player) {
+    return <CmjProximamente titulo="Sin tests CMJ todavía" texto="En cuanto subas un CSV con saltos de este jugador y queden vinculados a él (pestaña Subir CSV, dentro de Control de fatiga), aparecerán aquí." />;
+  }
+
+  const metric = CMJ_METRICS[metricKey];
+  const microRows = microList.map((m) => ({ m, r: player.microResults.get(m.id) })).filter(({ r }) => r);
+  const microSelActivo = microSel ?? (microRows.length ? microRows[microRows.length - 1].m.id : null);
+
+  const dentroDeRango = (r) => {
+    if (periodo !== "rango" || !rango.start || !rango.end) return periodo !== "rango";
+    const t = new Date(r.date).getTime();
+    return t >= new Date(rango.start).getTime() && t <= new Date(rango.end + "T23:59:59").getTime();
+  };
+
+  let puntos = [];
+  if (periodo === "microciclo") {
+    const sel = microRows.find(({ m }) => m.id === microSelActivo);
+    if (sel) {
+      puntos = CMJ_FIELDS.filter((k) => sel.r[k])
+        .map((k) => sel.r[k])
+        .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
+        .filter((p) => p.valor != null);
+    }
+  } else {
+    puntos = player.sorted
+      .filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r))
+      .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
+      .filter((p) => p.valor != null);
+  }
+
+  // Misma referencia que en el panel original: MD-2/MD+1 se comparan con el
+  // Inicio de esa misma semana; un Inicio se compara con el Inicio anterior
+  // (tendencia semana a semana). Sin ninguna referencia válida, no se
+  // muestra ningún %.
+  function referenciaDelta(p) {
+    if (p.tag === "md2" || p.tag === "md1") {
+      if (p.microId == null) return null;
+      const mr = player.microResults.get(p.microId);
+      if (!mr || !mr.inicio) return null;
+      const baseVal = metric.get(mr.inicio);
+      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+    }
+    if (p.tag === "inicio") {
+      const idx = player.inicios.findIndex((x) => x.date === p.date);
+      if (idx <= 0) return null;
+      const baseVal = metric.get(player.inicios[idx - 1]);
+      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+    }
+    return null;
+  }
+
+  const statusMeta = CMJ_STATUS_META[player.combinedStatus];
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
+        <div style={{ fontSize: 12, color: ds.inkMuted }}>
+          {player.nTests} tests · primer test {fmtDateShort(player.sorted[0].date)} · último {fmtDateShort(player.sorted[player.sorted.length - 1].date)}
+        </div>
+        <DsBadge tone={player.combinedStatus === "red" ? "danger" : player.combinedStatus === "green" ? "success" : player.combinedStatus === "amber" ? "accent" : "neutral"}>
+          {statusMeta.label}
+        </DsBadge>
+      </div>
+
+      <button onClick={() => setMostrarFiltros((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12, cursor: "pointer", padding: 0, margin: "10px 0 12px" }}>
+        {mostrarFiltros ? "▾ ocultar filtros" : "▸ filtros"}
+      </button>
+
+      {mostrarFiltros && (
+        <DsCard style={{ padding: 14, marginBottom: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variable</div>
+            <DsTabSwitcher tabs={CMJ_METRIC_LIST.map((m) => ({ id: m.key, label: m.label }))} active={metricKey} onChange={setMetricKey} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Periodo</div>
+            <DsTabSwitcher
+              tabs={[
+                { id: "temporada", label: "Temporada completa" },
+                { id: "rango", label: "Rango de fechas" },
+                { id: "microciclo", label: "Microciclo concreto" },
+              ]}
+              active={periodo}
+              onChange={setPeriodo}
+            />
+          </div>
+
+          {periodo === "rango" && (
+            <div>
+              <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Fechas</div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <DsInput type="date" value={rango.start} onChange={(e) => setRango({ ...rango, start: e.target.value })} />
+                <DsInput type="date" value={rango.end} onChange={(e) => setRango({ ...rango, end: e.target.value })} />
+              </div>
+            </div>
+          )}
+
+          {periodo === "microciclo" && (
+            microRows.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Microciclo</div>
+                <DsSelect value={microSelActivo || ""} onChange={(e) => setMicroSel(e.target.value)} style={{ maxWidth: 220 }}>
+                  {microRows.map(({ m }) => (
+                    <option key={m.id} value={m.id}>Nº {m.numero}</option>
+                  ))}
+                </DsSelect>
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: ds.inkMuted }}>Este jugador todavía no tiene tests dentro de ningún microciclo registrado.</div>
+            )
+          )}
+
+          {periodo !== "microciclo" && (
+            <div>
+              <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Momento</div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  { key: "inicio", label: "Inicio", color: CMJ_TAG_META.inicio.color },
+                  { key: "md2", label: "MD-2", color: CMJ_TAG_META.md2.color },
+                  { key: "md1", label: "MD+1", color: CMJ_TAG_META.md1.color },
+                  { key: "sin", label: "Sin etiqueta", color: ds.inkMuted },
+                ].map((op) => {
+                  const activo = filtroTags.has(op.key);
+                  return (
+                    <button
+                      key={op.key}
+                      onClick={() => toggleTag(op.key)}
+                      style={{ fontSize: 12, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${activo ? op.color : ds.border}`, background: activo ? `${op.color}1E` : "transparent", color: activo ? op.color : ds.inkMuted, cursor: "pointer", fontWeight: 600 }}
+                    >
+                      {op.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </DsCard>
+      )}
+
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>
+        {periodo === "microciclo" ? `Microciclo Nº ${microRows.find(({ m }) => m.id === microSelActivo)?.m.numero ?? "—"}` : "Evolución"} · {metric.label}
+      </div>
+
+      <DsCard style={{ padding: 14, marginBottom: 16 }}>
+        <CmjGraficaEvolucionReal puntos={puntos} color={CMJ_METRIC_CHART_COLOR[metricKey]} decimales={metric.decimals} />
+      </DsCard>
+
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>Registros ({metric.label})</div>
+      {puntos.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún registro coincide con el filtro seleccionado.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...puntos].reverse().map((p, i) => {
+            const delta = periodo !== "microciclo" ? referenciaDelta(p) : null;
+            return (
+              <DsCard key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", flexWrap: "wrap" }}>
+                <div style={{ fontSize: 12, color: ds.inkMuted, minWidth: 100 }}>{fmtDateShort(p.date)}</div>
+                <div style={{ fontSize: 11.5, color: p.tag ? CMJ_TAG_META[p.tag].color : ds.inkMuted, minWidth: 90 }}>{p.tag ? CMJ_TAG_META[p.tag].label : "Sin etiqueta"}</div>
+                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13, color: CMJ_METRIC_CHART_COLOR[metricKey], marginLeft: "auto" }}>
+                  {cmjFmt(p.valor, metric.decimals)} {metric.unit}
+                  {delta != null && <span style={{ marginLeft: 8, fontWeight: 600, color: delta >= 0 ? ds.success : ds.danger }}>{cmjSigned(delta)}</span>}
+                </div>
+              </DsCard>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Ficha de un jugador concreto, abierta desde Usuarios ("Ver ficha").
-// Cabecera de identidad + dos pestañas: Resumen (nuevo) e Historial (es
+// Cabecera de identidad + tres pestañas: Resumen (nuevo), Historial (es
 // HistorialPorJugador tal cual ya existía, sin cambios — la misma pieza que
 // usa el módulo de Historial general, aquí preseleccionando a este jugador
-// pero sin perder la posibilidad de cambiar a otro desde su desplegable).
+// pero sin perder la posibilidad de cambiar a otro desde su desplegable) y
+// CMJ (Parte 5: evolución del salto de este jugador, independiente de
+// Historial porque son cosas diferentes — fuerza vs. salto).
 function FichaJugadorModuloReal({ jugador, onBack }) {
   const [players, , playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
@@ -10152,6 +10433,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           {[
             { id: "resumen", label: "Resumen" },
             { id: "historial", label: "Historial" },
+            { id: "cmj", label: "CMJ" },
           ].map((v) => (
             <button
               key={v.id}
@@ -10172,8 +10454,10 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
         </div>
         {pestana === "resumen" ? (
           <ResumenFichaJugadorReal jugador={actual} />
-        ) : (
+        ) : pestana === "historial" ? (
           <HistorialPorJugador players={players} jugadorInicial={actual.id} />
+        ) : (
+          <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
         )}
       </div>
     </PantallaBase>
