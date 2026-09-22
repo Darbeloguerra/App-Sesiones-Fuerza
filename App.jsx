@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search } from "lucide-react";
+import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search, Zap, Bell, Calendar, AlertTriangle } from "lucide-react";
 
 // ============================================================
 // SISTEMA DE DISEÑO "FUERZA" — incrustado aquí mismo (antes eran 3
@@ -2869,7 +2869,7 @@ function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
   return (
     <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}>⚡</div>
+        <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}><Zap size={15} fill={ds.accentInk} /></div>
         <div>
           <div style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 14, letterSpacing: "-0.01em" }}>FUERZA</div>
           <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, letterSpacing: "0.06em" }}>PANEL DE ENTRENADOR</div>
@@ -3028,7 +3028,7 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>{hoyLabel}</span>
-            <div style={{ width: 34, height: 34, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}>🔔</div>
+            <div style={{ width: 34, height: 34, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}><Bell size={15} /></div>
             <DsAvatar size={34}>D</DsAvatar>
           </div>
         </div>
@@ -3214,7 +3214,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
       </div>
       {t.nota && (
         <div style={{ marginLeft: 20, display: "flex", gap: 5, fontSize: 10.5, color: ds.inkSecondary }}>
-          <span style={{ color: ds.warning, flexShrink: 0 }}>📝</span>
+          <span style={{ color: ds.warning, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={12} /></span>
           <span>{t.nota}</span>
         </div>
       )}
@@ -3889,7 +3889,7 @@ function TareaVisualReal({ tarea }) {
         )}
         {tarea.nota && (
           <div style={{ display: "flex", gap: 4, marginTop: 3, fontSize: 10, color: ds.inkSecondary }}>
-            <span style={{ color: ds.warning }}>📝</span>
+            <span style={{ color: ds.warning, display: "inline-flex" }}><AlertTriangle size={12} /></span>
             <span>{tarea.nota}</span>
           </div>
         )}
@@ -4415,26 +4415,9 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           )}
         </div>
         {puedeDesplegar && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 3,
-              flexShrink: 0,
-              color: ds.accent,
-              fontFamily: dsF.mono,
-              fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: "0.02em",
-              border: `1px solid ${ds.accentBorderSubtle}`,
-              borderRadius: dsR.full,
-              padding: "5px 8px 5px 10px",
-              background: ds.accentSubtle,
-            }}
-          >
-            {expandido ? "CERRAR" : "REGISTRAR"}
-            <span style={{ fontSize: 11, transform: expandido ? "rotate(90deg)" : "none", transition: "transform 140ms ease-out" }}>›</span>
-          </div>
+          <span style={{ display: "flex", alignItems: "center", flexShrink: 0, color: expandido ? ds.accent : ds.inkMuted, transition: "color 140ms ease-out" }}>
+            <Pencil size={13} />
+          </span>
         )}
         <div onClick={(e) => e.stopPropagation()}>
           <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
@@ -4462,7 +4445,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
       )}
       {tarea.nota && (
         <div style={{ marginLeft: 55, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
-          <span style={{ color: ds.warning, fontSize: 12, flexShrink: 0 }}>📝</span>
+          <span style={{ color: ds.warning, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={12} /></span>
           <span style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.4 }}>{tarea.nota}</span>
         </div>
       )}
@@ -5105,7 +5088,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           {session.status === "hoy" && (
             <DsCard style={{ borderColor: ds.accentBorderSubtle, padding: "14px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.accentSubtle, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.accent, fontSize: 18 }}>⚡</div>
+                <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.accentSubtle, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.accent }}><Zap size={19} fill={ds.accent} /></div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>Tienes una sesión disponible hoy</div>
                   <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>
@@ -5132,7 +5115,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           )}
           {session.status === "proxima" && (
             <DsCard style={{ padding: "14px 16px", flexDirection: "row", alignItems: "center", gap: 12 }}>
-              <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, fontSize: 18 }}>📅</div>
+              <div style={{ width: 44, height: 44, borderRadius: dsR.md, background: ds.bgElevated, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}><Calendar size={19} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ fontSize: 14, fontWeight: 600, textTransform: "capitalize" }}>
                   {session.dateLabel}
@@ -5401,7 +5384,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               <div style={{ marginTop: 22 }}>
                 {totalHechas < totalTareas && (
                   <div style={{ display: "flex", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
-                    <span style={{ color: ds.warning, flexShrink: 0 }}>⚠</span>
+                    <span style={{ color: ds.warning, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={14} /></span>
                     <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
                       Vas a enviar la sesión con {totalTareas - totalHechas} tarea{totalTareas - totalHechas === 1 ? "" : "s"} sin hacer. Tu entrenador la verá como incompleta.
                     </span>
@@ -5409,7 +5392,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                 )}
                 {tareasSinRegistroCompleto.length > 0 && (
                   <div style={{ display: "flex", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
-                    <span style={{ color: ds.warning, flexShrink: 0 }}>⚠</span>
+                    <span style={{ color: ds.warning, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={14} /></span>
                     <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
                       {tareasSinRegistroCompleto.length === 1 ? "Esta tarea está marcada como hecha pero le falta" : "Estas tareas están marcadas como hechas pero les falta"} registrar carga o repeticiones:{" "}
                       {tareasSinRegistroCompleto.map((t) => t.nombre).join(", ")}.
@@ -5601,7 +5584,7 @@ function TarjetaEjercicioReal({ ejercicio, categorias, esVariante, onEditar, onE
         </button>
       )}
       <button onClick={onEditar} style={btnIconoReal} title="Editar ejercicio">
-        ✎
+        <Pencil size={13} />
       </button>
       <button onClick={onEliminar} style={btnIconoReal} title="Eliminar ejercicio">
         ×
