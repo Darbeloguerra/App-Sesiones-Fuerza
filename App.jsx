@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search, Zap, Bell, Calendar, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search, Zap, Bell, Calendar, AlertTriangle, Home, TrendingUp, Activity } from "lucide-react";
 
 // ============================================================
 // SISTEMA DE DISEÑO "FUERZA" — incrustado aquí mismo (antes eran 3
@@ -4622,6 +4622,67 @@ function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegi
   );
 }
 
+// Barra de navegación inferior del jugador — sustituye al selector de
+// pestañas de arriba (DsTabSwitcher: una fila de píldoras pegada a la
+// izquierda, sin repartir el ancho) por una barra fija al fondo de la
+// pantalla, icono + etiqueta a partes iguales, como en las apps de
+// referencia del sector (My Jump Lab, Hevy). Solo se usa dentro de
+// PantallaJugadorReal — no toca PantallaBase ni ninguna pantalla de
+// entrenador. Position:fixed funciona aquí igual dentro que fuera del
+// contenedor con scroll de PantallaBase porque ese contenedor no tiene
+// transform/filter (lo que sí rompería el fixed); se comprobará de todos
+// modos en el dispositivo real.
+const PLAYER_TAB_ICONS = { dashboard: Home, progreso: TrendingUp, cmj: Activity };
+
+function BarraInferiorJugadorReal({ tabs, active, onChange }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        zIndex: 30,
+        display: "flex",
+        justifyContent: "center",
+        background: ds.bgElevated,
+        borderTop: `1px solid ${ds.border}`,
+        paddingBottom: "env(safe-area-inset-bottom, 0px)",
+      }}
+    >
+      <div style={{ width: "100%", maxWidth: 420, display: "flex" }}>
+        {tabs.map((t) => {
+          const Icono = PLAYER_TAB_ICONS[t.id];
+          const activo = active === t.id;
+          return (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => onChange(t.id)}
+              aria-current={activo ? "page" : undefined}
+              style={{
+                flex: 1,
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+                background: "transparent",
+                border: "none",
+                padding: "9px 4px 8px",
+                color: activo ? ds.accent : ds.inkMuted,
+                cursor: "pointer",
+              }}
+            >
+              {Icono && <Icono size={20} strokeWidth={activo ? 2.4 : 2} />}
+              <span style={{ fontSize: 10.5, fontWeight: activo ? 700 : 500 }}>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [players, , playersLoaded] = usePlayers();
   const player = players.find((p) => p.id === presetPlayerId) || null;
@@ -5050,6 +5111,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // Las tres pestañas compartidas entre Dashboard/Progreso/CMJ — "Sesión de
   // hoy" ya no es una pestaña, se abre aparte al pulsar "Ver sesión" desde
   // el Dashboard (ver JugadorHoy/JugadorDashboard del sistema de diseño).
+  // Se muestran en BarraInferiorJugadorReal (barra fija abajo), ya no en el
+  // DsTabSwitcher de arriba.
   const PLAYER_TABS = [
     { id: "dashboard", label: "Dashboard" },
     { id: "progreso", label: "Progreso" },
@@ -5066,6 +5129,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       ? { status: "proxima", dateLabel: fmtDateLabel(proximaSesion.fecha), detail: proximaSesion.sesion.objetivo, mdTag: proximaSesion.sesion.md }
       : { status: "ninguna" };
     return (
+      <>
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
           <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -5080,11 +5144,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             </button>
           </div>
 
-          <div style={{ margin: "14px 0 20px" }}>
-            <DsTabSwitcher tabs={PLAYER_TABS} active="dashboard" onChange={setVistaJugador} />
-          </div>
-
-          <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Sesión</div>
+          <div style={{ marginTop: 20, marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Sesión</div>
           {session.status === "hoy" && (
             <DsCard style={{ borderColor: ds.accentBorderSubtle, padding: "14px 16px" }}>
               <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
@@ -5180,13 +5240,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               </div>
             )}
           </div>
+          <div style={{ height: 76 }} />
         </div>
       </PantallaBase>
+      <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="dashboard" onChange={setVistaJugador} />
+      </>
     );
   }
 
   if (vistaJugador === "cmj") {
     return (
+      <>
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
           <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -5198,10 +5262,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               ⟳
             </button>
           </div>
-          <div style={{ margin: "14px 0 18px" }}>
-            <DsTabSwitcher tabs={PLAYER_TABS} active="cmj" onChange={setVistaJugador} />
-          </div>
-          <div style={{ marginBottom: 8, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Historial de saltos</div>
+          <div style={{ marginBottom: 8, marginTop: 18, fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkMuted, textTransform: "uppercase" }}>Historial de saltos</div>
           {cmjResumen ? (
             <DsCard>
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
@@ -5222,8 +5283,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               <div style={{ fontSize: 12, lineHeight: 1.5, maxWidth: 260 }}>En cuanto registres tu primer CMJ en una sesión, empezará a verse aquí.</div>
             </div>
           )}
+          <div style={{ height: 76 }} />
         </div>
       </PantallaBase>
+      <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="cmj" onChange={setVistaJugador} />
+      </>
     );
   }
 
@@ -5234,6 +5298,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // fallo que has visto.
   if (vistaJugador === "progreso") {
     return (
+      <>
       <PantallaBase rol="jugador" maxWidth={480}>
         <div>
           <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
@@ -5245,12 +5310,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
               ⟳
             </button>
           </div>
-          <div style={{ margin: "14px 0 18px" }}>
-            <DsTabSwitcher tabs={PLAYER_TABS} active="progreso" onChange={setVistaJugador} />
-          </div>
+          <div style={{ marginTop: 18 }} />
           <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
+          <div style={{ height: 76 }} />
         </div>
       </PantallaBase>
+      <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="progreso" onChange={setVistaJugador} />
+      </>
     );
   }
 
