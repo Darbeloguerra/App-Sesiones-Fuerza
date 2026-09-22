@@ -10245,17 +10245,35 @@ function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
       </div>
     );
   }
-  const width = 640;
+  const width = 660;
   const height = 200;
-  const padX = 36;
-  const padY = 20;
+  const padLeft = 6;
+  const padRight = 48;
+  const padY = 22;
   const allValores = series.flatMap((s) => s.puntos.map((p) => p.valorMostrado));
   const minV = Math.min(...allValores);
   const maxV = Math.max(...allValores);
   const rango = maxV - minV || 1;
-  const stepX = (width - padX * 2) / (nPuntos - 1);
-  const coordX = (i) => padX + i * stepX;
+  const stepX = (width - padLeft - padRight) / (nPuntos - 1);
+  const coordX = (i) => padLeft + i * stepX;
   const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
+
+  // Igual criterio que GraficaProgresoCargaReal (sin números de eje fijos:
+  // el valor final va pegado a la línea) pero con varias series a la vez,
+  // así que las etiquetas se reparten en una pequeña columna a la derecha,
+  // separadas un mínimo vertical entre sí, para que no se pisen aunque dos
+  // líneas terminen muy cerca la una de la otra.
+  const xUltimo = coordX(nPuntos - 1);
+  const etiquetas = series
+    .map((s) => {
+      const ultimo = s.puntos[s.puntos.length - 1];
+      return { key: s.key, color: s.color, texto: ultimo.valorMostrado.toFixed(decimalesEje), y: coordY(ultimo.valorMostrado) };
+    })
+    .sort((a, b) => a.y - b.y);
+  const GAP_MIN = 13;
+  for (let i = 1; i < etiquetas.length; i++) {
+    if (etiquetas[i].y - etiquetas[i - 1].y < GAP_MIN) etiquetas[i].y = etiquetas[i - 1].y + GAP_MIN;
+  }
 
   return (
     <div>
@@ -10271,10 +10289,11 @@ function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
             </g>
           );
         })}
-        <text x={4} y={coordY(maxV) + 3} fontSize="9.5" fill={ds.inkMuted}>{maxV.toFixed(decimalesEje)}</text>
-        <text x={4} y={coordY(minV) + 3} fontSize="9.5" fill={ds.inkMuted}>{minV.toFixed(decimalesEje)}</text>
-        <text x={padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
-        <text x={width - padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
+        {etiquetas.map((e) => (
+          <text key={e.key} x={xUltimo + 8} y={e.y + 3.5} fontSize="10.5" fontWeight="700" fill={e.color} textAnchor="start">{e.texto}</text>
+        ))}
+        <text x={padLeft} y={height - 5} fontSize="9.5" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
+        <text x={xUltimo} y={height - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
       </svg>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", marginTop: 10 }}>
         {series.map((s) => (
