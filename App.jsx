@@ -2170,7 +2170,7 @@ function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
 function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
   const acciones = [
     { id: "reset", label: "Resetear PIN" },
-    { id: "historial", label: "Ver historial" },
+    { id: "historial", label: "Ver ficha" },
     jugador.estado === "activo"
       ? { id: "suspender", label: "Suspender jugador", tono: "ambar" }
       : { id: "activar", label: "Activar jugador", tono: "verde" },
@@ -8227,7 +8227,7 @@ export default function App() {
   const [screen, setScreen] = useState("portal"); // "portal" | "coach" | "player"
   const [playerId, setPlayerId] = useState(null);
   const [coachModulo, setCoachModulo] = useState(null); // null = dashboard
-  const [historialJugador, setHistorialJugador] = useState(null); // jugador para "Ver historial" desde Roster
+  const [historialJugador, setHistorialJugador] = useState(null); // jugador para "Ver ficha" desde Usuarios
 
   useEffect(() => {
     if (screen === "coach") precalentarDatosEntrenador();
@@ -8282,7 +8282,7 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
 
   // screen === "coach"
   if (historialJugador) {
-    return <HistorialJugadorModuloReal jugador={historialJugador} onBack={() => setHistorialJugador(null)} />;
+    return <FichaJugadorModuloReal jugador={historialJugador} onBack={() => setHistorialJugador(null)} />;
   }
   if (coachModulo === "roster") {
     return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
@@ -8313,27 +8313,218 @@ function ProgramacionModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   return <ProgramacionReal players={players} onBack={onBack} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />;
 }
 
-// "Ver historial" de un jugador concreto desde el Roster: reutiliza
-// HistorialPorJugador (la misma pieza que usa el módulo de Historial general),
-// preseleccionando el jugador sobre el que se pulsó, pero sin perder la
-// posibilidad de cambiar a otro desde el propio desplegable.
-function HistorialJugadorModuloReal({ jugador, onBack }) {
-  const [players, , playersLoaded] = usePlayers();
-  if (!playersLoaded) return <LoadingBlock />;
+// Cabecera de identidad de la ficha de jugador. Reutiliza exactamente las
+// mismas piezas visuales que ya existían en FilaJugadorReal (punto de
+// estado, chips de grupo, chips de categoría preventiva, PIN con
+// mostrar/ocultar) — aquí solo cambia el layout, de fila a cabecera. No
+// permite editar grupos/categorías desde aquí a propósito: eso ya se hace
+// desde la fila en Usuarios, y duplicar esa lógica de guardado en un
+// segundo sitio no aporta nada en este primer paso.
+function CabeceraFichaJugadorReal({ jugador, categorias, grupos }) {
+  const [pinVisible, setPinVisible] = useState(false);
+  const suspendido = jugador.estado === "suspendido";
+  const nombresGrupos = (jugador.gruposIds || [])
+    .map((id) => grupos.find((g) => g.id === id)?.nombre)
+    .filter(Boolean);
+  const nombresCategorias = (jugador.groupIds || [])
+    .map((id) => categorias.find((c) => c.id === id)?.nombre)
+    .filter(Boolean);
+  const iniciales =
+    jugador.name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0].toUpperCase())
+      .join("") || "?";
+
   return (
-    <PantallaBase rol="entrenador" maxWidth={560}>
+    <div style={{ display: "flex", gap: 14, alignItems: "flex-start", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 18 }}>
+      <DsAvatar size={52} style={{ flexShrink: 0 }}>{iniciales}</DsAvatar>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+          <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, flexShrink: 0 }} />
+          <h1 style={{ fontFamily: dsF.display, fontSize: 21, fontWeight: 700, margin: 0, color: ds.ink }}>{jugador.name}</h1>
+          {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+          {nombresGrupos.length > 0 ? (
+            nombresGrupos.map((g) => (
+              <ChipReal key={g} tono="azul">
+                {g}
+              </ChipReal>
+            ))
+          ) : (
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente</span>
+          )}
+        </div>
+        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
+          {nombresCategorias.length > 0 ? (
+            nombresCategorias.map((c) => (
+              <ChipReal key={c} tono="verde">
+                {c}
+              </ChipReal>
+            ))
+          ) : (
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Sin categoría preventiva</span>
+          )}
+        </div>
+      </div>
+      <div
+        onClick={() => setPinVisible((v) => !v)}
+        style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkMuted, cursor: "pointer", textAlign: "center", flexShrink: 0 }}
+        title="Mostrar/ocultar PIN"
+      >
+        <div style={{ fontSize: 9, letterSpacing: "0.08em", marginBottom: 3 }}>PIN</div>
+        {pinVisible ? jugador.pin : "••••"}
+      </div>
+    </div>
+  );
+}
+
+// Pestaña "Resumen" de la ficha: adherencia de esta semana y variación de
+// la carga media semanal de ESTE jugador. Mismo criterio de ventana y de
+// "cumplido" que "Quién necesita atención" en DashboardEntrenadorSidebarReal
+// (calcularAdherencia, cargaMedia) — aquí reescrito para un único jugador en
+// vez de para todo el equipo, no es una métrica nueva.
+function ResumenFichaJugadorReal({ jugador }) {
+  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const { loaded: historyLoaded, items } = usePlayerHistory(jugador.id);
+
+  if (!progLoaded || !historyLoaded) return <LoadingBlock />;
+
+  const hoy = todayStr();
+  const lunes = inicioSemanaCalendario(hoy);
+  const domingo = sumarDiasFecha(lunes, 6);
+  const lunesAnterior = sumarDiasFecha(lunes, -7);
+  const domingoAnterior = sumarDiasFecha(lunes, -1);
+
+  const fechasConRegistro = new Set(items.map((it) => it.date));
+  const fechasAsignadas = (desde, hasta) => {
+    const fechas = [];
+    sesiones
+      .filter((s) => s.enviada)
+      .forEach((s) => {
+        const incluyeAJugador = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino.includes(jugador.id) : jugador.estado === "activo";
+        if (!incluyeAJugador) return;
+        (s.fechas || []).forEach((f) => {
+          if (f >= desde && f <= hasta) fechas.push(f);
+        });
+      });
+    return fechas;
+  };
+  const calcularAdherencia = (fechas) => {
+    if (!fechas.length) return null;
+    const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
+    return Math.round((cumplidas / fechas.length) * 100);
+  };
+  const adherenciaActual = calcularAdherencia(fechasAsignadas(lunes, hoy));
+  const adherenciaAnterior = calcularAdherencia(fechasAsignadas(lunesAnterior, domingoAnterior));
+  const deltaAdherencia = adherenciaActual != null && adherenciaAnterior != null ? adherenciaActual - adherenciaAnterior : null;
+
+  const cargaMedia = (desde, hasta) => {
+    const regs = items.filter(
+      (it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= desde && it.date <= hasta
+    );
+    if (!regs.length) return null;
+    return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
+  };
+  const cargaActual = cargaMedia(lunes, hoy);
+  const cargaAnterior = cargaMedia(lunesAnterior, domingoAnterior);
+  const variacionPct = cargaActual != null && cargaAnterior != null && cargaAnterior !== 0 ? ((cargaActual - cargaAnterior) / cargaAnterior) * 100 : null;
+
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10 }}>
+      {adherenciaActual != null ? (
+        <DsStatTile
+          label="Adherencia esta semana"
+          value={`${adherenciaActual}%`}
+          delta={deltaAdherencia != null ? { direction: deltaAdherencia >= 0 ? "up" : "down", label: `${deltaAdherencia > 0 ? "+" : ""}${deltaAdherencia} vs semana pasada` } : undefined}
+        />
+      ) : (
+        <DsStatTile label="Adherencia esta semana" value="—" delta={{ direction: "neutral", label: "sin sesiones asignadas aún" }} />
+      )}
+      {variacionPct != null ? (
+        <DsStatTile
+          label="Carga media vs. semana pasada"
+          value={`${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%`}
+          delta={{ direction: variacionPct <= -10 ? "down" : "neutral", label: variacionPct <= -10 ? "caída relevante" : "dentro de lo normal" }}
+        />
+      ) : (
+        <DsStatTile label="Carga media vs. semana pasada" value="—" delta={{ direction: "neutral", label: "sin datos suficientes" }} />
+      )}
+    </div>
+  );
+}
+
+// Ficha de un jugador concreto, abierta desde Usuarios ("Ver ficha").
+// Cabecera de identidad + dos pestañas: Resumen (nuevo) e Historial (es
+// HistorialPorJugador tal cual ya existía, sin cambios — la misma pieza que
+// usa el módulo de Historial general, aquí preseleccionando a este jugador
+// pero sin perder la posibilidad de cambiar a otro desde su desplegable).
+function FichaJugadorModuloReal({ jugador, onBack }) {
+  const [players, , playersLoaded] = usePlayers();
+  const [categorias, categoriasLoaded] = useCategoriasPreventivas();
+  const [grupos, , gruposLoaded] = useEntityList("grupos");
+  const [pestana, setPestana] = useState("resumen");
+
+  if (!playersLoaded || !categoriasLoaded || !gruposLoaded) return <LoadingBlock />;
+
+  // El jugador puede haber cambiado (categoría, grupo, estado, PIN) desde
+  // que se abrió esta ficha — se resuelve siempre contra la lista fresca de
+  // usePlayers() en vez de quedarse con el objeto que llegó por prop.
+  const actual = players.find((p) => p.id === jugador?.id) || jugador;
+
+  if (!actual) {
+    return (
+      <PantallaBase rol="entrenador" maxWidth={640}>
+        <button
+          onClick={onBack}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
+        >
+          ← Volver a Usuarios
+        </button>
+        <div style={{ color: ds.inkMuted, fontSize: 13, marginTop: 20 }}>Este jugador ya no existe.</div>
+      </PantallaBase>
+    );
+  }
+
+  return (
+    <PantallaBase rol="entrenador" maxWidth={640}>
       <div>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
         >
-          ← Volver al Roster
+          ← Volver a Usuarios
         </button>
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 600, margin: "0 0 4px" }}>{jugador?.name || "Jugador"}</h1>
+        <CabeceraFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} />
+        <div style={{ display: "flex", gap: 6, margin: "16px 0 14px" }}>
+          {[
+            { id: "resumen", label: "Resumen" },
+            { id: "historial", label: "Historial" },
+          ].map((v) => (
+            <button
+              key={v.id}
+              onClick={() => setPestana(v.id)}
+              style={{
+                fontSize: 12.5,
+                padding: "7px 12px",
+                borderRadius: dsR.md,
+                border: `1px solid ${pestana === v.id ? ds.accent : ds.border}`,
+                background: pestana === v.id ? ds.accentSubtle : "transparent",
+                color: pestana === v.id ? ds.accent : ds.inkSecondary,
+                cursor: "pointer",
+              }}
+            >
+              {v.label}
+            </button>
+          ))}
         </div>
-        <HistorialPorJugador players={players} jugadorInicial={jugador?.id} />
+        {pestana === "resumen" ? (
+          <ResumenFichaJugadorReal jugador={actual} />
+        ) : (
+          <HistorialPorJugador players={players} jugadorInicial={actual.id} />
+        )}
       </div>
     </PantallaBase>
   );
