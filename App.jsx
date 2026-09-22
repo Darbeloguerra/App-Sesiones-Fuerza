@@ -3347,12 +3347,22 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 // SVG a mano, sin librería externa (esta app no tiene ninguna cargada).
 // Cada punto es un registro con carga válida; se traza una línea recta entre
 // ellos en el orden de las fechas.
+// P4 (Fase 3): punto → detalle de esa sesión, en vez de una gráfica muda.
+// El punto pulsado (táctil o click, no solo hover — en móvil no hay hover)
+// queda seleccionado y su ficha se lee justo encima, con todo lo que el
+// registro trae (reps, RIR) además de la fecha y el valor que ya se veían.
+// Por defecto el último punto está seleccionado, para no cambiar lo que ya
+// se veía si nadie toca nada.
 function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
   // Id único por instancia: puede haber varias de estas gráficas montadas a
   // la vez en la misma pantalla (una por tarea), y los <defs> de SVG son
   // globales al documento — sin esto, dos gráficas compartirían el mismo
   // degradado y una de las dos se vería mal.
   const [gradId] = useState(() => `gpc-${Math.random().toString(36).slice(2, 9)}`);
+  const [seleccionado, setSeleccionado] = useState(puntos.length - 1);
+  // Si cambian los puntos (p. ej. se elige otra tarea en el desplegable) y
+  // el índice seleccionado ya no existe, vuelve a caer en el último.
+  const indiceActivo = seleccionado != null && seleccionado < puntos.length ? seleccionado : puntos.length - 1;
 
   if (puntos.length < 2) {
     return (
@@ -3377,6 +3387,7 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
   const areaD = `${pathD} L ${coordX(puntos.length - 1).toFixed(1)} ${height - padBottom} L ${coordX(0).toFixed(1)} ${height - padBottom} Z`;
   const primero = puntos[0];
   const ultimo = puntos[puntos.length - 1];
+  const activo = puntos[indiceActivo];
   // Sin ejes ni cuadrícula — minimalista, al estilo de referencia: el valor
   // inicial y el final se leen pegados a su propio punto de la línea, no en
   // una columna de ejes aparte.
@@ -3386,6 +3397,17 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
 
   return (
     <div>
+      {/* Ficha de la sesión seleccionada — lo que antes solo estaba en la
+          fila de la lista de abajo, ahora también arriba del todo, pegado
+          al punto que se acaba de tocar. */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", rowGap: 4 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted }}>{fmtDateLabel(activo.date)}</div>
+        <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.ink, fontWeight: 700 }}>
+          {activo.valor}{unidad}
+          {activo.reps !== "" && activo.reps != null && <span style={{ color: ds.inkSecondary, fontWeight: 400 }}> · {activo.reps} reps</span>}
+          {activo.rir !== "" && activo.rir != null && <span style={{ color: ds.inkSecondary, fontWeight: 400 }}> · RIR {activo.rir}</span>}
+        </div>
+      </div>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
         <defs>
           <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -3395,8 +3417,22 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
         </defs>
         <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
         <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
+        {indiceActivo != null && (
+          <line x1={coordX(indiceActivo)} y1={padTop - 10} x2={coordX(indiceActivo)} y2={height - padBottom} stroke={ds.accent} strokeWidth={1} strokeOpacity={0.35} strokeDasharray="3 3" />
+        )}
         {puntos.map((p, i) => (
-          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
+          <g key={i} onClick={() => setSeleccionado(i)} style={{ cursor: "pointer" }}>
+            {/* Círculo invisible más grande solo para que el dedo tenga margen de sobra al tocar — el visible sigue fino */}
+            <circle cx={coordX(i)} cy={coordY(p.valor)} r={14} fill="transparent" />
+            <circle
+              cx={coordX(i)}
+              cy={coordY(p.valor)}
+              r={i === indiceActivo ? 5.5 : i === 0 || i === puntos.length - 1 ? 4 : 3}
+              fill={i === indiceActivo ? ds.accent : ds.canvas}
+              stroke={ds.accent}
+              strokeWidth={2.25}
+            />
+          </g>
         ))}
         <text x={coordX(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.valor}{unidad}</text>
         <text x={coordX(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.valor}{unidad}</text>
@@ -3404,14 +3440,33 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
         <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
-        {[...puntos].reverse().map((p, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, color: ds.inkSecondary, fontFamily: dsF.mono }}>
-            <span>{fmtDateShort(p.date)}</span>
-            <span style={{ color: ds.ink }}>
-              {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
-            </span>
-          </div>
-        ))}
+        {[...puntos].reverse().map((p, iRev) => {
+          const i = puntos.length - 1 - iRev;
+          const esActivo = i === indiceActivo;
+          return (
+            <div
+              key={i}
+              onClick={() => setSeleccionado(i)}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 11.5,
+                color: ds.inkSecondary,
+                fontFamily: dsF.mono,
+                cursor: "pointer",
+                padding: "3px 6px",
+                margin: "0 -6px",
+                borderRadius: dsR.sm,
+                background: esActivo ? ds.accentSubtle : "transparent",
+              }}
+            >
+              <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(p.date)}</span>
+              <span style={{ color: ds.ink }}>
+                {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -4019,7 +4074,7 @@ function MiProgresoJugadorReal({ items, loaded }) {
     ? items
         .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null && claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir) === claveActiva)
         .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
+        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal, reps: it.repsReal }))
     : [];
 
   // Cabecera de número grande: valor más reciente + variación desde el
@@ -4160,7 +4215,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
             (!hasta || it.date <= hasta)
         )
         .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
+        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal, reps: it.repsReal }))
     : [];
 
   return (
@@ -6052,7 +6107,7 @@ function resumenRegistroReal(tarea, registro) {
   return partes.length ? partes.join(" · ") : "Registrado";
 }
 
-function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true }) {
+function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, onAmpliarGif, orden, mostrarRegistro = true, esRecordNuevo = false }) {
   const videoEfectivo = videoEfectivoTarea(tarea, registro);
   const [expandido, setExpandido] = useState(false);
   // Con la tarea ya hecha, los campos de registro se colapsan en una línea
@@ -6066,7 +6121,21 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj;
   const mostrarFormulario = puedeDesplegar && expandido;
   return (
-    <DsCard status={hecho ? "done" : "default"} style={{ padding: 14, gap: 12, borderRadius: dsR.xl, borderColor: hecho ? ds.successBorderSubtle : "transparent", boxShadow: dsSh.elevation2 }}>
+    <DsCard
+      status={hecho ? "done" : "default"}
+      style={{
+        padding: 14,
+        gap: 12,
+        borderRadius: dsR.xl,
+        // P6: la tarea donde se acaba de superar el récord se queda con un
+        // halo dorado persistente, no solo el toast puntual del momento en
+        // que se guarda — así el jugador ve el logro también si vuelve a
+        // esta pantalla más tarde en la misma sesión.
+        borderColor: esRecordNuevo ? ds.accent : hecho ? ds.successBorderSubtle : "transparent",
+        background: esRecordNuevo ? `${ds.accent}1A` : undefined,
+        boxShadow: dsSh.elevation2,
+      }}
+    >
       <div
         onClick={() => puedeDesplegar && setExpandido((v) => !v)}
         style={{ display: "flex", gap: 11, alignItems: "center", cursor: puedeDesplegar ? "pointer" : "default" }}
@@ -6119,6 +6188,11 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             <>
               <div style={{ display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                 <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
+                {esRecordNuevo && (
+                  <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.accentInk, background: ds.accent, borderRadius: 4, padding: "1.5px 5px" }}>
+                    RÉCORD
+                  </span>
+                )}
                 {tarea.mostrarLateralidad !== false && (
                   <DsBadge tone={tarea.unilateral ? "accent" : "neutral"}>{tarea.unilateral ? "Unilateral" : "Bilateral"}</DsBadge>
                 )}
@@ -6442,6 +6516,13 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
+  // Adherencia semanal para la cabecera del dashboard (P5 — Fase 3): mismo
+  // cálculo que ya usa el entrenador en ResumenFichaJugadorReal
+  // (calcularAdherencia sobre fechasAsignadas), no una métrica nueva. Hace
+  // falta el programa completo (no solo el bootstrap de hoy) para saber qué
+  // fechas de la semana tenían sesión asignada.
+  const { sesiones: sesionesProgramacion } = useBootstrapProgramacion();
+
   // Datos reales de salto (altura/potencia/fuerza/velocidad), vinculados por
   // jugador_id — el mismo pipeline que ya usa el entrenador en la ficha de
   // jugador (CmjFichaJugadorReal): no se recalcula nada nuevo, se reutiliza
@@ -6487,6 +6568,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [enviado, setEnviado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState("");
+  // P6: ids de tareas cuyo aviso puntual de "nuevo récord" ya se ha
+  // descartado a mano en esta sesión — el halo/badge de la tarea se queda
+  // igualmente, solo se oculta el aviso.
+  const [recordsDescartados, setRecordsDescartados] = useState([]);
 
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
@@ -6644,6 +6729,39 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   };
   const inicioSemanaActual = haceDias(6);
 
+  // Adherencia esta semana vs. la semana pasada — semana de calendario
+  // (lunes-domingo), igual criterio que ResumenFichaJugadorReal, no la
+  // ventana corrediza de 7 días que usan mejorasSemana/descensosSemana (son
+  // preguntas distintas: "¿cumplo lo que me mandan?" vs. "¿progreso en cada
+  // ejercicio?").
+  const lunesSemana = inicioSemanaCalendario(date);
+  const domingoSemana = sumarDiasFecha(lunesSemana, 6);
+  const lunesSemanaAnterior = sumarDiasFecha(lunesSemana, -7);
+  const domingoSemanaAnterior = sumarDiasFecha(lunesSemana, -1);
+  const fechasConRegistro = new Set(historyItems.map((it) => it.date));
+  const fechasAsignadasJugador = (desde, hasta) => {
+    if (!player) return [];
+    const fechas = [];
+    sesionesProgramacion
+      .filter((s) => s.enviada)
+      .forEach((s) => {
+        const incluyeAJugador = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino.includes(player.id) : player.estado === "activo";
+        if (!incluyeAJugador) return;
+        (s.fechas || []).forEach((f) => {
+          if (f >= desde && f <= hasta) fechas.push(f);
+        });
+      });
+    return fechas;
+  };
+  const calcularAdherenciaJugador = (fechas) => {
+    if (!fechas.length) return null;
+    const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
+    return Math.round((cumplidas / fechas.length) * 100);
+  };
+  const adherenciaSemanaActual = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemana, domingoSemana));
+  const adherenciaSemanaAnterior = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemanaAnterior, domingoSemanaAnterior));
+  const deltaAdherenciaSemana = adherenciaSemanaActual != null && adherenciaSemanaAnterior != null ? adherenciaSemanaActual - adherenciaSemanaAnterior : null;
+
   const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
   // Récord de carga: se agrupa por NOMBRE de ejercicio (no por diseño exacto
@@ -6666,6 +6784,15 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     if (!recordCarga || maxActual.date > recordCarga.fecha) {
       recordCarga = { nombre, valor: Number(maxActual.cargaReal), fecha: maxActual.date, pctSobreAnterior };
     }
+  });
+
+  // P6 — récord en vivo: el mejor valor de carga ya registrado (antes de
+  // hoy) por ejercicio, para poder avisar al jugador EN EL MOMENTO en que
+  // supera su marca dentro de la propia sesión, sin esperar a que se envíe
+  // ni a que aparezca en el resumen del dashboard.
+  const mejorHistoricoPorNombre = new Map();
+  registrosPorEjercicio.forEach((regs, nombre) => {
+    mejorHistoricoPorNombre.set(nombre, Math.max(...regs.map((it) => Number(it.cargaReal))));
   });
 
   // Cambios de carga esta semana frente a la propia media histórica de cada
@@ -6928,6 +7055,18 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                 HOY · {fmtDateLabel(date).toUpperCase()}
               </div>
               <h1 style={{ fontFamily: dsF.display, fontSize: 23, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Hola, {player.name}</h1>
+              {adherenciaSemanaActual != null && (
+                <div style={{ marginTop: 6, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                  <DsBadge tone={adherenciaSemanaActual >= 80 ? "success" : adherenciaSemanaActual >= 50 ? "accent" : "danger"}>
+                    Adherencia esta semana: {adherenciaSemanaActual}%
+                  </DsBadge>
+                  {deltaAdherenciaSemana != null && deltaAdherenciaSemana !== 0 && (
+                    <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: deltaAdherenciaSemana > 0 ? ds.success : ds.danger }}>
+                      {deltaAdherenciaSemana > 0 ? "▲" : "▼"} {Math.abs(deltaAdherenciaSemana)} vs. semana pasada
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
             <button onClick={onExit} aria-label="Cambiar de jugador" style={{ width: 40, height: 40, borderRadius: 11, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.inkSecondary, cursor: "pointer", flexShrink: 0 }}>
               ⟳
@@ -7311,6 +7450,26 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     );
   }
 
+  // P6 — récord en vivo: cualquier tarea de Fuerza marcada como hecha cuya
+  // carga registrada ahora mismo supera su mejor marca histórica (antes de
+  // hoy). El halo/badge de la tarea se calcula para todas ellas; el toast
+  // puntual solo se muestra para la primera que no se haya descartado a
+  // mano, para no apilar varios avisos a la vez.
+  const recordsEnVivo = todasLasTareas
+    .filter((t) => !t.esResistencia && !t.esCmj && hechoDraft[t.id])
+    .map((t) => {
+      const r = getRegistro(t.id);
+      const cargaNum = r.carga !== "" && r.carga != null ? Number(r.carga) : null;
+      if (cargaNum == null || Number.isNaN(cargaNum)) return null;
+      const mejorPrevio = mejorHistoricoPorNombre.get(t.nombre);
+      if (mejorPrevio != null && cargaNum <= mejorPrevio) return null;
+      const pct = mejorPrevio ? ((cargaNum - mejorPrevio) / mejorPrevio) * 100 : null;
+      return { id: t.id, nombre: t.nombre, valor: cargaNum, mejorPrevio: mejorPrevio ?? null, pct };
+    })
+    .filter(Boolean);
+  const recordsEnVivoIds = new Set(recordsEnVivo.map((r) => r.id));
+  const toastRecordActivo = recordsEnVivo.find((r) => !recordsDescartados.includes(r.id)) || null;
+
   return (
     <PantallaBase rol="jugador" maxWidth={480}>
       <div>
@@ -7351,6 +7510,50 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             </div>
           )}
         </div>
+
+        {/* P6: toast momentáneo, en el flujo normal del layout (empuja el
+            resto hacia abajo en vez de flotar encima) — así nunca puede
+            solaparse ni con la cabecera ni con la lista de tareas. */}
+        {toastRecordActivo && (
+          <div
+            style={{
+              marginBottom: 18,
+              background: ds.surface,
+              border: `1px solid ${ds.accent}`,
+              borderRadius: dsR.xl,
+              padding: 14,
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
+              boxShadow: dsSh.elevation2,
+            }}
+          >
+            <div style={{ width: 38, height: 38, borderRadius: dsR.full, background: ds.accent, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={ds.accentInk} strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 2 9 9l-7 1 5 5-1.5 7L12 18l6.5 4L17 15l5-5-7-1-3-7Z" />
+              </svg>
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 14.5, fontWeight: 700, color: ds.ink }}>¡Nuevo récord!</div>
+              <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>
+                {toastRecordActivo.nombre} · {toastRecordActivo.valor} kg
+              </div>
+              {toastRecordActivo.pct != null && (
+                <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.accent, marginTop: 3 }}>
+                  ▲ {toastRecordActivo.pct >= 0 ? "+" : ""}
+                  {toastRecordActivo.pct.toFixed(1)}% sobre tu marca anterior ({toastRecordActivo.mejorPrevio} kg)
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setRecordsDescartados((prev) => [...prev, toastRecordActivo.id])}
+              aria-label="Descartar aviso de récord"
+              style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 16, cursor: "pointer", padding: 4, flexShrink: 0, lineHeight: 1 }}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {!loaded ? (
           <LoadingBlock />
@@ -7394,6 +7597,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                             if (v) setGifAmpliado(v);
                           }}
                           mostrarRegistro={nombreBloque === "Fuerza" || nombreBloque === "CMJ"}
+                          esRecordNuevo={recordsEnVivoIds.has(item.tarea.id)}
                         />
                       )
                     )}
