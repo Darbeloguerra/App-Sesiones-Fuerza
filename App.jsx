@@ -10257,24 +10257,32 @@ function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
   const coordX = (i) => padX + i * stepX;
   const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
 
+  // Sin números de eje en una columna fija (eso es justo lo que la
+  // aleja del estilo de referencia) — cada línea lleva su propio valor
+  // final pegado a su último punto, del mismo color que la línea, igual
+  // criterio que GraficaProgresoCargaReal pero repetido por serie.
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
-        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{maxV.toFixed(decimalesEje)}</text>
-        <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{minV.toFixed(decimalesEje)}</text>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block", overflow: "visible" }}>
         {series.map((s) => {
           const pathD = s.puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valorMostrado).toFixed(1)}`).join(" ");
+          const ultimo = s.puntos[s.puntos.length - 1];
+          const yUltimo = coordY(ultimo.valorMostrado);
+          const arriba = yUltimo < height / 2;
           return (
             <g key={s.key}>
-              <path d={pathD} fill="none" stroke={s.color} strokeWidth={2.25} strokeLinejoin="round" />
+              <path d={pathD} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
               {s.puntos.map((p, i) => (
-                <circle key={i} cx={coordX(i)} cy={coordY(p.valorMostrado)} r={3.25} fill={ds.canvas} stroke={s.color} strokeWidth={2} />
+                <circle key={i} cx={coordX(i)} cy={coordY(p.valorMostrado)} r={i === s.puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={s.color} strokeWidth={2} />
               ))}
+              <text x={coordX(s.puntos.length - 1)} y={yUltimo + (arriba ? -10 : 16)} fontSize="10.5" fontWeight="700" fill={s.color} textAnchor="end">
+                {ultimo.valorMostrado.toFixed(decimalesEje)}
+              </text>
             </g>
           );
         })}
-        <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
-        <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
+        <text x={padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
+        <text x={width - padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
       </svg>
       <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", marginTop: 10 }}>
         {series.map((s) => (
