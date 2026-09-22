@@ -913,6 +913,10 @@ function usePlayers() {
         estado: r.estado || "activo",
         groupIds: Array.isArray(r.categorias_preventivas) ? r.categorias_preventivas : [],
         gruposIds: Array.isArray(r.grupos_ids) ? r.grupos_ids : [],
+        // Posición de juego (portero/central/...) — añadida para el módulo
+        // Control de fatiga (Parte 5), pero es un dato del jugador en
+        // general, no exclusivo del CMJ.
+        posicion: r.posicion || null,
       })),
     [rows]
   );
@@ -4471,7 +4475,7 @@ function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
         <DsTabSwitcher tabs={TABS} active={vista} onChange={setVista} />
         <div style={{ marginTop: 16 }}>
           {vista === "subir" && <CmjSubirCsvReal />}
-          {vista === "estado" && <CmjProximamente titulo="Estado actual" texto="El semáforo semanal por jugador (con umbrales individualizados y detección de divergencia) llega en el siguiente paso, una vez tengas microciclos y algún CSV ya cargados." />}
+          {vista === "estado" && <CmjEstadoActualReal />}
           {vista === "microciclos" && <CmjMicrociclosReal />}
           {vista === "ranking" && <CmjProximamente titulo="Ranking" texto="El ranking histórico por jugador llega al final de este módulo, cuando el resto ya esté funcionando." />}
         </div>
@@ -4639,6 +4643,295 @@ function CmjMicrociclosReal() {
           })}
         </div>
       )}
+    </div>
+  );
+}
+
+const CMJ_UMBRAL_DEFECTO = { ambarPct: 6, rojoPct: 12, individualizar: true, protocoloDesde: "" };
+
+// Igual que en el panel original: qué mostrar HOY para un jugador depende
+// de qué día es dentro del microciclo actual. Si hoy es "Inicio", se enseña
+// el chequeo de recuperación (¿se ha recuperado del MD+1 de la semana
+// pasada?); si es MD-2 o MD+1, el estado de ese test frente al Inicio de
+// esta semana; si no hay test programado hoy, se enseña la última lectura
+// disponible de esta semana (a modo de contexto).
+function cmjHoyDe(player, todayTag) {
+  const m = player.lastMicro;
+  if (!todayTag) {
+    const dayField = m?.md1 ? "md1" : m?.md2 ? "md2" : null;
+    if (!dayField) return { status: "gray", motivo: "Sin tests registrados en este microciclo todavía.", rows: [], nivel: null };
+    const d = cmjMotivoDia(m, dayField, player.umbral);
+    return { status: d.status, motivo: `Última lectura (${CMJ_TAG_META[dayField].label}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m };
+  }
+  if (todayTag === "inicio") {
+    if (!m || !m.inicio) return { status: "gray", motivo: "Test de inicio de hoy aún no registrado.", rows: [], nivel: null };
+    const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
+    return { status: r.status, motivo: r.motivo, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m };
+  }
+  if (!m || !m[todayTag]) return { status: "gray", motivo: `Test de hoy (${CMJ_TAG_META[todayTag].label}) aún no registrado.`, rows: [], nivel: null };
+  const d = cmjMotivoDia(m, todayTag, player.umbral);
+  return { status: d.status, motivo: d.motivo, rows: cmjFilasDia(m, todayTag, player.umbral), nivel: d.nivel, m };
+}
+
+function CmjAjustesUmbralReal({ umbral, onGuardado }) {
+  const [form, setForm] = useState(umbral);
+  const [guardando, setGuardando] = useState(false);
+
+  async function guardar() {
+    setGuardando(true);
+    await api.setConfig("cmj_umbral", form);
+    setGuardando(false);
+    onGuardado(form);
+  }
+
+  return (
+    <DsCard style={{ padding: 14, marginBottom: 16 }}>
+      <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 10 }}>Ajustes del umbral</div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 4 }}>Ámbar general (%)</div>
+          <DsInput type="number" min="1" max="40" value={form.ambarPct} onChange={(e) => setForm({ ...form, ambarPct: Number(e.target.value) })} style={{ width: 70 }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 4 }}>Rojo general (%)</div>
+          <DsInput type="number" min="1" max="60" value={form.rojoPct} onChange={(e) => setForm({ ...form, rojoPct: Number(e.target.value) })} style={{ width: 70 }} />
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, cursor: "pointer" }}>
+          <DsToggle on={form.individualizar} onClick={() => setForm({ ...form, individualizar: !form.individualizar })} />
+          Individualizar por jugador (con 4+ Inicios de historial)
+        </label>
+        <div>
+          <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 4 }}>Usar Inicios desde (cambio de protocolo)</div>
+          <DsInput type="date" value={form.protocoloDesde || ""} onChange={(e) => setForm({ ...form, protocoloDesde: e.target.value })} />
+        </div>
+        <DsButton size="sm" onClick={guardar} disabled={guardando}>{guardando ? "Guardando…" : "Guardar ajustes"}</DsButton>
+      </div>
+    </DsCard>
+  );
+}
+
+function CmjEstadoActualReal() {
+  const [players, , playersLoaded] = usePlayers();
+  const [saltos, setSaltos] = useState([]);
+  const [microciclos, setMicrociclos] = useState([]);
+  const [umbral, setUmbral] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+  const [filtroEstado, setFiltroEstado] = useState(new Set(["red", "amber", "green", "gray"]));
+  const [expandedCards, setExpandedCards] = useState(new Set());
+  const [expandedMetrics, setExpandedMetrics] = useState(new Set());
+  const [mostrarAjustes, setMostrarAjustes] = useState(false);
+
+  const cargar = useCallback(async () => {
+    const [saltosRes, microRes, umbralGuardado] = await Promise.all([
+      supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null),
+      supabase.from("cmj_microciclos").select("*"),
+      api.config("cmj_umbral"),
+    ]);
+    if (!saltosRes.error) setSaltos(saltosRes.data || []);
+    if (!microRes.error) setMicrociclos(microRes.data || []);
+    setUmbral(umbralGuardado || CMJ_UMBRAL_DEFECTO);
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+
+  const filasParaMotor = useMemo(
+    () =>
+      saltos
+        .filter((s) => playersById.has(s.jugador_id))
+        .map((s) => ({
+          jugadorId: s.jugador_id,
+          nombre: playersById.get(s.jugador_id).name,
+          dateKey: s.fecha,
+          date: s.fecha_hora,
+          peso: s.peso,
+          hp0: s.hp0,
+          altura: s.altura,
+          fuerza: s.fuerza,
+          potencia: s.potencia,
+          velocidad: s.velocidad,
+          kineticsValid: s.kinetics_valid,
+          pesoValid: s.peso_valid,
+          hp0Valid: s.hp0_valid,
+        })),
+    [saltos, playersById]
+  );
+
+  function toggleFiltro(s) {
+    setFiltroEstado((prev) => {
+      const next = new Set(prev);
+      next.has(s) ? next.delete(s) : next.add(s);
+      return next;
+    });
+  }
+  function toggleCard(id) {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+  function toggleMetrica(id) {
+    setExpandedMetrics((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
+
+  if (!playersLoaded || !loaded || !umbral) return <LoadingBlock />;
+
+  const { players: builtPlayers, microList } = cmjBuildPlayers(filasParaMotor, microciclos, umbral.ambarPct, umbral.rojoPct, umbral.individualizar, umbral.protocoloDesde);
+  const current = cmjFindCurrentMicroId(microList);
+
+  const cabecera = (
+    <div style={{ marginBottom: 16 }}>
+      <button onClick={() => setMostrarAjustes((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12, cursor: "pointer", padding: 0, marginBottom: mostrarAjustes ? 10 : 0 }}>
+        {mostrarAjustes ? "▾ ocultar ajustes del umbral" : "▸ ajustes del umbral"}
+      </button>
+      {mostrarAjustes && <CmjAjustesUmbralReal umbral={umbral} onGuardado={setUmbral} />}
+    </div>
+  );
+
+  if (microList.length === 0) {
+    return (
+      <div>
+        {cabecera}
+        <CmjProximamente titulo="Sin microciclos definidos" texto="Ve a la pestaña Microciclos y crea al menos uno (Inicio, MD-2, MD+1) para poder ver el estado semanal." />
+      </div>
+    );
+  }
+  if (current.id == null) {
+    const next = microList[0];
+    return (
+      <div>
+        {cabecera}
+        <CmjProximamente
+          titulo="El primer microciclo programado aún no ha empezado"
+          texto={`Microciclo Nº ${next.numero} · inicio previsto ${next.inicio ? fmtDateShort(next.inicio) : "sin fecha"}. En cuanto se registren tests para esa fecha, aparecerán aquí.`}
+        />
+      </div>
+    );
+  }
+
+  const meta = microList.find((m) => m.id === current.id);
+  const todayKey = cmjDateKeyFromDate(new Date());
+  const todayTag = CMJ_FIELDS.find((f) => meta[f] === todayKey) || null;
+
+  const conHoy = builtPlayers.map((p) => ({ p, hoy: cmjHoyDe(p, todayTag) }));
+
+  const porPosicion = new Map(CMJ_POSICIONES.map((pos) => [pos.key, []]));
+  porPosicion.set(null, []);
+  conHoy.forEach(({ p, hoy }) => {
+    if (!filtroEstado.has(hoy.status)) return;
+    const jugador = playersById.get(p.jugadorId);
+    const pos = jugador?.posicion || null;
+    (porPosicion.has(pos) ? porPosicion.get(pos) : porPosicion.get(null)).push({ p, hoy, jugador });
+  });
+  const totalFiltrados = [...porPosicion.values()].reduce((s, l) => s + l.length, 0);
+
+  return (
+    <div>
+      {cabecera}
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 8 }}>
+          Microciclo Nº {meta.numero} · inicio {meta.inicio ? fmtDateShort(meta.inicio) : "—"} · {todayTag ? `hoy: ${CMJ_TAG_META[todayTag]?.label || "Inicio microciclo"}` : "hoy no hay test programado — última lectura de la semana"}
+        </div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          {["red", "amber", "green", "gray"].map((s) => {
+            const activo = filtroEstado.has(s);
+            const meta2 = CMJ_STATUS_META[s];
+            return (
+              <button
+                key={s}
+                onClick={() => toggleFiltro(s)}
+                style={{
+                  fontSize: 12,
+                  padding: "6px 11px",
+                  borderRadius: dsR.md,
+                  border: `1px solid ${activo ? meta2.color : ds.border}`,
+                  background: activo ? meta2.bg : "transparent",
+                  color: activo ? meta2.color : ds.inkMuted,
+                  cursor: "pointer",
+                  fontWeight: 600,
+                }}
+              >
+                {meta2.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {totalFiltrados === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún jugador coincide con el filtro seleccionado.</div>}
+
+      {[...CMJ_POSICIONES.map((p) => p.key), null].map((posKey) => {
+        const lista = porPosicion.get(posKey) || [];
+        if (lista.length === 0) return null;
+        const label = posKey ? cmjPosicionLabel(posKey) : "Sin posición";
+        return (
+          <div key={posKey ?? "sin"} style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary }}>{label}</span>
+              <span style={{ fontSize: 11, color: ds.inkMuted }}>{lista.length}</span>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {lista
+                .sort((a, b) => a.jugador.name.localeCompare(b.jugador.name))
+                .map(({ p, hoy }) => {
+                  const cardId = p.jugadorId;
+                  const cardOpen = expandedCards.has(cardId);
+                  const statusMeta = CMJ_STATUS_META[hoy.status];
+                  return (
+                    <DsCard key={cardId} style={{ padding: "10px 12px", borderColor: hoy.status !== "gray" ? statusMeta.color + "55" : ds.border }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nombre}</span>
+                        {hoy.nivel && <span style={{ fontSize: 11, color: ds.inkMuted }}>|</span>}
+                        {hoy.nivel && <span style={{ fontSize: 11, fontWeight: 600, color: statusMeta.color }}>{hoy.nivel}</span>}
+                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 13 }}>⚠</span>}
+                        <span style={{ marginLeft: "auto" }}>
+                          <DsBadge tone={hoy.status === "red" ? "danger" : hoy.status === "green" ? "success" : hoy.status === "amber" ? "accent" : "neutral"}>{statusMeta.label}</DsBadge>
+                        </span>
+                      </div>
+
+                      {hoy.rows.length > 0 ? (
+                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                          {hoy.rows.map((row) => {
+                            const mkey = `${cardId}::${row.key}`;
+                            const mOpen = expandedMetrics.has(mkey);
+                            const rowMeta = CMJ_STATUS_META[row.status];
+                            return (
+                              <div key={row.key}>
+                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, cursor: "pointer", padding: "2px 0" }}>
+                                  <span style={{ color: ds.inkSecondary }}>{mOpen ? "▾" : "▸"} {row.label}</span>
+                                  <span style={{ color: rowMeta.color, fontWeight: 600 }}>{cmjSigned(row.delta)}</span>
+                                </div>
+                                {mOpen && <div style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 14px" }}>{row.explicacion}</div>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 6, fontSize: 12, color: ds.inkMuted }}>Sin valores todavía</div>
+                      )}
+
+                      {hoy.motivo && (
+                        <>
+                          <div onClick={() => toggleCard(cardId)} style={{ marginTop: 6, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer" }}>
+                            {cardOpen ? "▾ ocultar recomendación" : "▸ ver recomendación"}
+                          </div>
+                          {cardOpen && <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>{hoy.motivo}</div>}
+                        </>
+                      )}
+                    </DsCard>
+                  );
+                })}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
