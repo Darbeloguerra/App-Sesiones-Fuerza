@@ -2239,15 +2239,31 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "12px 12px",
-        background: ds.surface,
-        border: `1px solid ${suspendido ? `${ds.warning}33` : ds.border}`,
-        borderRadius: dsR.lg,
-        opacity: suspendido ? 0.7 : 1,
+        gap: 12,
+        padding: "13px 15px",
+        background: `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
+        border: `1px solid ${suspendido ? `${ds.warning}40` : ds.borderSoft}`,
+        borderRadius: dsR.xl,
+        boxShadow: `${dsSh.elevation1}, inset 0 1px 0 rgba(255,255,255,0.03)`,
+        opacity: suspendido ? 0.75 : 1,
+        transition: "border-color 140ms ease-out, box-shadow 140ms ease-out",
       }}
     >
-      <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, flexShrink: 0 }} />
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: dsR.full,
+          background: suspendido ? `${ds.warning}1E` : `${ds.success}1E`,
+          border: `1.5px solid ${suspendido ? ds.warning : ds.success}55`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success }} />
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{jugador.name}</span>
@@ -2306,15 +2322,49 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
           )}
         </div>
       </div>
-      <div
+      <button
         onClick={() => setPinVisible((v) => !v)}
-        style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkMuted, cursor: "pointer", minWidth: 50, textAlign: "center" }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontFamily: dsF.mono,
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: ds.inkSecondary,
+          cursor: "pointer",
+          minWidth: 68,
+          justifyContent: "center",
+          background: ds.canvas,
+          border: `1px solid ${ds.border}`,
+          borderRadius: dsR.md,
+          padding: "6px 9px",
+        }}
         title="Mostrar/ocultar PIN"
+        type="button"
       >
         {pinVisible ? jugador.pin : "••••"}
-      </div>
+        {pinVisible ? <EyeOff size={12} /> : <Eye size={12} />}
+      </button>
       <div style={{ position: "relative" }}>
-        <button onClick={() => setMenuAbierto((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", padding: "2px 6px" }}>
+        <button
+          onClick={() => setMenuAbierto((v) => !v)}
+          style={{
+            width: 30,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: menuAbierto ? ds.surfaceRaised : "transparent",
+            border: `1px solid ${menuAbierto ? ds.borderMuted : "transparent"}`,
+            borderRadius: dsR.md,
+            color: ds.inkMuted,
+            fontSize: 18,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+          type="button"
+        >
           ⋮
         </button>
         {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
@@ -3286,6 +3336,12 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 // Cada punto es un registro con carga válida; se traza una línea recta entre
 // ellos en el orden de las fechas.
 function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
+  // Id único por instancia: puede haber varias de estas gráficas montadas a
+  // la vez en la misma pantalla (una por tarea), y los <defs> de SVG son
+  // globales al documento — sin esto, dos gráficas compartirían el mismo
+  // degradado y una de las dos se vería mal.
+  const [gradId] = useState(() => `gpc-${Math.random().toString(36).slice(2, 9)}`);
+
   if (puntos.length < 2) {
     return (
       <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
@@ -3293,39 +3349,47 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
       </div>
     );
   }
-  const width = 320;
-  const height = 170;
-  const padX = 34;
-  const padY = 20;
+  const width = 640;
+  const height = 210;
+  const padX = 6;
+  const padTop = 34;
+  const padBottom = 30;
   const valores = puntos.map((p) => p.valor);
   const minV = Math.min(...valores);
   const maxV = Math.max(...valores);
   const rango = maxV - minV || 1;
-  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const stepX = puntos.length > 1 ? (width - padX * 2) / (puntos.length - 1) : 0;
   const coordX = (i) => padX + i * stepX;
-  const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
+  const coordY = (v) => height - padBottom - ((v - minV) / rango) * (height - padTop - padBottom);
   const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${coordX(puntos.length - 1).toFixed(1)} ${height - padBottom} L ${coordX(0).toFixed(1)} ${height - padBottom} Z`;
+  const primero = puntos[0];
+  const ultimo = puntos[puntos.length - 1];
+  // Sin ejes ni cuadrícula — minimalista, al estilo de referencia: el valor
+  // inicial y el final se leen pegados a su propio punto de la línea, no en
+  // una columna de ejes aparte.
+  const yUltimo = coordY(ultimo.valor);
+  const yPrimero = coordY(primero.valor);
+  const labelUltimoArriba = yUltimo < height / 2;
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
-        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>
-          {maxV}
-        </text>
-        <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>
-          {minV}
-        </text>
-        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2} />
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ds.accent} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={ds.accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
         {puntos.map((p, i) => (
-          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={ds.accent} />
+          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
         ))}
-        <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>
-          {fmtDateShort(puntos[0].date)}
-        </text>
-        <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">
-          {fmtDateShort(puntos[puntos.length - 1].date)}
-        </text>
+        <text x={coordX(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.valor}{unidad}</text>
+        <text x={coordX(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.valor}{unidad}</text>
+        <text x={coordX(0)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{fmtDateShort(primero.date)}</text>
+        <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {[...puntos].reverse().map((p, i) => (
@@ -3925,6 +3989,19 @@ function MiProgresoJugadorReal({ items, loaded }) {
         .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
     : [];
 
+  // Cabecera de número grande: valor más reciente + variación desde el
+  // primer registro visible, en semanas — mismo criterio de jerarquía por
+  // tamaño (WHOOP) que el resto de la app: el dato que más importa se lee
+  // antes que ningún otro elemento de la pantalla.
+  let cabeceraProgreso = null;
+  if (puntos.length >= 2) {
+    const primero = puntos[0];
+    const ultimo = puntos[puntos.length - 1];
+    const deltaValor = ultimo.valor - primero.valor;
+    const semanas = Math.max(1, Math.round((new Date(ultimo.date) - new Date(primero.date)) / (7 * 86400000)));
+    cabeceraProgreso = { valor: ultimo.valor, deltaValor, semanas };
+  }
+
   return (
     <div>
       <DsCard style={{ padding: "14px 16px", marginBottom: 16 }}>
@@ -3933,18 +4010,32 @@ function MiProgresoJugadorReal({ items, loaded }) {
           {fechasCompletadas.size} {fechasCompletadas.size === 1 ? "sesión completada" : "sesiones completadas"}
         </div>
       </DsCard>
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
-        <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)}>
-          {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
-          {combinaciones.map((c) => (
-            <option key={c.clave} value={c.clave}>
-              {c.etiqueta}
-            </option>
-          ))}
-        </DsSelect>
-      </label>
-      <GraficaProgresoCargaReal puntos={puntos} />
+
+      <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6, letterSpacing: "0.05em" }}>PROGRESO POR EJERCICIO</div>
+      <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)} style={{ marginBottom: 14 }}>
+        {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
+        {combinaciones.map((c) => (
+          <option key={c.clave} value={c.clave}>
+            {c.etiqueta}
+          </option>
+        ))}
+      </DsSelect>
+
+      <DsCard style={{ padding: "16px 18px" }}>
+        {cabeceraProgreso && (
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontFamily: dsF.display, fontSize: 34, fontWeight: 800, color: ds.ink, lineHeight: 1 }}>
+              {cabeceraProgreso.valor}<span style={{ fontSize: 18, fontWeight: 700, color: ds.inkSecondary }}>kg</span>
+            </span>
+            {cabeceraProgreso.deltaValor !== 0 && (
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: cabeceraProgreso.deltaValor > 0 ? ds.success : ds.danger, marginLeft: "auto" }}>
+                {cabeceraProgreso.deltaValor > 0 ? "+" : ""}{cabeceraProgreso.deltaValor}kg en {cabeceraProgreso.semanas} {cabeceraProgreso.semanas === 1 ? "semana" : "semanas"}
+              </span>
+            )}
+          </div>
+        )}
+        <GraficaProgresoCargaReal puntos={puntos} />
+      </DsCard>
     </div>
   );
 }
@@ -4314,40 +4405,48 @@ function HistorialPorTarea({ players }) {
 }
 
 // Gráfico de progresión de carga con SVG plano — sin añadir ninguna
-// librería nueva al proyecto (ni recharts, ni chart.js).
+// librería nueva al proyecto (ni recharts, ni chart.js). Mismo tratamiento
+// minimalista que GraficaProgresoCargaReal (degradado bajo la línea,
+// etiquetas pegadas a los puntos de inicio/fin, sin cuadrícula ni columna
+// de ejes) para que las gráficas del modo entrenador se sientan del mismo
+// sistema que las del jugador — antes era un componente aparte que nunca
+// había recibido ese pase.
 function GraficoProgresionCarga({ puntos }) {
-  const ancho = 560,
-    alto = 220;
-  const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+  const [gradId] = useState(() => `gpc2-${Math.random().toString(36).slice(2, 9)}`);
+  const ancho = 640, alto = 210;
+  const padX = 6, padTop = 34, padBottom = 30;
   const cargas = puntos.map((p) => p.carga);
   const min = Math.min(...cargas);
   const max = Math.max(...cargas);
   const rango = max - min || 1;
-  const anchoUtil = ancho - padding.left - padding.right;
-  const altoUtil = alto - padding.top - padding.bottom;
-  const x = (i) => padding.left + (puntos.length > 1 ? (i / (puntos.length - 1)) * anchoUtil : anchoUtil / 2);
-  const y = (v) => padding.top + altoUtil - ((v - min) / rango) * altoUtil;
-  const puntosSvg = puntos.map((p, i) => `${x(i)},${y(p.carga)}`).join(" ");
+  const x = (i) => padX + (puntos.length > 1 ? (i / (puntos.length - 1)) * (ancho - padX * 2) : (ancho - padX * 2) / 2);
+  const y = (v) => alto - padBottom - ((v - min) / rango) * (alto - padTop - padBottom);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.carga).toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${x(puntos.length - 1).toFixed(1)} ${alto - padBottom} L ${x(0).toFixed(1)} ${alto - padBottom} Z`;
+  const primero = puntos[0];
+  const ultimo = puntos[puntos.length - 1];
+  const yUltimo = y(ultimo.carga);
+  const yPrimero = y(primero.carga);
+  const labelUltimoArriba = yUltimo < alto / 2;
 
   return (
-    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 12 }}>
-      <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <polyline points={puntosSvg} fill="none" stroke={ds.accent} strokeWidth="2" />
+    <DsCard style={{ padding: 14 }}>
+      <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ds.accent} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={ds.accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
         {puntos.map((p, i) => (
-          <circle key={i} cx={x(i)} cy={y(p.carga)} r="3.5" fill={ds.accent} />
+          <circle key={i} cx={x(i)} cy={y(p.carga)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
         ))}
-        <text x={padding.left} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono}>
-          {puntos[0].fecha}
-        </text>
-        <text x={ancho - padding.right} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {puntos[puntos.length - 1].fecha}
-        </text>
-        <text x={padding.left - 6} y={y(max) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {max}kg
-        </text>
-        <text x={padding.left - 6} y={y(min) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {min}kg
-        </text>
+        <text x={x(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.carga}kg</text>
+        <text x={x(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.carga}kg</text>
+        <text x={x(0)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{primero.fecha}</text>
+        <text x={x(puntos.length - 1)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{ultimo.fecha}</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {puntos
@@ -4363,7 +4462,7 @@ function GraficoProgresionCarga({ puntos }) {
             </div>
           ))}
       </div>
-    </div>
+    </DsCard>
   );
 }
 
@@ -10161,8 +10260,6 @@ function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
   return (
     <div>
       <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
-        <line x1={padX} y1={coordY(minV + rango / 2)} x2={width - padX} y2={coordY(minV + rango / 2)} stroke={ds.borderSoft} strokeWidth={1} strokeDasharray="3 4" />
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
         <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{maxV.toFixed(decimalesEje)}</text>
         <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{minV.toFixed(decimalesEje)}</text>
         {series.map((s) => {
@@ -10522,7 +10619,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
 
   if (!actual) {
     return (
-      <PantallaBase rol="entrenador" maxWidth={640}>
+      <PantallaBase rol="entrenador" maxWidth={900}>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -10535,7 +10632,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
   }
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={640}>
+    <PantallaBase rol="entrenador" maxWidth={900}>
       <div>
         <button
           onClick={onBack}
