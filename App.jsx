@@ -4477,7 +4477,7 @@ function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
           {vista === "subir" && <CmjSubirCsvReal />}
           {vista === "estado" && <CmjEstadoActualReal />}
           {vista === "microciclos" && <CmjMicrociclosReal />}
-          {vista === "ranking" && <CmjProximamente titulo="Ranking" texto="El ranking histórico por jugador llega al final de este módulo, cuando el resto ya esté funcionando." />}
+          {vista === "ranking" && <CmjRankingReal />}
         </div>
       </div>
     </PantallaEntrenadorAncha>
@@ -4932,6 +4932,269 @@ function CmjEstadoActualReal() {
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Ranking histórico: la mejor marca de cada jugador en la variable y el
+// periodo elegidos (histórico completo, un microciclo concreto o un rango
+// de fechas), filtrable por momento del test (Inicio/MD-2/MD+1/sin
+// etiqueta) y por posición — igual que en el panel independiente. Los
+// umbrales de alerta no influyen aquí (el ranking no evalúa fatiga, solo
+// compara marcas), así que se usa cmjBuildPlayers con el umbral por
+// defecto solo para reutilizar el mismo agrupado por jugador y microciclo.
+function CmjRankingReal() {
+  const [players, , playersLoaded] = usePlayers();
+  const [saltos, setSaltos] = useState([]);
+  const [microciclos, setMicrociclos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [metricKey, setMetricKey] = useState("altura");
+  const [periodo, setPeriodo] = useState("historico"); // 'historico' | 'microciclo' | 'rango'
+  const [microSel, setMicroSel] = useState(null);
+  const [rango, setRango] = useState({ start: "", end: "" });
+  const [filtroTags, setFiltroTags] = useState(() => new Set(["inicio", "md2", "md1", "sin"]));
+  const [filtroPosicion, setFiltroPosicion] = useState(() => new Set([...CMJ_POSICIONES.map((p) => p.key), "sin"]));
+  const [mostrarFiltros, setMostrarFiltros] = useState(false);
+
+  const cargar = useCallback(async () => {
+    const [saltosRes, microRes] = await Promise.all([
+      supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null),
+      supabase.from("cmj_microciclos").select("*"),
+    ]);
+    if (!saltosRes.error) setSaltos(saltosRes.data || []);
+    if (!microRes.error) setMicrociclos(microRes.data || []);
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+
+  const filasParaMotor = useMemo(
+    () =>
+      saltos
+        .filter((s) => playersById.has(s.jugador_id))
+        .map((s) => ({
+          jugadorId: s.jugador_id,
+          nombre: playersById.get(s.jugador_id).name,
+          dateKey: s.fecha,
+          date: s.fecha_hora,
+          peso: s.peso,
+          hp0: s.hp0,
+          altura: s.altura,
+          fuerza: s.fuerza,
+          potencia: s.potencia,
+          velocidad: s.velocidad,
+          kineticsValid: s.kinetics_valid,
+          pesoValid: s.peso_valid,
+          hp0Valid: s.hp0_valid,
+        })),
+    [saltos, playersById]
+  );
+
+  function toggleTag(k) {
+    setFiltroTags((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+  function toggleFiltroPosicion(k) {
+    setFiltroPosicion((prev) => {
+      const next = new Set(prev);
+      next.has(k) ? next.delete(k) : next.add(k);
+      return next;
+    });
+  }
+
+  if (!playersLoaded || !loaded) return <LoadingBlock />;
+
+  const { players: builtPlayers, microList } = cmjBuildPlayers(
+    filasParaMotor,
+    microciclos,
+    CMJ_UMBRAL_DEFECTO.ambarPct,
+    CMJ_UMBRAL_DEFECTO.rojoPct,
+    CMJ_UMBRAL_DEFECTO.individualizar,
+    CMJ_UMBRAL_DEFECTO.protocoloDesde
+  );
+
+  const microSelActivo = microSel ?? (microList.length ? microList[microList.length - 1].id : null);
+  const metric = CMJ_METRICS[metricKey];
+
+  const candidatosDe = (p) => {
+    if (periodo === "microciclo") {
+      const m = p.microResults.get(microSelActivo);
+      if (!m) return [];
+      return CMJ_FIELDS.filter((k) => m[k] && filtroTags.has(k)).map((k) => m[k]);
+    }
+    const dentroDeRango = (r) => {
+      if (periodo !== "rango" || !rango.start || !rango.end) return periodo !== "rango";
+      const t = new Date(r.date).getTime();
+      return t >= new Date(rango.start).getTime() && t <= new Date(rango.end + "T23:59:59").getTime();
+    };
+    return p.sorted.filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r));
+  };
+
+  const filaDe = (p) => {
+    const candidatos = candidatosDe(p).map((r) => ({ r, v: metric.get(r) })).filter((c) => c.v != null);
+    if (candidatos.length === 0) return null;
+    const mejor = candidatos.reduce((a, b) => (b.v > a.v ? b : a));
+    return { player: p, valor: mejor.v, fecha: mejor.r.date, tag: mejor.r.tag };
+  };
+
+  const posicionDe = (p) => playersById.get(p.jugadorId)?.posicion || "sin";
+
+  const filas = builtPlayers
+    .filter((p) => filtroPosicion.has(posicionDe(p)))
+    .map(filaDe)
+    .filter(Boolean)
+    .sort((a, b) => b.valor - a.valor);
+
+  const sinDatos = builtPlayers.filter((p) => filtroPosicion.has(posicionDe(p)) && !filaDe(p));
+
+  const RANK_COLOR = { 0: ds.accent, 1: ds.inkSecondary, 2: ds.chart1 };
+  const RANK_BG = { 0: `${ds.accent}1A`, 1: `${ds.inkSecondary}14`, 2: `${ds.chart1}14` };
+  const esReciente = (fecha) => (Date.now() - new Date(fecha).getTime()) / 86400000 <= 14;
+
+  const opcionesMomento = [
+    { key: "inicio", label: "Inicio", color: CMJ_TAG_META.inicio.color },
+    { key: "md2", label: "MD-2", color: CMJ_TAG_META.md2.color },
+    { key: "md1", label: "MD+1", color: CMJ_TAG_META.md1.color },
+    { key: "sin", label: "Sin etiqueta", color: ds.inkMuted },
+  ];
+  const opcionesPosicion = [...CMJ_POSICIONES.map((p) => ({ key: p.key, label: p.label })), { key: "sin", label: "Sin posición" }];
+
+  return (
+    <div>
+      <div style={{ marginBottom: 12 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Mejor marca por jugador</div>
+        <div style={{ fontSize: 12, color: ds.inkMuted, lineHeight: 1.5 }}>
+          Mejor valor de cada jugador en la variable y el periodo elegidos. El podio (1º-3º) se resalta, y "▲ reciente" indica una marca de los últimos 14 días.
+        </div>
+      </div>
+
+      <button onClick={() => setMostrarFiltros((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12, cursor: "pointer", padding: 0, marginBottom: mostrarFiltros ? 12 : 16 }}>
+        {mostrarFiltros ? "▾ ocultar filtros" : "▸ filtros"}
+      </button>
+
+      {mostrarFiltros && (
+        <DsCard style={{ padding: 14, marginBottom: 16, display: "flex", flexDirection: "column", gap: 14 }}>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variable</div>
+            <DsTabSwitcher tabs={CMJ_METRIC_LIST.map((m) => ({ id: m.key, label: m.label }))} active={metricKey} onChange={setMetricKey} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Periodo</div>
+            <DsTabSwitcher
+              tabs={[
+                { id: "historico", label: "Histórico completo" },
+                { id: "microciclo", label: "Microciclo concreto" },
+                { id: "rango", label: "Rango de fechas" },
+              ]}
+              active={periodo}
+              onChange={setPeriodo}
+            />
+          </div>
+
+          {periodo === "microciclo" && (
+            microList.length > 0 ? (
+              <div>
+                <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Microciclo</div>
+                <DsSelect value={microSelActivo || ""} onChange={(e) => setMicroSel(e.target.value)} style={{ maxWidth: 220 }}>
+                  {microList.map((m) => (
+                    <option key={m.id} value={m.id}>Nº {m.numero}</option>
+                  ))}
+                </DsSelect>
+              </div>
+            ) : (
+              <div style={{ fontSize: 12, color: ds.inkMuted }}>Todavía no hay ningún microciclo registrado.</div>
+            )
+          )}
+
+          {periodo === "rango" && (
+            <div>
+              <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Fechas</div>
+              <div style={{ display: "flex", gap: 12 }}>
+                <DsInput type="date" value={rango.start} onChange={(e) => setRango({ ...rango, start: e.target.value })} />
+                <DsInput type="date" value={rango.end} onChange={(e) => setRango({ ...rango, end: e.target.value })} />
+              </div>
+            </div>
+          )}
+
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Momento</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {opcionesMomento.map((op) => {
+                const activo = filtroTags.has(op.key);
+                return (
+                  <button
+                    key={op.key}
+                    onClick={() => toggleTag(op.key)}
+                    style={{ fontSize: 12, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${activo ? op.color : ds.border}`, background: activo ? `${op.color}1E` : "transparent", color: activo ? op.color : ds.inkMuted, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    {op.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Posición</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {opcionesPosicion.map((op) => {
+                const activo = filtroPosicion.has(op.key);
+                return (
+                  <button
+                    key={op.key}
+                    onClick={() => toggleFiltroPosicion(op.key)}
+                    style={{ fontSize: 12, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: activo ? ds.accent : ds.inkMuted, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    {op.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </DsCard>
+      )}
+
+      {filas.length === 0 ? (
+        <CmjProximamente titulo="Sin datos para este filtro" texto="Prueba a ampliar el momento, la posición o el periodo seleccionados." />
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {filas.map((f, i) => {
+            const jugador = playersById.get(f.player.jugadorId);
+            const posLabel = jugador?.posicion ? cmjPosicionLabel(jugador.posicion) : "—";
+            return (
+              <DsCard
+                key={f.player.jugadorId}
+                style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 12px", flexWrap: "wrap", background: RANK_BG[i] || undefined, borderLeft: RANK_COLOR[i] ? `3px solid ${RANK_COLOR[i]}` : undefined }}
+              >
+                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: RANK_COLOR[i] || ds.inkMuted, minWidth: 22 }}>{i + 1}</div>
+                <div style={{ minWidth: 140, flex: 1 }}>
+                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{f.player.nombre}</div>
+                  <div style={{ fontSize: 11, color: ds.inkMuted }}>{posLabel}</div>
+                </div>
+                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: CMJ_METRIC_CHART_COLOR[metricKey] }}>
+                  {cmjFmt(f.valor, metric.decimals)} {metric.unit}
+                </div>
+                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 110 }}>
+                  {fmtDateShort(f.fecha)}
+                  {esReciente(f.fecha) && <span style={{ marginLeft: 6, color: ds.accent, fontWeight: 600 }}>▲ reciente</span>}
+                </div>
+                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 90 }}>{f.tag ? CMJ_TAG_META[f.tag].label : "—"}</div>
+              </DsCard>
+            );
+          })}
+        </div>
+      )}
+
+      {sinDatos.length > 0 && (
+        <div style={{ marginTop: 14, fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5 }}>
+          Sin marca en este filtro: {sinDatos.map((p) => p.nombre).join(", ")}.
+        </div>
+      )}
     </div>
   );
 }
