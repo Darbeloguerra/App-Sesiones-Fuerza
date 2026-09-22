@@ -34,6 +34,7 @@ const ds = {
   focusRing: "#F0B429",
   chart1: "#B8872B",
   chart2: "#2F8FBF",
+  chart3: "#9B6BC7",
 };
 const dsSp = { 1: 4, 2: 6, 3: 8, 4: 10, 5: 12, 6: 16, 7: 20, 8: 24, 9: 28 };
 const dsR = { sm: 5, md: 8, lg: 10, xl: 14, xxl: 16, full: "50%" };
@@ -83,13 +84,14 @@ function GlobalStyles() {
       .ds-button:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
 
       .ds-card {
-        background: ${ds.surface}; border: 1px solid ${ds.border}; border-radius: ${dsR.lg}px;
-        padding: ${dsSp[5]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
-        box-shadow: ${dsSh.elevation2};
+        background: linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%);
+        border: 1px solid ${ds.borderSoft}; border-radius: ${dsR.xl}px;
+        padding: ${dsSp[6]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
+        box-shadow: ${dsSh.elevation2}, inset 0 1px 0 rgba(255,255,255,0.03);
         transition: box-shadow 160ms ease-out, border-color 160ms ease-out, transform 160ms ease-out;
       }
       .ds-card--interactive { cursor: pointer; }
-      .ds-card--interactive:hover { box-shadow: ${dsSh.elevation3}; border-color: ${ds.borderMuted}; transform: translateY(-1px); }
+      .ds-card--interactive:hover { box-shadow: ${dsSh.elevation3}, inset 0 1px 0 rgba(255,255,255,0.05); border-color: ${ds.borderMuted}; transform: translateY(-2px); }
       .ds-card--interactive:active { transform: translateY(0) scale(0.995); }
       .ds-card--done { border-color: ${ds.successBorderSubtle}; background: linear-gradient(180deg, ${ds.success}0d, ${ds.surface} 40%); }
       .ds-card--error { border-color: ${ds.dangerBorderSubtle}; }
@@ -158,13 +160,14 @@ function GlobalStyles() {
       .ds-navitem svg { flex-shrink: 0; }
 
       .ds-stattile {
-        background: ${ds.surface}; border: 1px solid ${ds.border}; border-radius: ${dsR.xl}px;
+        background: linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%);
+        border: 1px solid ${ds.borderSoft}; border-radius: ${dsR.xl}px;
         padding: ${dsSp[6]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
-        box-shadow: ${dsSh.elevation2}; transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+        box-shadow: ${dsSh.elevation2}, inset 0 1px 0 rgba(255,255,255,0.03); transition: transform 160ms ease-out, box-shadow 160ms ease-out;
       }
-      .ds-stattile:hover { transform: translateY(-2px); box-shadow: ${dsSh.elevation3}; }
-      .ds-stattile__label { font-family: ${dsF.mono}; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; color: ${ds.inkMuted}; text-transform: uppercase; }
-      .ds-stattile__value { font-family: ${dsF.display}; font-size: 28px; font-weight: 700; color: ${ds.ink}; }
+      .ds-stattile:hover { transform: translateY(-2px); box-shadow: ${dsSh.elevation3}, inset 0 1px 0 rgba(255,255,255,0.05); }
+      .ds-stattile__label { font-family: ${dsF.mono}; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: ${ds.inkMuted}; text-transform: uppercase; }
+      .ds-stattile__value { font-family: ${dsF.display}; font-size: 32px; font-weight: 800; color: ${ds.ink}; line-height: 1.05; }
       .ds-stattile__delta { display: flex; align-items: center; gap: 4px; font-size: 11.5px; }
       .ds-stattile__delta--up { color: ${ds.success}; }
       .ds-stattile__delta--down { color: ${ds.danger}; }
@@ -1839,7 +1842,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (fallosDeConexion && coachPin == null && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10, color: ds.danger }}>No se pudo conectar</div>
@@ -1863,7 +1866,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (coachPin == null && !creatingPin && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Primer acceso</div>
@@ -1882,7 +1885,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320 }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
             ENTRENAMIENTO DE FUERZA
           </div>
           <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700 }}>Crea tu código de entrenador</div>
@@ -1943,7 +1946,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   return screenWrap(
     <div style={{ width: "100%", maxWidth: 320 }}>
       <div style={{ textAlign: "center", marginBottom: 28 }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700 }}>Introduce tu código</div>
@@ -2236,15 +2239,31 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 10,
-        padding: "12px 12px",
-        background: ds.surface,
-        border: `1px solid ${suspendido ? `${ds.warning}33` : ds.border}`,
-        borderRadius: dsR.lg,
-        opacity: suspendido ? 0.7 : 1,
+        gap: 12,
+        padding: "13px 15px",
+        background: `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
+        border: `1px solid ${suspendido ? `${ds.warning}40` : ds.borderSoft}`,
+        borderRadius: dsR.xl,
+        boxShadow: `${dsSh.elevation1}, inset 0 1px 0 rgba(255,255,255,0.03)`,
+        opacity: suspendido ? 0.75 : 1,
+        transition: "border-color 140ms ease-out, box-shadow 140ms ease-out",
       }}
     >
-      <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, flexShrink: 0 }} />
+      <div
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: dsR.full,
+          background: suspendido ? `${ds.warning}1E` : `${ds.success}1E`,
+          border: `1.5px solid ${suspendido ? ds.warning : ds.success}55`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success }} />
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
           <span style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{jugador.name}</span>
@@ -2303,15 +2322,49 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
           )}
         </div>
       </div>
-      <div
+      <button
         onClick={() => setPinVisible((v) => !v)}
-        style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkMuted, cursor: "pointer", minWidth: 50, textAlign: "center" }}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          fontFamily: dsF.mono,
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: ds.inkSecondary,
+          cursor: "pointer",
+          minWidth: 68,
+          justifyContent: "center",
+          background: ds.canvas,
+          border: `1px solid ${ds.border}`,
+          borderRadius: dsR.md,
+          padding: "6px 9px",
+        }}
         title="Mostrar/ocultar PIN"
+        type="button"
       >
         {pinVisible ? jugador.pin : "••••"}
-      </div>
+        {pinVisible ? <EyeOff size={12} /> : <Eye size={12} />}
+      </button>
       <div style={{ position: "relative" }}>
-        <button onClick={() => setMenuAbierto((v) => !v)} style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", padding: "2px 6px" }}>
+        <button
+          onClick={() => setMenuAbierto((v) => !v)}
+          style={{
+            width: 30,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: menuAbierto ? ds.surfaceRaised : "transparent",
+            border: `1px solid ${menuAbierto ? ds.borderMuted : "transparent"}`,
+            borderRadius: dsR.md,
+            color: ds.inkMuted,
+            fontSize: 18,
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+          type="button"
+        >
           ⋮
         </button>
         {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
@@ -2562,7 +2615,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
     <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>USUARIOS</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
             {activos} activos · {suspendidos} suspendidos · {independientes} independientes
@@ -3283,6 +3336,12 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 // Cada punto es un registro con carga válida; se traza una línea recta entre
 // ellos en el orden de las fechas.
 function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
+  // Id único por instancia: puede haber varias de estas gráficas montadas a
+  // la vez en la misma pantalla (una por tarea), y los <defs> de SVG son
+  // globales al documento — sin esto, dos gráficas compartirían el mismo
+  // degradado y una de las dos se vería mal.
+  const [gradId] = useState(() => `gpc-${Math.random().toString(36).slice(2, 9)}`);
+
   if (puntos.length < 2) {
     return (
       <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
@@ -3290,39 +3349,47 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
       </div>
     );
   }
-  const width = 320;
-  const height = 170;
-  const padX = 34;
-  const padY = 20;
+  const width = 640;
+  const height = 210;
+  const padX = 6;
+  const padTop = 34;
+  const padBottom = 30;
   const valores = puntos.map((p) => p.valor);
   const minV = Math.min(...valores);
   const maxV = Math.max(...valores);
   const rango = maxV - minV || 1;
-  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const stepX = puntos.length > 1 ? (width - padX * 2) / (puntos.length - 1) : 0;
   const coordX = (i) => padX + i * stepX;
-  const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
+  const coordY = (v) => height - padBottom - ((v - minV) / rango) * (height - padTop - padBottom);
   const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${coordX(puntos.length - 1).toFixed(1)} ${height - padBottom} L ${coordX(0).toFixed(1)} ${height - padBottom} Z`;
+  const primero = puntos[0];
+  const ultimo = puntos[puntos.length - 1];
+  // Sin ejes ni cuadrícula — minimalista, al estilo de referencia: el valor
+  // inicial y el final se leen pegados a su propio punto de la línea, no en
+  // una columna de ejes aparte.
+  const yUltimo = coordY(ultimo.valor);
+  const yPrimero = coordY(primero.valor);
+  const labelUltimoArriba = yUltimo < height / 2;
 
   return (
     <div>
-      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
-        <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
-        <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>
-          {maxV}
-        </text>
-        <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>
-          {minV}
-        </text>
-        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2} />
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ds.accent} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={ds.accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
         {puntos.map((p, i) => (
-          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={ds.accent} />
+          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
         ))}
-        <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>
-          {fmtDateShort(puntos[0].date)}
-        </text>
-        <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">
-          {fmtDateShort(puntos[puntos.length - 1].date)}
-        </text>
+        <text x={coordX(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.valor}{unidad}</text>
+        <text x={coordX(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.valor}{unidad}</text>
+        <text x={coordX(0)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{fmtDateShort(primero.date)}</text>
+        <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {[...puntos].reverse().map((p, i) => (
@@ -3633,7 +3700,7 @@ const CMJ_METRIC_LIST = Object.values(CMJ_METRICS);
 // Colores de línea por métrica en las gráficas — se usan los tokens de
 // gráfico que ya tiene la app (ds.accent/ds.chart1/ds.chart2), no colores
 // nuevos, para que encaje con el resto del sistema de diseño.
-const CMJ_METRIC_CHART_COLOR = { altura: ds.accent, potenciaRel: ds.chart2, fuerzaRel: ds.chart1, velocidad: ds.inkMuted };
+const CMJ_METRIC_CHART_COLOR = { altura: ds.accent, potenciaRel: ds.chart2, fuerzaRel: ds.chart3, velocidad: ds.inkMuted };
 const CMJ_STATUS_ORDER = { red: 0, amber: 1, green: 2, gray: 3 };
 
 // Filas de métrica (Altura / Potencia relativa / Fuerza relativa) para un
@@ -3922,6 +3989,19 @@ function MiProgresoJugadorReal({ items, loaded }) {
         .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal }))
     : [];
 
+  // Cabecera de número grande: valor más reciente + variación desde el
+  // primer registro visible, en semanas — mismo criterio de jerarquía por
+  // tamaño (WHOOP) que el resto de la app: el dato que más importa se lee
+  // antes que ningún otro elemento de la pantalla.
+  let cabeceraProgreso = null;
+  if (puntos.length >= 2) {
+    const primero = puntos[0];
+    const ultimo = puntos[puntos.length - 1];
+    const deltaValor = ultimo.valor - primero.valor;
+    const semanas = Math.max(1, Math.round((new Date(ultimo.date) - new Date(primero.date)) / (7 * 86400000)));
+    cabeceraProgreso = { valor: ultimo.valor, deltaValor, semanas };
+  }
+
   return (
     <div>
       <DsCard style={{ padding: "14px 16px", marginBottom: 16 }}>
@@ -3930,18 +4010,32 @@ function MiProgresoJugadorReal({ items, loaded }) {
           {fechasCompletadas.size} {fechasCompletadas.size === 1 ? "sesión completada" : "sesiones completadas"}
         </div>
       </DsCard>
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>TAREA (MISMO EJERCICIO, MATERIAL, REPS Y RIR)</span>
-        <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)}>
-          {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
-          {combinaciones.map((c) => (
-            <option key={c.clave} value={c.clave}>
-              {c.etiqueta}
-            </option>
-          ))}
-        </DsSelect>
-      </label>
-      <GraficaProgresoCargaReal puntos={puntos} />
+
+      <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6, letterSpacing: "0.05em" }}>PROGRESO POR EJERCICIO</div>
+      <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)} style={{ marginBottom: 14 }}>
+        {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
+        {combinaciones.map((c) => (
+          <option key={c.clave} value={c.clave}>
+            {c.etiqueta}
+          </option>
+        ))}
+      </DsSelect>
+
+      <DsCard style={{ padding: "16px 18px" }}>
+        {cabeceraProgreso && (
+          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
+            <span style={{ fontFamily: dsF.display, fontSize: 34, fontWeight: 800, color: ds.ink, lineHeight: 1 }}>
+              {cabeceraProgreso.valor}<span style={{ fontSize: 18, fontWeight: 700, color: ds.inkSecondary }}>kg</span>
+            </span>
+            {cabeceraProgreso.deltaValor !== 0 && (
+              <span style={{ fontSize: 12.5, fontWeight: 700, color: cabeceraProgreso.deltaValor > 0 ? ds.success : ds.danger, marginLeft: "auto" }}>
+                {cabeceraProgreso.deltaValor > 0 ? "+" : ""}{cabeceraProgreso.deltaValor}kg en {cabeceraProgreso.semanas} {cabeceraProgreso.semanas === 1 ? "semana" : "semanas"}
+              </span>
+            )}
+          </div>
+        )}
+        <GraficaProgresoCargaReal puntos={puntos} />
+      </DsCard>
     </div>
   );
 }
@@ -4311,40 +4405,48 @@ function HistorialPorTarea({ players }) {
 }
 
 // Gráfico de progresión de carga con SVG plano — sin añadir ninguna
-// librería nueva al proyecto (ni recharts, ni chart.js).
+// librería nueva al proyecto (ni recharts, ni chart.js). Mismo tratamiento
+// minimalista que GraficaProgresoCargaReal (degradado bajo la línea,
+// etiquetas pegadas a los puntos de inicio/fin, sin cuadrícula ni columna
+// de ejes) para que las gráficas del modo entrenador se sientan del mismo
+// sistema que las del jugador — antes era un componente aparte que nunca
+// había recibido ese pase.
 function GraficoProgresionCarga({ puntos }) {
-  const ancho = 560,
-    alto = 220;
-  const padding = { top: 16, right: 16, bottom: 28, left: 44 };
+  const [gradId] = useState(() => `gpc2-${Math.random().toString(36).slice(2, 9)}`);
+  const ancho = 640, alto = 210;
+  const padX = 6, padTop = 34, padBottom = 30;
   const cargas = puntos.map((p) => p.carga);
   const min = Math.min(...cargas);
   const max = Math.max(...cargas);
   const rango = max - min || 1;
-  const anchoUtil = ancho - padding.left - padding.right;
-  const altoUtil = alto - padding.top - padding.bottom;
-  const x = (i) => padding.left + (puntos.length > 1 ? (i / (puntos.length - 1)) * anchoUtil : anchoUtil / 2);
-  const y = (v) => padding.top + altoUtil - ((v - min) / rango) * altoUtil;
-  const puntosSvg = puntos.map((p, i) => `${x(i)},${y(p.carga)}`).join(" ");
+  const x = (i) => padX + (puntos.length > 1 ? (i / (puntos.length - 1)) * (ancho - padX * 2) : (ancho - padX * 2) / 2);
+  const y = (v) => alto - padBottom - ((v - min) / rango) * (alto - padTop - padBottom);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.carga).toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${x(puntos.length - 1).toFixed(1)} ${alto - padBottom} L ${x(0).toFixed(1)} ${alto - padBottom} Z`;
+  const primero = puntos[0];
+  const ultimo = puntos[puntos.length - 1];
+  const yUltimo = y(ultimo.carga);
+  const yPrimero = y(primero.carga);
+  const labelUltimoArriba = yUltimo < alto / 2;
 
   return (
-    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 12 }}>
-      <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: "auto", display: "block" }}>
-        <polyline points={puntosSvg} fill="none" stroke={ds.accent} strokeWidth="2" />
+    <DsCard style={{ padding: 14 }}>
+      <svg viewBox={`0 0 ${ancho} ${alto}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ds.accent} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={ds.accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
         {puntos.map((p, i) => (
-          <circle key={i} cx={x(i)} cy={y(p.carga)} r="3.5" fill={ds.accent} />
+          <circle key={i} cx={x(i)} cy={y(p.carga)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
         ))}
-        <text x={padding.left} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono}>
-          {puntos[0].fecha}
-        </text>
-        <text x={ancho - padding.right} y={alto - 8} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {puntos[puntos.length - 1].fecha}
-        </text>
-        <text x={padding.left - 6} y={y(max) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {max}kg
-        </text>
-        <text x={padding.left - 6} y={y(min) + 4} fill={ds.inkMuted} fontSize="10" fontFamily={dsF.mono} textAnchor="end">
-          {min}kg
-        </text>
+        <text x={x(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.carga}kg</text>
+        <text x={x(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.carga}kg</text>
+        <text x={x(0)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{primero.fecha}</text>
+        <text x={x(puntos.length - 1)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{ultimo.fecha}</text>
       </svg>
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {puntos
@@ -4360,7 +4462,7 @@ function GraficoProgresionCarga({ puntos }) {
             </div>
           ))}
       </div>
-    </div>
+    </DsCard>
   );
 }
 
@@ -4372,7 +4474,7 @@ function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="historial" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>HISTORIAL</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
@@ -4469,7 +4571,7 @@ function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="fatiga" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>CONTROL DE FATIGA</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>CONTROL DE FATIGA</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Salto CMJ</h1>
         </div>
         <DsTabSwitcher tabs={TABS} active={vista} onChange={setVista} />
@@ -4872,12 +4974,12 @@ function CmjEstadoActualReal() {
         if (lista.length === 0) return null;
         const label = posKey ? cmjPosicionLabel(posKey) : "Sin posición";
         return (
-          <div key={posKey ?? "sin"} style={{ marginBottom: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary }}>{label}</span>
-              <span style={{ fontSize: 11, color: ds.inkMuted }}>{lista.length}</span>
+          <div key={posKey ?? "sin"} style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 10, paddingBottom: 6, borderBottom: `1px solid ${ds.borderSoft}` }}>
+              <span style={{ fontSize: 11.5, fontWeight: 700, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+              <span style={{ fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>{lista.length}</span>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
               {lista
                 .sort((a, b) => a.jugador.name.localeCompare(b.jugador.name))
                 .map(({ p, hoy }) => {
@@ -4885,44 +4987,50 @@ function CmjEstadoActualReal() {
                   const cardOpen = expandedCards.has(cardId);
                   const statusMeta = CMJ_STATUS_META[hoy.status];
                   return (
-                    <DsCard key={cardId} style={{ padding: "10px 12px", borderColor: hoy.status !== "gray" ? statusMeta.color + "55" : ds.border }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <span style={{ fontSize: 13.5, fontWeight: 600 }}>{p.nombre}</span>
-                        {hoy.nivel && <span style={{ fontSize: 11, color: ds.inkMuted }}>|</span>}
-                        {hoy.nivel && <span style={{ fontSize: 11, fontWeight: 600, color: statusMeta.color }}>{hoy.nivel}</span>}
-                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 13 }}>⚠</span>}
-                        <span style={{ marginLeft: "auto" }}>
-                          <DsBadge tone={hoy.status === "red" ? "danger" : hoy.status === "green" ? "success" : hoy.status === "amber" ? "accent" : "neutral"}>{statusMeta.label}</DsBadge>
-                        </span>
+                    <DsCard
+                      key={cardId}
+                      style={{
+                        padding: "11px 13px",
+                        gap: 6,
+                        background: hoy.status !== "gray" ? `linear-gradient(180deg, ${statusMeta.color}18 0%, ${ds.surface} 65%)` : undefined,
+                        borderColor: hoy.status !== "gray" ? statusMeta.color + "55" : ds.borderSoft,
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{p.nombre}</span>
+                        {hoy.nivel && <span style={{ fontSize: 10.5, color: ds.inkMuted }}>|</span>}
+                        {hoy.nivel && <span style={{ fontSize: 10.5, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase" }}>{hoy.nivel}</span>}
+                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 12 }}>⚠</span>}
+                        <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase", letterSpacing: "0.03em" }}>{statusMeta.label}</span>
                       </div>
 
                       {hoy.rows.length > 0 ? (
-                        <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 4 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                           {hoy.rows.map((row) => {
                             const mkey = `${cardId}::${row.key}`;
                             const mOpen = expandedMetrics.has(mkey);
                             const rowMeta = CMJ_STATUS_META[row.status];
                             return (
                               <div key={row.key}>
-                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, cursor: "pointer", padding: "2px 0" }}>
-                                  <span style={{ color: ds.inkSecondary }}>{mOpen ? "▾" : "▸"} {row.label}</span>
-                                  <span style={{ color: rowMeta.color, fontWeight: 600 }}>{cmjSigned(row.delta)}</span>
+                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
+                                  <span style={{ color: ds.inkSecondary }}>› {row.label}</span>
+                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono }}>{cmjSigned(row.delta)}</span>
                                 </div>
-                                {mOpen && <div style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 14px" }}>{row.explicacion}</div>}
+                                {mOpen && <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 12px" }}>{row.explicacion}</div>}
                               </div>
                             );
                           })}
                         </div>
                       ) : (
-                        <div style={{ marginTop: 6, fontSize: 12, color: ds.inkMuted }}>Sin valores todavía</div>
+                        <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Sin valores todavía</div>
                       )}
 
                       {hoy.motivo && (
                         <>
-                          <div onClick={() => toggleCard(cardId)} style={{ marginTop: 6, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer" }}>
-                            {cardOpen ? "▾ ocultar recomendación" : "▸ ver recomendación"}
+                          <div onClick={() => toggleCard(cardId)} style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer" }}>
+                            {cardOpen ? "▾ ocultar recomendación" : "› ver recomendación"}
                           </div>
-                          {cardOpen && <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.5 }}>{hoy.motivo}</div>}
+                          {cardOpen && <div style={{ fontSize: 11.5, lineHeight: 1.5, color: ds.inkSecondary }}>{hoy.motivo}</div>}
                         </>
                       )}
                     </DsCard>
@@ -5162,32 +5270,47 @@ function CmjRankingReal() {
       {filas.length === 0 ? (
         <CmjProximamente titulo="Sin datos para este filtro" texto="Prueba a ampliar el momento, la posición o el periodo seleccionados." />
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {filas.map((f, i) => {
-            const jugador = playersById.get(f.player.jugadorId);
-            const posLabel = jugador?.posicion ? cmjPosicionLabel(jugador.posicion) : "—";
-            return (
-              <DsCard
-                key={f.player.jugadorId}
-                style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 12px", flexWrap: "wrap", background: RANK_BG[i] || undefined, borderLeft: RANK_COLOR[i] ? `3px solid ${RANK_COLOR[i]}` : undefined }}
-              >
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: RANK_COLOR[i] || ds.inkMuted, minWidth: 22 }}>{i + 1}</div>
-                <div style={{ minWidth: 140, flex: 1 }}>
-                  <div style={{ fontSize: 13.5, fontWeight: 600 }}>{f.player.nombre}</div>
-                  <div style={{ fontSize: 11, color: ds.inkMuted }}>{posLabel}</div>
-                </div>
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 14, color: CMJ_METRIC_CHART_COLOR[metricKey] }}>
-                  {cmjFmt(f.valor, metric.decimals)} {metric.unit}
-                </div>
-                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 110 }}>
-                  {fmtDateShort(f.fecha)}
-                  {esReciente(f.fecha) && <span style={{ marginLeft: 6, color: ds.accent, fontWeight: 600 }}>▲ reciente</span>}
-                </div>
-                <div style={{ fontSize: 11.5, color: ds.inkMuted, minWidth: 90 }}>{f.tag ? CMJ_TAG_META[f.tag].label : "—"}</div>
-              </DsCard>
-            );
-          })}
-        </div>
+        <DsCard style={{ padding: 0, overflow: "hidden" }}>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 560 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "48px 1fr 130px 130px 110px 100px", padding: "12px 16px", borderBottom: `1px solid ${ds.border}` }}>
+                {["Nº", "Jugador", "Posición", metric.label.toUpperCase(), "Fecha", "Momento"].map((h, hi) => (
+                  <div key={h} style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", textAlign: hi >= 3 ? "right" : "left" }}>{h}</div>
+                ))}
+              </div>
+              {filas.map((f, i) => {
+                const jugador = playersById.get(f.player.jugadorId);
+                const posLabel = jugador?.posicion ? cmjPosicionLabel(jugador.posicion) : "—";
+                return (
+                  <div
+                    key={f.player.jugadorId}
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns: "48px 1fr 130px 130px 110px 100px",
+                      padding: "11px 16px",
+                      alignItems: "center",
+                      borderBottom: `1px solid ${ds.borderSoft}`,
+                      borderLeft: RANK_COLOR[i] ? `3px solid ${RANK_COLOR[i]}` : "3px solid transparent",
+                      background: RANK_BG[i] || (i % 2 === 1 ? ds.bgElevated + "40" : "transparent"),
+                    }}
+                  >
+                    <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13.5, color: RANK_COLOR[i] || ds.inkMuted }}>{i + 1}</div>
+                    <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", paddingRight: 8 }}>{f.player.nombre}</div>
+                    <div style={{ fontSize: 12, color: ds.inkSecondary }}>{posLabel}</div>
+                    <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13.5, color: CMJ_METRIC_CHART_COLOR[metricKey], textAlign: "right" }}>
+                      {cmjFmt(f.valor, metric.decimals)} {metric.unit}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted, textAlign: "right" }}>
+                      {fmtDateShort(f.fecha)}
+                      {esReciente(f.fecha) && <span style={{ display: "block", color: ds.success, fontWeight: 600, fontSize: 10.5 }}>▲ reciente</span>}
+                    </div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted, textAlign: "right" }}>{f.tag ? CMJ_TAG_META[f.tag].label : "—"}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </DsCard>
       )}
 
       {sinDatos.length > 0 && (
@@ -5753,7 +5876,7 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="programacion" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>PROGRAMACIÓN</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>PROGRAMACIÓN</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
         </div>
@@ -6355,7 +6478,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             ← Volver al dashboard
           </button>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIONES DE HOY</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>SESIONES DE HOY</div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
             <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)} · elige cuál trabajar ahora</div>
           </div>
@@ -6715,7 +6838,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         <div>
           <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.accent, marginBottom: 4, textTransform: "uppercase" }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>
                 HOY · {fmtDateLabel(date).toUpperCase()}
               </div>
               <h1 style={{ fontFamily: dsF.display, fontSize: 23, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Hola, {player.name}</h1>
@@ -6951,7 +7074,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </button>
         )}
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>
             HOY · {fmtDateLabel(date).toUpperCase()}
           </div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>Sesión de hoy</h1>
@@ -7579,7 +7702,7 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
       <div>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>BIBLIOTECA</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>BIBLIOTECA</div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ejercicios</h1>
             <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{ejercicios.length} ejercicios creados</div>
           </div>
@@ -9067,7 +9190,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
@@ -9726,7 +9849,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE DE LA DINÁMICA</span>
@@ -10107,64 +10230,98 @@ function ResumenFichaJugadorReal({ jugador }) {
 }
 
 // Extiende el patrón de gráfica SVG de GraficaProgresoCargaReal (línea +
-// puntos, sin librería externa) a cualquier variable del motor CMJ, con su
-// propio color y decimales — misma estética que ya usa el resto de la app,
-// en vez de traer recharts (que usaba el panel original y que aquí no es
-// una dependencia).
-function CmjGraficaEvolucionReal({ puntos, color, decimales = 1 }) {
-  if (puntos.length < 2) {
+// puntos, sin librería externa) a varias variables del motor CMJ
+// SUPERPUESTAS en la misma gráfica (una línea de color por variable, con
+// leyenda debajo) — sin traer recharts (que usaba el panel original y que
+// aquí no es una dependencia). Todas las series comparten el mismo eje X
+// (mismos registros) y el mismo eje Y, igual que hacía el panel original en
+// su vista "valores reales".
+function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
+  const nPuntos = series[0]?.puntos.length || 0;
+  if (nPuntos < 2) {
     return (
       <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
-        {puntos.length === 0 ? "Sin registros para esta variable en este filtro." : "Hace falta al menos 2 registros para trazar la evolución."}
+        {nPuntos === 0 ? "Sin registros para esta selección de variables en este filtro." : "Hace falta al menos 2 registros para trazar la evolución."}
       </div>
     );
   }
-  const width = 320;
-  const height = 170;
-  const padX = 34;
+  const width = 640;
+  const height = 200;
+  const padX = 36;
   const padY = 20;
-  const valores = puntos.map((p) => p.valor);
-  const minV = Math.min(...valores);
-  const maxV = Math.max(...valores);
+  const allValores = series.flatMap((s) => s.puntos.map((p) => p.valorMostrado));
+  const minV = Math.min(...allValores);
+  const maxV = Math.max(...allValores);
   const rango = maxV - minV || 1;
-  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const stepX = (width - padX * 2) / (nPuntos - 1);
   const coordX = (i) => padX + i * stepX;
   const coordY = (v) => height - padY - ((v - minV) / rango) * (height - padY * 2);
-  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 170, display: "block" }}>
-      <line x1={padX} y1={height - padY} x2={width - padX} y2={height - padY} stroke={ds.border} strokeWidth={1} />
-      <text x={2} y={coordY(maxV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(maxV, decimales)}</text>
-      <text x={2} y={coordY(minV) + 3} fontSize="9" fill={ds.inkMuted}>{cmjFmt(minV, decimales)}</text>
-      <path d={pathD} fill="none" stroke={color} strokeWidth={2} />
-      {puntos.map((p, i) => (
-        <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={3} fill={color} />
-      ))}
-      <text x={padX} y={height - 5} fontSize="9" fill={ds.inkMuted}>{fmtDateShort(puntos[0].date)}</text>
-      <text x={width - padX} y={height - 5} fontSize="9" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(puntos[puntos.length - 1].date)}</text>
-    </svg>
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
+        {series.map((s) => {
+          const pathD = s.puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valorMostrado).toFixed(1)}`).join(" ");
+          return (
+            <g key={s.key}>
+              <path d={pathD} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+              {s.puntos.map((p, i) => (
+                <circle key={i} cx={coordX(i)} cy={coordY(p.valorMostrado)} r={i === s.puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={s.color} strokeWidth={2} />
+              ))}
+            </g>
+          );
+        })}
+        <text x={4} y={coordY(maxV) + 3} fontSize="9.5" fill={ds.inkMuted}>{maxV.toFixed(decimalesEje)}</text>
+        <text x={4} y={coordY(minV) + 3} fontSize="9.5" fill={ds.inkMuted}>{minV.toFixed(decimalesEje)}</text>
+        <text x={padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted}>{fmtDateShort(series[0].puntos[0].date)}</text>
+        <text x={width - padX} y={height - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(series[0].puntos[nPuntos - 1].date)}</text>
+      </svg>
+      <div style={{ display: "flex", gap: 16, flexWrap: "wrap", justifyContent: "center", marginTop: 10 }}>
+        {series.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11.5, color: ds.inkSecondary, fontWeight: 600 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />
+            {s.label}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
-// Pestaña "CMJ" de la ficha de jugador: evolución de una variable a la vez
-// (Altura/Potencia relativa/Fuerza relativa/Velocidad), en temporada
-// completa, un rango de fechas o un microciclo concreto, con el mismo
-// filtro de Momento que Ranking. Cada registro muestra además el % de
-// cambio frente a su referencia (MD-2/MD+1 vs el Inicio de esa semana; un
-// Inicio vs el Inicio anterior) — igual criterio que usaba el panel
-// original. A diferencia de Ranking (que compara jugadores entre sí), aquí
-// solo se cargan los saltos de ESTE jugador, ya vinculados a su jugadorId.
+// Pestaña "CMJ" de la ficha de jugador: evolución de hasta 4 variables
+// SUPERPUESTAS en la misma gráfica (Altura/Potencia relativa/Fuerza
+// relativa/Velocidad), con vista "Valores reales" o "% respecto a su
+// media" (para comparar variables de unidades distintas en el mismo eje),
+// en temporada completa, un rango de fechas o un microciclo concreto, con
+// el mismo filtro de Momento que Ranking. La tabla de registros muestra
+// además el % de cambio frente a su referencia (MD-2/MD+1 vs el Inicio de
+// esa semana; un Inicio vs el Inicio anterior) — igual criterio que usaba
+// el panel original. A diferencia de Ranking (que compara jugadores entre
+// sí), aquí solo se cargan los saltos de ESTE jugador, ya vinculados a su
+// jugadorId.
 function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   const [saltos, setSaltos] = useState([]);
   const [microciclos, setMicrociclos] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [metricKey, setMetricKey] = useState("altura");
+  const [metricKeys, setMetricKeys] = useState(() => new Set(["altura", "potenciaRel", "fuerzaRel"]));
+  const [modoValores, setModoValores] = useState("reales"); // 'reales' | 'pct'
   const [periodo, setPeriodo] = useState("temporada"); // 'temporada' | 'rango' | 'microciclo'
   const [rango, setRango] = useState({ start: "", end: "" });
   const [microSel, setMicroSel] = useState(null);
   const [filtroTags, setFiltroTags] = useState(() => new Set(["inicio", "md2", "md1", "sin"]));
   const [mostrarFiltros, setMostrarFiltros] = useState(false);
+
+  function toggleMetric(k) {
+    setMetricKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(k)) {
+        if (next.size > 1) next.delete(k); // siempre queda al menos una variable seleccionada
+      } else {
+        next.add(k);
+      }
+      return next;
+    });
+  }
 
   const cargar = useCallback(async () => {
     const [saltosRes, microRes] = await Promise.all([
@@ -10218,7 +10375,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
     return <CmjProximamente titulo="Sin tests CMJ todavía" texto="En cuanto subas un CSV con saltos de este jugador y queden vinculados a él (pestaña Subir CSV, dentro de Control de fatiga), aparecerán aquí." />;
   }
 
-  const metric = CMJ_METRICS[metricKey];
+  const metricasSel = CMJ_METRIC_LIST.filter((m) => metricKeys.has(m.key));
   const microRows = microList.map((m) => ({ m, r: player.microResults.get(m.id) })).filter(({ r }) => r);
   const microSelActivo = microSel ?? (microRows.length ? microRows[microRows.length - 1].m.id : null);
 
@@ -10228,42 +10385,55 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
     return t >= new Date(rango.start).getTime() && t <= new Date(rango.end + "T23:59:59").getTime();
   };
 
-  let puntos = [];
+  // Registros base del periodo/filtro elegido (sin reducir todavía a una
+  // variable) — a diferencia de antes, aquí se parte de los registros
+  // crudos para poder superponer varias variables en la misma gráfica.
+  let registrosBase = [];
   if (periodo === "microciclo") {
     const sel = microRows.find(({ m }) => m.id === microSelActivo);
-    if (sel) {
-      puntos = CMJ_FIELDS.filter((k) => sel.r[k])
-        .map((k) => sel.r[k])
-        .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
-        .filter((p) => p.valor != null);
-    }
+    if (sel) registrosBase = CMJ_FIELDS.filter((k) => sel.r[k]).map((k) => sel.r[k]);
   } else {
-    puntos = player.sorted
-      .filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r))
-      .map((r) => ({ date: r.date, valor: metric.get(r), tag: r.tag, microId: r.microId }))
-      .filter((p) => p.valor != null);
+    registrosBase = player.sorted.filter((r) => filtroTags.has(r.tag || "sin") && dentroDeRango(r));
   }
+  // Solo entran a la gráfica y a la tabla los registros que tienen valor en
+  // TODAS las variables seleccionadas — así las líneas superpuestas y las
+  // filas de la tabla comparten siempre el mismo eje de fechas.
+  const registros = registrosBase.filter((r) => metricasSel.every((m) => m.get(r) != null));
 
   // Misma referencia que en el panel original: MD-2/MD+1 se comparan con el
   // Inicio de esa misma semana; un Inicio se compara con el Inicio anterior
   // (tendencia semana a semana). Sin ninguna referencia válida, no se
   // muestra ningún %.
-  function referenciaDelta(p) {
-    if (p.tag === "md2" || p.tag === "md1") {
-      if (p.microId == null) return null;
-      const mr = player.microResults.get(p.microId);
+  function referenciaDelta(r, metric) {
+    if (r.tag === "md2" || r.tag === "md1") {
+      if (r.microId == null) return null;
+      const mr = player.microResults.get(r.microId);
       if (!mr || !mr.inicio) return null;
       const baseVal = metric.get(mr.inicio);
-      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+      return baseVal != null ? cmjPct(metric.get(r), baseVal) : null;
     }
-    if (p.tag === "inicio") {
-      const idx = player.inicios.findIndex((x) => x.date === p.date);
+    if (r.tag === "inicio") {
+      const idx = player.inicios.findIndex((x) => x.date === r.date);
       if (idx <= 0) return null;
       const baseVal = metric.get(player.inicios[idx - 1]);
-      return baseVal != null ? cmjPct(p.valor, baseVal) : null;
+      return baseVal != null ? cmjPct(metric.get(r), baseVal) : null;
     }
     return null;
   }
+
+  const seriesGrafica = metricasSel.map((m) => {
+    const valoresReales = registros.map((r) => m.get(r));
+    const media = valoresReales.length ? valoresReales.reduce((a, b) => a + b, 0) / valoresReales.length : 0;
+    return {
+      key: m.key,
+      label: m.label,
+      color: CMJ_METRIC_CHART_COLOR[m.key],
+      puntos: registros.map((r, i) => ({
+        date: r.date,
+        valorMostrado: modoValores === "pct" ? (media ? (valoresReales[i] / media) * 100 : 0) : valoresReales[i],
+      })),
+    };
+  });
 
   const statusMeta = CMJ_STATUS_META[player.combinedStatus];
 
@@ -10285,8 +10455,34 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
       {mostrarFiltros && (
         <DsCard style={{ padding: 14, marginBottom: 16, display: "flex", flexDirection: "column", gap: 14 }}>
           <div>
-            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variable</div>
-            <DsTabSwitcher tabs={CMJ_METRIC_LIST.map((m) => ({ id: m.key, label: m.label }))} active={metricKey} onChange={setMetricKey} />
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Variables ({metricasSel.length} de {CMJ_METRIC_LIST.length})</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {CMJ_METRIC_LIST.map((m) => {
+                const activo = metricKeys.has(m.key);
+                const color = CMJ_METRIC_CHART_COLOR[m.key];
+                return (
+                  <button
+                    key={m.key}
+                    onClick={() => toggleMetric(m.key)}
+                    style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${activo ? color : ds.border}`, background: activo ? `${color}1E` : "transparent", color: activo ? color : ds.inkMuted, cursor: "pointer", fontWeight: 600 }}
+                  >
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, opacity: activo ? 1 : 0.35, flexShrink: 0 }} />
+                    {m.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Vista</div>
+            <DsTabSwitcher
+              tabs={[
+                { id: "reales", label: "Valores reales" },
+                { id: "pct", label: "% respecto a su media" },
+              ]}
+              active={modoValores}
+              onChange={setModoValores}
+            />
           </div>
           <div>
             <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 6 }}>Periodo</div>
@@ -10354,31 +10550,47 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
       )}
 
       <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>
-        {periodo === "microciclo" ? `Microciclo Nº ${microRows.find(({ m }) => m.id === microSelActivo)?.m.numero ?? "—"}` : "Evolución"} · {metric.label}
+        {periodo === "microciclo" ? `Microciclo Nº ${microRows.find(({ m }) => m.id === microSelActivo)?.m.numero ?? "—"}` : "Evolución"}
       </div>
 
       <DsCard style={{ padding: 14, marginBottom: 16 }}>
-        <CmjGraficaEvolucionReal puntos={puntos} color={CMJ_METRIC_CHART_COLOR[metricKey]} decimales={metric.decimals} />
+        <CmjGraficaEvolucionMultiReal series={seriesGrafica} decimalesEje={modoValores === "pct" ? 0 : 1} />
       </DsCard>
 
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>Registros ({metric.label})</div>
-      {puntos.length === 0 ? (
-        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún registro coincide con el filtro seleccionado.</div>
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>
+        Registros ({metricasSel.map((m) => m.label).join(" · ")})
+      </div>
+      {registros.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún registro coincide con el filtro seleccionado (o falta alguna de las variables elegidas en esos días).</div>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          {[...puntos].reverse().map((p, i) => {
-            const delta = periodo !== "microciclo" ? referenciaDelta(p) : null;
-            return (
-              <DsCard key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 12px", flexWrap: "wrap" }}>
-                <div style={{ fontSize: 12, color: ds.inkMuted, minWidth: 100 }}>{fmtDateShort(p.date)}</div>
-                <div style={{ fontSize: 11.5, color: p.tag ? CMJ_TAG_META[p.tag].color : ds.inkMuted, minWidth: 90 }}>{p.tag ? CMJ_TAG_META[p.tag].label : "Sin etiqueta"}</div>
-                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13, color: CMJ_METRIC_CHART_COLOR[metricKey], marginLeft: "auto" }}>
-                  {cmjFmt(p.valor, metric.decimals)} {metric.unit}
-                  {delta != null && <span style={{ marginLeft: 8, fontWeight: 600, color: delta >= 0 ? ds.success : ds.danger }}>{cmjSigned(delta)}</span>}
-                </div>
-              </DsCard>
-            );
-          })}
+        <div style={{ overflowX: "auto" }}>
+          <div style={{ minWidth: 280 + metricasSel.length * 130 }}>
+            <div style={{ display: "grid", gridTemplateColumns: `100px 96px repeat(${metricasSel.length}, minmax(120px, 1fr))`, padding: "0 10px 8px", borderBottom: `1px solid ${ds.border}` }}>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fecha</div>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Momento</div>
+              {metricasSel.map((m) => (
+                <div key={m.key} style={{ fontSize: 10.5, color: CMJ_METRIC_CHART_COLOR[m.key], textTransform: "uppercase", letterSpacing: "0.05em", textAlign: "right" }}>{m.label}</div>
+              ))}
+            </div>
+            {[...registros].reverse().map((r, i) => (
+              <div
+                key={i}
+                style={{ display: "grid", gridTemplateColumns: `100px 96px repeat(${metricasSel.length}, minmax(120px, 1fr))`, padding: "9px 10px", borderBottom: `1px solid ${ds.borderSoft}`, background: i % 2 === 0 ? "transparent" : ds.bgElevated + "55" }}
+              >
+                <div style={{ fontSize: 12, color: ds.ink }}>{fmtDateShort(r.date)}</div>
+                <div style={{ fontSize: 11.5, color: r.tag ? CMJ_TAG_META[r.tag].color : ds.inkMuted }}>{r.tag ? CMJ_TAG_META[r.tag].label : "—"}</div>
+                {metricasSel.map((m) => {
+                  const delta = periodo !== "microciclo" ? referenciaDelta(r, m) : null;
+                  return (
+                    <div key={m.key} style={{ textAlign: "right", fontFamily: dsF.mono, fontSize: 12.5, color: ds.ink }}>
+                      {cmjFmt(m.get(r), m.decimals)} <span style={{ color: ds.inkMuted, fontSize: 10.5 }}>{m.unit}</span>
+                      {delta != null && <span style={{ marginLeft: 6, fontWeight: 700, color: delta >= 0 ? ds.success : ds.danger }}>{cmjSigned(delta)}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>
@@ -10407,7 +10619,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
 
   if (!actual) {
     return (
-      <PantallaBase rol="entrenador" maxWidth={640}>
+      <PantallaBase rol="entrenador" maxWidth={900}>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -10420,7 +10632,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
   }
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={640}>
+    <PantallaBase rol="entrenador" maxWidth={900}>
       <div>
         <button
           onClick={onBack}
