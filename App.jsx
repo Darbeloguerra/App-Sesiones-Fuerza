@@ -2669,6 +2669,15 @@ function IconoModulo({ tipo }) {
           <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" />
         </svg>
       );
+    // Icono para "Control de fatiga" — un pulso/zigzag, dibujado a mano en
+    // el mismo estilo que el resto de este set (no es un icono de librería,
+    // para no mezclar dos sistemas de iconos distintos en este único menú).
+    case "pulso":
+      return (
+        <svg viewBox="0 0 24 24" {...common}>
+          <path d="M2 13h4l2.5-7L13 19l2.5-9.5L17 13h5" />
+        </svg>
+      );
     default:
       return null;
   }
@@ -2681,6 +2690,7 @@ const MODULOS_DASHBOARD = [
   { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
   { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
+  { id: "fatiga", nombre: "Control de fatiga", descripcion: "Salto CMJ, microciclos y estado del equipo", icono: "pulso" },
 ];
 
 function TarjetaModuloCompactaReal({ modulo, onClick }) {
@@ -3324,6 +3334,551 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
   );
 }
 
+// ============================================================
+// CONTROL DE FATIGA (CMJ) — motor de cálculo
+// ------------------------------------------------------------
+// Portado del panel de fatiga independiente de David (Google Sheets
+// + Apps Script) el 22/09/2026. Son funciones puras — no dependen de
+// React ni de cómo se guardan los datos — así que se pueden probar
+// y verificar exactamente igual que el resto del archivo.
+//
+// Una diferencia importante respecto al panel original, y a
+// propósito: allí cada jugador se identificaba por el NOMBRE tal
+// cual venía en el CSV de My Jump Lab. Aquí, en cambio, todo lo que
+// analiza (CmjBuildPlayers y en adelante) trabaja sobre el
+// jugador_id real de Supabase — el mismo que usa el resto de la
+// app. El nombre del CSV solo se usa para la vinculación inicial
+// (ver la sección de subida de CSV), nunca como identidad para el
+// análisis. Así se evita el riesgo de que una variación de un
+// nombre (una tilde, un apellido de más) cree en silencio un
+// "jugador" distinto del que ya tienes en el roster.
+// ============================================================
+
+function cmjNum(v) {
+  if (v === undefined) return null;
+  const s = String(v).trim();
+  if (s === "" || s === "---") return null;
+  const n = parseFloat(s.replace(/\./g, "").replace(",", "."));
+  return Number.isFinite(n) ? n : null;
+}
+
+function cmjParseDateTime(raw) {
+  const [datePart, timePart] = String(raw || "").split(",").map((s) => s.trim());
+  if (!datePart) return null;
+  const [d, m, y] = datePart.split(".").map((x) => parseInt(x, 10));
+  let h = 0, mi = 0;
+  if (timePart) {
+    const [hh, mm] = timePart.split(":").map((x) => parseInt(x, 10));
+    h = hh || 0; mi = mm || 0;
+  }
+  if (!d || !m || !y) return null;
+  return new Date(y, m - 1, d, h, mi);
+}
+
+function cmjDateKeyFromDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Columnas reales del export de My Jump Lab, en el orden en que vienen.
+const CMJ_CSV_COLS = [
+  "fecha", "equipo", "nombre", "peso", "hp0", "tipo", "altCajon", "carga",
+  "altura", "rsiMod", "tDespegue", "tVuelo", "tContacto", "dri", "fuerza",
+  "velocidad", "potencia", "impulse", "ifr", "stiffness", "color",
+];
+
+function cmjMean(arr) {
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+}
+
+// Si un jugador tiene más de un salto registrado el mismo día (protocolo de
+// varios intentos por sesión), se promedian en un único test representativo
+// de ese día — igual que en el panel original.
+function cmjAggregateByDay(rows) {
+  const groups = new Map();
+  rows.forEach((r) => {
+    const key = `${r.nombreCsv}|${r.dateKey}`;
+    (groups.get(key) || groups.set(key, []).get(key)).push(r);
+  });
+  const result = [];
+  groups.forEach((group) => {
+    if (group.length === 1) {
+      result.push({ ...group[0], nSaltos: 1 });
+      return;
+    }
+    const sorted = [...group].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const kinRows = sorted.filter((r) => r.kineticsValid);
+    const velRows = sorted.filter((r) => r.velocidad != null);
+    result.push({
+      nombreCsv: sorted[0].nombreCsv,
+      equipo: sorted[0].equipo,
+      date: sorted[0].date,
+      dateKey: sorted[0].dateKey,
+      peso: cmjMean(sorted.map((r) => r.peso).filter((v) => v > 0)) ?? sorted[0].peso,
+      hp0: sorted[0].hp0,
+      altura: cmjMean(sorted.map((r) => r.altura)),
+      kineticsValid: kinRows.length > 0,
+      pesoValid: sorted.some((r) => r.pesoValid),
+      hp0Valid: sorted.some((r) => r.hp0Valid),
+      fuerza: kinRows.length ? cmjMean(kinRows.map((r) => r.fuerza)) : null,
+      potencia: kinRows.length ? cmjMean(kinRows.map((r) => r.potencia)) : null,
+      velocidad: velRows.length ? cmjMean(velRows.map((r) => r.velocidad)) : null,
+      nSaltos: group.length,
+    });
+  });
+  return result;
+}
+
+// Convierte el texto crudo del CSV de My Jump Lab en filas ya agregadas por
+// día, listas para vincular a un jugador y guardar en cmj_saltos. Nada de
+// esto toca Supabase — es solo parseo, igual que hacía el panel original.
+function cmjParseCSV(text) {
+  const lines = String(text || "").split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length < 2) return { rows: [], issues: { dupCount: 0, pesoZero: 0, hp0Suspect: 0, total: 0 } };
+  const rows = [];
+  const seen = new Set();
+  let dupCount = 0, pesoZero = 0, hp0Suspect = 0;
+
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(";");
+    if (parts.length < 20) continue;
+    const rec = {};
+    CMJ_CSV_COLS.forEach((c, idx) => { rec[c] = parts[idx]; });
+
+    const nombreCsv = (rec.nombre || "").trim().replace(/\s+/g, " ");
+    if (!nombreCsv) continue;
+    const date = cmjParseDateTime(rec.fecha);
+    if (!date) continue;
+
+    const peso = cmjNum(rec.peso);
+    const hp0 = cmjNum(rec.hp0);
+    const altura = cmjNum(rec.altura);
+    if (altura === null || altura <= 0) continue;
+
+    const pesoValid = peso !== null && peso > 0;
+    const hp0Valid = hp0 !== null && hp0 >= 0.10 && hp0 <= 0.55;
+    if (!pesoValid) pesoZero++;
+    if (peso !== null && peso > 0 && !hp0Valid) hp0Suspect++;
+    const kineticsValid = pesoValid && hp0Valid;
+
+    const key = nombreCsv + "|" + date.getTime() + "|" + altura;
+    if (seen.has(key)) { dupCount++; continue; }
+    seen.add(key);
+
+    rows.push({
+      nombreCsv,
+      equipo: (rec.equipo || "").trim(),
+      date: date.toISOString(),
+      dateKey: cmjDateKeyFromDate(date),
+      peso, hp0, altura,
+      fuerza: kineticsValid ? cmjNum(rec.fuerza) : null,
+      potencia: kineticsValid ? cmjNum(rec.potencia) : null,
+      velocidad: cmjNum(rec.velocidad),
+      kineticsValid, pesoValid, hp0Valid,
+    });
+  }
+  const aggregated = cmjAggregateByDay(rows);
+  return { rows: aggregated, issues: { dupCount, pesoZero, hp0Suspect, total: aggregated.length } };
+}
+
+function cmjPct(a, b) { return b ? ((a - b) / b) * 100 : null; }
+function cmjFmt(v, d = 1) { return v === null || v === undefined ? "—" : v.toFixed(d); }
+function cmjSigned(v, d = 1) { return v == null ? "—" : `${v > 0 ? "+" : ""}${cmjFmt(v, d)}%`; }
+function cmjSdMuestral(arr) {
+  if (arr.length < 2) return null;
+  const m = cmjMean(arr);
+  return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1));
+}
+function cmjClamp(v, min, max) { return v == null ? null : Math.min(max, Math.max(min, v)); }
+
+const CMJ_MIN_INICIOS_PARA_INDIVIDUALIZAR = 4;
+const CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION = 3;
+
+// Qué mide cada variable a nivel fisiológico y por qué una caída importa —
+// se combina con la severidad y el estado (verde/ámbar/rojo) para construir
+// la explicación que ve el entrenador en cada tarjeta.
+const CMJ_METRIC_PHYSIO = {
+  altura: {
+    concepto: "La altura de salto resume la capacidad global de producir fuerza explosiva en muy poco tiempo.",
+    rojo: "Una caída de esta magnitud indica fatiga neuromuscular real: el sistema nervioso y el músculo ya no están generando la potencia de salida habitual. Entrenar o competir así aumenta el riesgo de sobrecarga y de lesión, y conviene reducir la carga antes de exigir el gesto explosivo del partido.",
+    ambar: "Una caída moderada puede deberse tanto a fatiga incipiente como al ruido normal de un salto único (la altura varía de forma natural un 3–8% entre sesiones). No es motivo de alarma por sí sola, pero conviene confirmarlo en el próximo test antes de intervenir.",
+    verde: "Se mantiene dentro de la variabilidad normal — no hay indicio de fatiga en esta variable.",
+  },
+  potenciaRel: {
+    concepto: "La potencia relativa mide la velocidad a la que el jugador aplica fuerza por kilo de peso — es más sensible a la fatiga que la propia altura.",
+    rojo: "Que caiga con esta intensidad, incluso si la altura aguanta, señala que el jugador está saltando con otra estrategia (más tiempo de contramovimiento, menos explosividad real) para lograr el mismo resultado aparente. Es precisamente la fatiga que la altura por sí sola puede ocultar, y justifica intervenir en la carga aunque el salto \"parezca\" normal.",
+    ambar: "Un descenso moderado en la velocidad de aplicación de fuerza, todavía dentro de un margen que puede ser variabilidad del test — pero es la primera señal que suele adelantarse a una caída de altura, así que merece vigilancia.",
+    verde: "Dentro de rango normal — el jugador sigue aplicando fuerza a la velocidad habitual.",
+  },
+  fuerzaRel: {
+    concepto: "La fuerza relativa indica cuánta fuerza es capaz de generar el jugador por kilo de peso corporal durante el salto.",
+    rojo: "Una caída de esta magnitud sugiere fatiga muscular periférica (acumulación de metabolitos, microdaño muscular tras el esfuerzo) o menor activación neural del músculo. Combinada con una caída de potencia, es una señal consistente de fatiga acumulada real, no de un mal salto puntual.",
+    ambar: "Una reducción moderada de la capacidad de generar fuerza — a vigilar junto con la potencia en los próximos tests, sin que por sí sola requiera todavía cambios de carga.",
+    verde: "Dentro de rango normal — la capacidad de generar fuerza no muestra signos de fatiga.",
+  },
+};
+
+// Cuán lejos está un valor del umbral que lo clasificó.
+function cmjSeveridad(delta, status, ambarPct, rojoPct) {
+  if (delta == null || status === "gray" || status === "green") return "";
+  if (status === "red") {
+    const ratio = Math.abs(delta) / rojoPct;
+    if (ratio < 1.15) return "justo por encima del umbral rojo";
+    if (ratio < 1.5) return "claramente por encima del umbral rojo";
+    return "muy por encima del umbral rojo";
+  }
+  const rango = rojoPct - ambarPct;
+  const progreso = rango > 0 ? (Math.abs(delta) - ambarPct) / rango : 0;
+  if (progreso > 0.66) return "cerca de pasar a alerta roja";
+  if (progreso > 0.33) return "vigilancia moderada, a mitad de camino del umbral rojo";
+  return "poco por encima del umbral ámbar";
+}
+
+function cmjNivelPalabra(delta, status, ambarPct, rojoPct) {
+  if (delta == null || status === "gray" || status === "green") return null;
+  if (status === "red") {
+    const ratio = Math.abs(delta) / rojoPct;
+    if (ratio < 1.15) return "leve";
+    if (ratio < 1.5) return "moderada";
+    return "severa";
+  }
+  const rango = rojoPct - ambarPct;
+  const progreso = rango > 0 ? (Math.abs(delta) - ambarPct) / rango : 0;
+  if (progreso > 0.66) return "severa";
+  if (progreso > 0.33) return "moderada";
+  return "leve";
+}
+
+// Recomendación graduada: cuánto más lejos del rango óptimo, más contundente
+// la acción, y el texto depende de qué día es (en MD-2 no hay otro test
+// antes del partido; en MD+1 o en el chequeo de recuperación todavía queda
+// margen para observar antes de actuar).
+function cmjNivelAccion(delta, status, ambarPct, rojoPct, dayField) {
+  if (status === "gray") return "Sin datos suficientes todavía para valorar.";
+  if (status === "green") return "Dentro del rango normal respecto al Inicio de esta semana — estado óptimo, no se requiere ninguna intervención sobre la carga.";
+  if (delta == null) return "";
+
+  const esMD2 = dayField === "md2";
+
+  if (status === "red") {
+    const ratio = Math.abs(delta) / rojoPct;
+    if (esMD2) {
+      if (ratio < 1.15) return "Cae por debajo del Inicio de esta semana, justo por encima del umbral rojo. No habrá otro test antes del partido para confirmarlo: reduce su carga en las próximas 48h o valora ajustar su papel en el once.";
+      if (ratio < 1.5) return "Cae por debajo del Inicio de esta semana, claramente por encima del umbral rojo. No habrá otro test antes del partido: reduce de forma notable su exposición o valora que no salga de inicio.";
+      return "Cae muy por debajo del Inicio de esta semana, muy por encima del umbral rojo. No habrá otro test antes del partido: prioriza no exponerlo a esfuerzo máximo.";
+    }
+    if (dayField === "md1") {
+      if (ratio < 1.15) return "Cae por debajo del Inicio de esta semana, justo por encima del umbral rojo. Ajusta un poco la sesión regenerativa de hoy; con varios días por delante hasta el próximo test, confirma que remonta.";
+      if (ratio < 1.5) return "Cae por debajo del Inicio de esta semana, claramente por encima del umbral rojo. Ajusta con claridad la regenerativa y el resto de la semana, y confirma la evolución en el Inicio del próximo microciclo.";
+      return "Cae muy por debajo del Inicio de esta semana, muy por encima del umbral rojo. Prioriza la recuperación esta semana antes de cualquier carga alta, y vigila de cerca cómo llega al MD-2.";
+    }
+    if (ratio < 1.15) return "Justo por encima del umbral rojo. Reduce ligeramente la carga y confírmalo en el MD-2 de esta semana.";
+    if (ratio < 1.5) return "Claramente por encima del umbral rojo. Ajusta volumen/intensidad ya, y vigila de cerca hasta el MD-2.";
+    return "Muy por encima del umbral rojo. Prioriza la recuperación antes de seguir cargando esta semana.";
+  }
+
+  const rango = rojoPct - ambarPct;
+  const progreso = rango > 0 ? (Math.abs(delta) - ambarPct) / rango : 0;
+  if (esMD2) {
+    if (progreso > 0.66) return "Cae por debajo del Inicio de esta semana, cerca del umbral rojo. No habrá otro test antes del partido para confirmarlo: decide ya si ajustas su participación.";
+    if (progreso > 0.33) return "Cae por debajo del Inicio de esta semana, a mitad de camino del umbral rojo. No habrá otro test antes de jugar: valora ahora si conviene ajustar minutos o rol.";
+    return "Apenas por debajo del Inicio de esta semana, dentro de lo normal. Aunque es la última medición antes del partido, la magnitud no justifica cambios — puede jugar con normalidad.";
+  }
+  if (dayField === "md1") {
+    if (progreso > 0.66) return "Cae por debajo del Inicio de esta semana, cerca del umbral rojo. Vigila de cerca los próximos días; si se mantiene al llegar al Inicio de la próxima semana, sí conviene ajustar carga.";
+    if (progreso > 0.33) return "Cae por debajo del Inicio de esta semana, a mitad de camino del umbral rojo. Probablemente se resuelva con los días de descanso — confírmalo en el Inicio de la próxima semana.";
+    return "Apenas por debajo del Inicio de esta semana, dentro de lo esperable el día después de competir — no hace falta ninguna acción, solo confirmarlo cuando toque el próximo test.";
+  }
+  if (progreso > 0.66) return "Cerca del umbral rojo. Si no mejora en el MD-2 de esta semana, habrá que intervenir.";
+  if (progreso > 0.33) return "A mitad de camino del umbral rojo. Vigila la evolución hasta el próximo test antes de decidir.";
+  return "Apenas por encima de lo normal — probablemente no haga falta ningún cambio, confírmalo en el próximo test.";
+}
+
+function cmjExplicacionMetrica(metricKey, delta, status, ambarPct, rojoPct) {
+  const info = CMJ_METRIC_PHYSIO[metricKey];
+  if (status === "gray") return `${info.concepto} Sin datos suficientes todavía para comparar esta variable en este punto.`;
+  const sev = cmjSeveridad(delta, status, ambarPct, rojoPct);
+  const texto = status === "red" ? info.rojo : status === "amber" ? info.ambar : info.verde;
+  return `${info.concepto} ${texto}${sev ? ` (${sev}).` : ""}`;
+}
+
+const CMJ_STATUS_META = {
+  red: { label: "Intervenir", color: ds.danger, bg: `${ds.danger}22` },
+  amber: { label: "Vigilar", color: ds.warning, bg: `${ds.warning}22` },
+  green: { label: "Normal", color: ds.success, bg: `${ds.success}1E` },
+  gray: { label: "Sin datos", color: ds.inkMuted, bg: `${ds.inkMuted}22` },
+};
+const CMJ_TAG_META = {
+  inicio: { label: "Inicio microciclo", color: ds.chart2 },
+  md2: { label: "MD-2", color: ds.accent },
+  md1: { label: "MD+1", color: ds.chart1 },
+};
+const CMJ_FIELDS = ["inicio", "md2", "md1"];
+
+// Altura, Potencia y Fuerza se relativizan por kg para poder comparar entre
+// jugadores y en el tiempo; Velocidad se deriva matemáticamente de la altura
+// (v = √(2gh)), así que se muestra como lectura alternativa pero no dispara
+// alertas (sería contar la misma señal dos veces) — igual que en el panel
+// original.
+const CMJ_METRICS = {
+  altura: { key: "altura", label: "Altura", unit: "cm", decimals: 1, get: (r) => r.altura, drivesStatus: true },
+  potenciaRel: { key: "potenciaRel", label: "Potencia relativa", unit: "W/kg", decimals: 1, get: (r) => (r.kineticsValid && r.peso) ? r.potencia / r.peso : null, drivesStatus: true },
+  fuerzaRel: { key: "fuerzaRel", label: "Fuerza relativa", unit: "N/kg", decimals: 1, get: (r) => (r.kineticsValid && r.peso) ? r.fuerza / r.peso : null, drivesStatus: true },
+  velocidad: { key: "velocidad", label: "Velocidad", unit: "m/s", decimals: 2, get: (r) => r.velocidad, drivesStatus: false },
+};
+const CMJ_METRIC_LIST = Object.values(CMJ_METRICS);
+// Colores de línea por métrica en las gráficas — se usan los tokens de
+// gráfico que ya tiene la app (ds.accent/ds.chart1/ds.chart2), no colores
+// nuevos, para que encaje con el resto del sistema de diseño.
+const CMJ_METRIC_CHART_COLOR = { altura: ds.accent, potenciaRel: ds.chart2, fuerzaRel: ds.chart1, velocidad: ds.inkMuted };
+const CMJ_STATUS_ORDER = { red: 0, amber: 1, green: 2, gray: 3 };
+
+// Filas de métrica (Altura / Potencia relativa / Fuerza relativa) para un
+// día concreto del microciclo (md2 o md1), con el umbral propio de cada
+// jugador para esa métrica.
+function cmjFilasDia(microResult, dayField, umbral) {
+  return CMJ_METRIC_LIST.filter((x) => x.drivesStatus).map((metric) => {
+    const mm = microResult.metrics[metric.key];
+    const delta = mm[`${dayField}Delta`];
+    const status = mm[`${dayField}Status`];
+    const u = umbral[metric.key];
+    return { key: metric.key, label: metric.label, delta, status, explicacion: cmjExplicacionMetrica(metric.key, delta, status, u.ambarPct, u.rojoPct) };
+  });
+}
+function cmjFilasRecuperacion(recuperacion, umbral) {
+  return CMJ_METRIC_LIST.filter((x) => x.drivesStatus).map((metric) => {
+    const mm = recuperacion ? recuperacion.metrics[metric.key] : { delta: null, status: "gray" };
+    const u = umbral[metric.key];
+    return { key: metric.key, label: metric.label, delta: mm.delta, status: mm.status, explicacion: cmjExplicacionMetrica(metric.key, mm.delta, mm.status, u.ambarPct, u.rojoPct) };
+  });
+}
+
+// Estado global del día (peor de las 3 métricas) + la recomendación
+// graduada — el desglose fisiológico por variable vive en cmjFilasDia.
+function cmjMotivoDia(microResult, dayField, umbral) {
+  const statusKey = `${dayField}Status`;
+  const deltaKey = `${dayField}Delta`;
+  let worst = "gray", worstDelta = null, worstKey = null;
+  CMJ_METRIC_LIST.filter((x) => x.drivesStatus).forEach((metric) => {
+    const mm = microResult.metrics[metric.key];
+    const s = mm[statusKey];
+    if (CMJ_STATUS_ORDER[s] < CMJ_STATUS_ORDER[worst]) { worst = s; worstDelta = mm[deltaKey]; worstKey = metric.key; }
+    else if (s === worst && mm[deltaKey] != null && (worstDelta == null || Math.abs(mm[deltaKey]) > Math.abs(worstDelta))) { worstDelta = mm[deltaKey]; worstKey = metric.key; }
+  });
+  if (worst === "gray") return { status: "gray", motivo: "Test de hoy aún no registrado.", nivel: null };
+  const u = umbral[worstKey];
+  return { status: worst, motivo: cmjNivelAccion(worstDelta, worst, u.ambarPct, u.rojoPct, dayField), nivel: cmjNivelPalabra(worstDelta, worst, u.ambarPct, u.rojoPct) };
+}
+function cmjMotivoRecuperacion(recuperacion, umbral) {
+  if (!recuperacion) return { status: "gray", motivo: "Sin MD+1 del microciclo anterior con el que comparar.", nivel: null };
+  const esFallback = recuperacion.modo === "media_inicios";
+  if (recuperacion.status === "gray") {
+    return {
+      status: "gray", nivel: null, motivo: esFallback
+        ? `Esta semana no hubo MD+1 con el que comparar, y todavía no hay suficientes Inicios previos de este jugador para usar como respaldo (tiene ${recuperacion.nPrevios} de los ${CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION} necesarios).`
+        : "Aún sin datos suficientes para valorar la recuperación.",
+    };
+  }
+  let worstDelta = null, worstKey = null;
+  CMJ_METRIC_LIST.filter((x) => x.drivesStatus).forEach((metric) => {
+    const mm = recuperacion.metrics[metric.key];
+    if (mm.status === recuperacion.status && mm.delta != null && (worstDelta == null || Math.abs(mm.delta) > Math.abs(worstDelta))) { worstDelta = mm.delta; worstKey = metric.key; }
+  });
+  const u = umbral[worstKey] || umbral.altura;
+  let prefijo;
+  if (esFallback) {
+    prefijo = recuperacion.status === "green"
+      ? `Sin MD+1 esta semana: comparado con su media de los últimos ${recuperacion.nPrevios} Inicios, está dentro de lo habitual. `
+      : `Sin MD+1 esta semana: comparado con su media de los últimos ${recuperacion.nPrevios} Inicios, está por debajo de lo habitual. `;
+  } else {
+    prefijo = recuperacion.status === "green"
+      ? "Recuperación adecuada respecto al MD+1 del microciclo anterior. "
+      : "No muestra la recuperación esperada tras el descanso. ";
+  }
+  return { status: recuperacion.status, motivo: prefijo + cmjNivelAccion(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct, "inicio"), nivel: cmjNivelPalabra(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct) };
+}
+
+// Posiciones para agrupar/ordenar en las pantallas de grupo. A diferencia
+// del panel original (donde vivían en un "roster" aparte), aquí la posición
+// es un campo del propio jugador (jugador.posicion en Supabase).
+const CMJ_POSICIONES = [
+  { key: "portero", label: "Porteros", singular: "Portero" },
+  { key: "central", label: "Centrales", singular: "Central" },
+  { key: "lateral", label: "Laterales", singular: "Lateral" },
+  { key: "mediocentro", label: "Mediocentros", singular: "Mediocentro" },
+  { key: "interior", label: "Interiores", singular: "Interior" },
+  { key: "extremo", label: "Extremos", singular: "Extremo" },
+  { key: "delantero", label: "Delanteros", singular: "Delantero" },
+];
+function cmjPosicionLabel(key) { return CMJ_POSICIONES.find((p) => p.key === key)?.singular || "Sin posición"; }
+function cmjPosicionOrder(key) { const idx = CMJ_POSICIONES.findIndex((p) => p.key === key); return idx === -1 ? 99 : idx; }
+
+function cmjMicroRefDate(m) {
+  const defined = CMJ_FIELDS.map((f) => m[f]).filter(Boolean).sort();
+  return defined.length ? defined[0] : null;
+}
+function cmjBuildDateIndex(microciclos) {
+  const map = new Map();
+  microciclos.forEach((m) => {
+    CMJ_FIELDS.forEach((f) => {
+      if (m[f]) map.set(cmjDateKeyFromDate(new Date(m[f])), { microId: m.id, tag: f, numero: m.numero });
+    });
+  });
+  return map;
+}
+function cmjOrderedMicroList(microciclos) {
+  return [...microciclos].filter((m) => cmjMicroRefDate(m)).sort((a, b) => new Date(cmjMicroRefDate(a)) - new Date(cmjMicroRefDate(b)));
+}
+function cmjStatusFromDelta(d, ambarPct, rojoPct) {
+  if (d === null || d === undefined) return "gray";
+  if (d <= -rojoPct) return "red";
+  if (d <= -ambarPct) return "amber";
+  return "green";
+}
+
+// El corazón del análisis. A diferencia del panel original, "rows" aquí son
+// ya filas de cmj_saltos vinculadas a un jugador real (jugadorId no nulo) —
+// las filas todavía "sin vincular" se filtran antes de llegar aquí, en la
+// pantalla de subida de CSV, así que esta función nunca agrupa por nombre
+// de texto, solo por jugadorId.
+function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individualizar, protocoloDesde) {
+  const index = cmjBuildDateIndex(microciclos);
+  const microList = cmjOrderedMicroList(microciclos);
+  const byJugador = new Map();
+  rows.forEach((r) => {
+    if (!r.jugadorId) return;
+    const hit = index.get(r.dateKey);
+    const tagged = { ...r, tag: hit ? hit.tag : null, microId: hit ? hit.microId : null };
+    if (!byJugador.has(r.jugadorId)) byJugador.set(r.jugadorId, []);
+    byJugador.get(r.jugadorId).push(tagged);
+  });
+
+  const players = [...byJugador.entries()].map(([jugadorId, recs]) => {
+    const sorted = [...recs].sort((a, b) => new Date(a.date) - new Date(b.date));
+    const inicios = sorted.filter((r) => r.tag === "inicio");
+    // Si se ha marcado una fecha de cambio de protocolo (p. ej. de salto
+    // único a "mejor de 3"), el perfil de ruido individual solo usa Inicios
+    // desde esa fecha.
+    const iniciosParaUmbral = protocoloDesde
+      ? inicios.filter((r) => new Date(r.date) >= new Date(protocoloDesde))
+      : inicios;
+
+    // Perfil de ruido propio del jugador: variabilidad de un Inicio al
+    // siguiente (no contra la media general, para no confundir una mejora
+    // sostenida con irregularidad). Con menos de 4 Inicios se usa el umbral
+    // general hasta que haya datos suficientes para confiar en el propio.
+    const ratioGlobal = ambarPct > 0 ? rojoPct / ambarPct : 2;
+    const umbral = {};
+    CMJ_METRIC_LIST.filter((m) => m.drivesStatus).forEach((metric) => {
+      const valoresTodos = iniciosParaUmbral.map((r) => metric.get(r)).filter((v) => v != null);
+      const valores = valoresTodos.slice(-10);
+      if (individualizar && valores.length >= CMJ_MIN_INICIOS_PARA_INDIVIDUALIZAR) {
+        const diffs = valores.slice(1).map((v, i) => v - valores[i]);
+        const sdDiffs = cmjSdMuestral(diffs);
+        const errorTipico = sdDiffs != null ? sdDiffs / Math.SQRT2 : null;
+        const m_ = cmjMean(valores);
+        const cv = (errorTipico != null && m_) ? (errorTipico / m_) * 100 : null;
+        const ambarI = cmjClamp(cv, 3, 20);
+        const rojoI = cmjClamp(ambarI * ratioGlobal, ambarI + 1, 35);
+        umbral[metric.key] = { ambarPct: ambarI, rojoPct: rojoI, cv, n: valores.length, personalizado: true };
+      } else {
+        umbral[metric.key] = { ambarPct, rojoPct, cv: null, n: valores.length, personalizado: false };
+      }
+    });
+
+    const microDataMap = new Map();
+    sorted.forEach((r) => {
+      if (r.microId == null) return;
+      if (!microDataMap.has(r.microId)) microDataMap.set(r.microId, {});
+      microDataMap.get(r.microId)[r.tag] = r;
+    });
+
+    const microResults = new Map();
+    microDataMap.forEach((b, id) => {
+      const metrics = {};
+      let worstStatus = "gray", heightStatus = "gray";
+      CMJ_METRIC_LIST.forEach((metric) => {
+        const baseVal = b.inicio ? metric.get(b.inicio) : null;
+        const md2Val = b.md2 ? metric.get(b.md2) : null;
+        const md1Val = b.md1 ? metric.get(b.md1) : null;
+        const md2Delta = (baseVal != null && md2Val != null) ? cmjPct(md2Val, baseVal) : null;
+        const md1Delta = (baseVal != null && md1Val != null) ? cmjPct(md1Val, baseVal) : null;
+        const u = umbral[metric.key] || { ambarPct, rojoPct };
+        const md2Status = cmjStatusFromDelta(md2Delta, u.ambarPct, u.rojoPct);
+        const md1Status = cmjStatusFromDelta(md1Delta, u.ambarPct, u.rojoPct);
+        const mStatus = CMJ_STATUS_ORDER[md2Status] <= CMJ_STATUS_ORDER[md1Status] ? md2Status : md1Status;
+        metrics[metric.key] = { base: baseVal, md2Delta, md1Delta, md2Status, md1Status, status: mStatus };
+        if (metric.key === "altura") heightStatus = mStatus;
+        if (metric.drivesStatus && CMJ_STATUS_ORDER[mStatus] < CMJ_STATUS_ORDER[worstStatus]) worstStatus = mStatus;
+      });
+      // "Divergencia": el estado combinado es peor que lo que diría la
+      // altura por sí sola — potencia o fuerza están delatando fatiga que
+      // la altura, saltando con otra estrategia, está enmascarando.
+      const divergente = CMJ_STATUS_ORDER[worstStatus] < CMJ_STATUS_ORDER[heightStatus];
+      microResults.set(id, { ...b, metrics, status: worstStatus, heightStatus, divergente });
+    });
+
+    // Chequeo de recuperación: el Inicio de cada microciclo se compara con
+    // el MD+1 del microciclo ANTERIOR. Si esa semana no tuvo MD+1, se usa
+    // como respaldo la media de los Inicios anteriores de ESTE jugador.
+    microList.forEach((meta, idx) => {
+      const curr = microResults.get(meta.id);
+      if (!curr || !curr.inicio || idx === 0) return;
+      const prev = microResults.get(microList[idx - 1].id);
+      const hayMd1Anterior = prev && prev.md1;
+      const modo = hayMd1Anterior ? "md1_anterior" : "media_inicios";
+      const iniciosPrevios = hayMd1Anterior ? [] : inicios.filter((r) => new Date(r.date) < new Date(curr.inicio.date)).slice(-10);
+
+      const recMetrics = {};
+      let worst = "gray";
+      CMJ_METRIC_LIST.filter((m) => m.drivesStatus).forEach((metric) => {
+        let baseVal;
+        if (hayMd1Anterior) {
+          baseVal = metric.get(prev.md1);
+        } else {
+          const valoresPrevios = iniciosPrevios.map((r) => metric.get(r)).filter((v) => v != null);
+          baseVal = valoresPrevios.length >= CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION ? cmjMean(valoresPrevios) : null;
+        }
+        const nowVal = metric.get(curr.inicio);
+        const delta = (baseVal != null && nowVal != null) ? cmjPct(nowVal, baseVal) : null;
+        const u = umbral[metric.key] || { ambarPct, rojoPct };
+        const status = cmjStatusFromDelta(delta, u.ambarPct, u.rojoPct);
+        recMetrics[metric.key] = { delta, status };
+        if (CMJ_STATUS_ORDER[status] < CMJ_STATUS_ORDER[worst]) worst = status;
+      });
+      curr.recuperacion = { metrics: recMetrics, status: worst, modo, nPrevios: iniciosPrevios.length };
+    });
+
+    const orderedIds = microList.map((m) => m.id);
+    const lastActiveId = [...orderedIds].reverse().find((id) => microResults.has(id) && microResults.get(id).status !== "gray");
+    const lastId = lastActiveId ?? [...orderedIds].reverse().find((id) => microResults.has(id));
+    const lastMicro = lastId != null ? microResults.get(lastId) : null;
+
+    const trendPoints = inicios.slice(-6);
+    const trendPct = trendPoints.length >= 3 ? cmjPct(trendPoints[trendPoints.length - 1].altura, trendPoints[0].altura) : null;
+
+    return {
+      jugadorId,
+      nombre: sorted[sorted.length - 1].nombre,
+      sorted, inicios, microResults,
+      lastMicro, combinedStatus: lastMicro ? lastMicro.status : "gray",
+      trendPct, nTests: sorted.length, umbral,
+    };
+  });
+
+  return { players: players.sort((a, b) => CMJ_STATUS_ORDER[a.combinedStatus] - CMJ_STATUS_ORDER[b.combinedStatus]), microList };
+}
+
+function cmjFindCurrentMicroId(microList) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const past = microList.filter((m) => { const d = new Date(cmjMicroRefDate(m)); d.setHours(0, 0, 0, 0); return d <= today; });
+  if (past.length === 0) return { id: null, mode: microList.length > 0 ? "solo-futuro" : "vacio" };
+  return { id: past[past.length - 1].id, mode: "ok" };
+}
+function cmjSuggestNextNumero(microciclos) {
+  const nums = microciclos.map((m) => parseInt(m.numero, 10)).filter((n) => Number.isFinite(n));
+  return nums.length === 0 ? "1" : String(Math.max(...nums) + 1);
+}
+
 // "Mi progreso" — versión ligera de la pestaña "Progreso por tarea" de
 // HistorialPorJugador, para la propia vista del jugador: sin selector de
 // jugador (siempre es el suyo), sin filtro de fechas, sin herramientas de
@@ -3853,6 +4408,304 @@ function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   );
 }
 
+// ============================================================
+// CONTROL DE FATIGA (CMJ) — módulo de entrenador
+// ------------------------------------------------------------
+// Pantalla nueva (22/09/2026), fusión del panel de fatiga independiente de
+// David. Por ahora solo la pestaña "Subir CSV" tiene contenido real — el
+// resto se entrega en pasos siguientes, cada uno verificado por separado.
+// ============================================================
+
+// Normaliza un nombre para comparar "Alex Pérez", "alex perez" y "Alex  Pérez "
+// como el mismo jugador: minúsculas, sin tildes, sin espacios de sobra.
+function cmjNormalizarNombre(s) {
+  return (s || "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+// Alias guardados (nombre del CSV -> jugador ya vinculado a mano antes) —
+// la red de seguridad de la que se habló: una vez vinculado un nombre que
+// no coincidía, no hay que repetirlo en el próximo CSV.
+function useCmjAlias() {
+  const [alias, setAlias] = useState(new Map());
+  const [loaded, setLoaded] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    let cancelado = false;
+    setLoaded(false);
+    supabase
+      .from("cmj_alias_nombre")
+      .select("*")
+      .then(({ data, error }) => {
+        if (cancelado) return;
+        if (!error && data) {
+          setAlias(new Map(data.map((r) => [r.nombre_normalizado, { jugadorId: r.jugador_id, nombreOriginal: r.nombre_original }])));
+        }
+        setLoaded(true);
+      });
+    return () => { cancelado = true; };
+  }, [reloadKey]);
+  const recargar = useCallback(() => setReloadKey((k) => k + 1), []);
+  return [alias, loaded, recargar];
+}
+
+function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
+  const [vista, setVista] = useState("subir");
+  const TABS = [
+    { id: "subir", label: "Subir CSV" },
+    { id: "estado", label: "Estado actual" },
+    { id: "microciclos", label: "Microciclos" },
+    { id: "ranking", label: "Ranking" },
+  ];
+  return (
+    <PantallaEntrenadorAncha activo="fatiga" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+      <div>
+        <div style={{ marginBottom: 16 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>CONTROL DE FATIGA</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Salto CMJ</h1>
+        </div>
+        <DsTabSwitcher tabs={TABS} active={vista} onChange={setVista} />
+        <div style={{ marginTop: 16 }}>
+          {vista === "subir" && <CmjSubirCsvReal />}
+          {vista === "estado" && <CmjProximamente titulo="Estado actual" texto="El semáforo semanal por jugador (con umbrales individualizados y detección de divergencia) llega en el siguiente paso, una vez tengas microciclos y algún CSV ya cargados." />}
+          {vista === "microciclos" && <CmjProximamente titulo="Microciclos" texto="Aquí definirás las fechas de Inicio / MD-2 / MD+1 de cada semana. Todavía no está construido." />}
+          {vista === "ranking" && <CmjProximamente titulo="Ranking" texto="El ranking histórico por jugador llega al final de este módulo, cuando el resto ya esté funcionando." />}
+        </div>
+      </div>
+    </PantallaEntrenadorAncha>
+  );
+}
+
+function CmjProximamente({ titulo, texto }) {
+  return (
+    <DsCard style={{ padding: 20, textAlign: "center", color: ds.inkMuted }}>
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 6 }}>{titulo}</div>
+      <div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 420, margin: "0 auto" }}>{texto}</div>
+    </DsCard>
+  );
+}
+
+function CmjSubirCsvReal() {
+  const [players, , playersLoaded] = usePlayers();
+  const [alias, aliasLoaded, recargarAlias] = useCmjAlias();
+  const [parsed, setParsed] = useState(null); // { rows, issues }
+  const [vinculos, setVinculos] = useState(new Map()); // nombreCsv -> jugadorId | "ignorar" | null
+  const [origenVinculo, setOrigenVinculo] = useState(new Map()); // nombreCsv -> "alias" | "nombre" | "manual" | null
+  const [guardando, setGuardando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+  const [errorGuardado, setErrorGuardado] = useState("");
+  const fileInputRef = useRef(null);
+
+  const jugadoresPorNombreNorm = useMemo(() => {
+    const m = new Map();
+    players.forEach((p) => m.set(cmjNormalizarNombre(p.name), p.id));
+    return m;
+  }, [players]);
+
+  function resolverAutomatico(nombreCsv) {
+    const norm = cmjNormalizarNombre(nombreCsv);
+    const porAlias = alias.get(norm);
+    if (porAlias) return { jugadorId: porAlias.jugadorId, origen: "alias" };
+    const porNombre = jugadoresPorNombreNorm.get(norm);
+    if (porNombre) return { jugadorId: porNombre, origen: "nombre" };
+    return { jugadorId: null, origen: null };
+  }
+
+  function limpiarSeleccion() {
+    setParsed(null);
+    setVinculos(new Map());
+    setOrigenVinculo(new Map());
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const { rows, issues } = cmjParseCSV(ev.target.result);
+      const nuevosVinculos = new Map();
+      const nuevosOrigenes = new Map();
+      [...new Set(rows.map((r) => r.nombreCsv))].forEach((n) => {
+        const { jugadorId, origen } = resolverAutomatico(n);
+        nuevosVinculos.set(n, jugadorId);
+        nuevosOrigenes.set(n, origen);
+      });
+      setParsed({ rows, issues });
+      setVinculos(nuevosVinculos);
+      setOrigenVinculo(nuevosOrigenes);
+      setResultado(null);
+      setErrorGuardado("");
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  const nombresUnicos = useMemo(() => (parsed ? [...new Set(parsed.rows.map((r) => r.nombreCsv))] : []), [parsed]);
+  const pendientes = nombresUnicos.filter((n) => vinculos.get(n) == null).length;
+
+  async function confirmarGuardado() {
+    if (!parsed) return;
+    setGuardando(true);
+    setErrorGuardado("");
+    try {
+      // 1) Guardar como alias los vínculos que ha elegido David a mano ahora
+      // mismo (no los que ya venían de un alias guardado antes) — así la
+      // próxima vez que aparezca este mismo nombre en un CSV, se vincula solo.
+      const aliasNuevos = nombresUnicos
+        .filter((n) => {
+          const v = vinculos.get(n);
+          return v && v !== "ignorar" && origenVinculo.get(n) === "manual";
+        })
+        .map((n) => ({ nombre_normalizado: cmjNormalizarNombre(n), jugador_id: vinculos.get(n), nombre_original: n }));
+
+      if (aliasNuevos.length) {
+        const { error } = await supabase.from("cmj_alias_nombre").upsert(aliasNuevos, { onConflict: "nombre_normalizado" });
+        if (error) throw new Error(error.message);
+      }
+
+      // 2) Guardar los saltos — solo de los nombres vinculados a un jugador
+      // real. Los "ignorados" y los que siguen sin vincular no se guardan:
+      // así nunca se crea un jugador fantasma por un nombre que no coincide.
+      const filas = parsed.rows
+        .filter((r) => {
+          const v = vinculos.get(r.nombreCsv);
+          return v && v !== "ignorar";
+        })
+        .map((r) => ({
+          id: genId("cmjsalto"),
+          jugador_id: vinculos.get(r.nombreCsv),
+          nombre_csv: r.nombreCsv,
+          equipo: r.equipo || null,
+          fecha: r.dateKey,
+          fecha_hora: r.date,
+          peso: r.peso,
+          hp0: r.hp0,
+          altura: r.altura,
+          fuerza: r.fuerza,
+          potencia: r.potencia,
+          velocidad: r.velocidad,
+          kinetics_valid: r.kineticsValid,
+          peso_valid: r.pesoValid,
+          hp0_valid: r.hp0Valid,
+          n_saltos: r.nSaltos,
+        }));
+
+      if (filas.length) {
+        const { error } = await supabase.from("cmj_saltos").upsert(filas, { onConflict: "nombre_csv,fecha" });
+        if (error) throw new Error(error.message);
+      }
+
+      const ignorados = nombresUnicos.filter((n) => vinculos.get(n) === "ignorar").length;
+      const pendientesFinal = nombresUnicos.filter((n) => vinculos.get(n) == null).length;
+      setResultado({
+        guardados: filas.length,
+        jugadoresGuardados: nombresUnicos.length - ignorados - pendientesFinal,
+        ignorados,
+        pendientes: pendientesFinal,
+      });
+      if (aliasNuevos.length) recargarAlias();
+      limpiarSeleccion();
+    } catch (err) {
+      setErrorGuardado(err.message || "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+    }
+    setGuardando(false);
+  }
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>Subir CSV de My Jump Lab</div>
+        <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>
+          Cada exportación se trata como tu historial completo hasta la fecha — puedes subir el mismo archivo varias veces, no se duplica (se actualiza el test de ese jugador y ese día).
+        </div>
+      </div>
+
+      <input ref={fileInputRef} type="file" accept=".csv,text/csv" onChange={handleFile} style={{ display: "none" }} id="cmj-csv-input" />
+      <label htmlFor="cmj-csv-input" className="ds-button ds-button--secondary" style={{ display: "inline-flex", cursor: "pointer" }}>
+        Elegir archivo CSV
+      </label>
+
+      {!playersLoaded || !aliasLoaded ? (
+        parsed && <LoadingBlock />
+      ) : parsed ? (
+        <div style={{ marginTop: 20 }}>
+          <div style={{ fontSize: 12.5, color: ds.inkMuted, marginBottom: 10 }}>
+            {parsed.rows.length} test{parsed.rows.length === 1 ? "" : "s"} de {nombresUnicos.length} jugador{nombresUnicos.length === 1 ? "" : "es"} detectados en el CSV.
+            {parsed.issues.dupCount > 0 && ` ${parsed.issues.dupCount} fila(s) duplicada(s) ignoradas.`}
+            {parsed.issues.hp0Suspect > 0 && ` ${parsed.issues.hp0Suspect} test(s) sin calibración válida — fuerza y potencia no se calcularán para esos.`}
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {nombresUnicos.map((nombreCsv) => {
+              const v = vinculos.get(nombreCsv);
+              const origen = origenVinculo.get(nombreCsv);
+              const nTests = parsed.rows.filter((r) => r.nombreCsv === nombreCsv).length;
+              return (
+                <DsCard key={nombreCsv} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 600 }}>{nombreCsv}</div>
+                    <div style={{ fontSize: 11, color: ds.inkMuted }}>{nTests} test{nTests === 1 ? "" : "s"}</div>
+                  </div>
+                  {v && v !== "ignorar" ? (
+                    <DsBadge tone={origen === "manual" ? "accent" : "success"}>
+                      {origen === "alias" ? "vinculado (alias)" : origen === "nombre" ? "vinculado por nombre" : "vinculado"}
+                    </DsBadge>
+                  ) : v === "ignorar" ? (
+                    <DsBadge tone="neutral">ignorado</DsBadge>
+                  ) : (
+                    <DsBadge tone="danger">sin vincular</DsBadge>
+                  )}
+                  <DsSelect
+                    value={v && v !== "ignorar" ? v : v === "ignorar" ? "ignorar" : ""}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setVinculos((prev) => new Map(prev).set(nombreCsv, val === "" ? null : val));
+                      setOrigenVinculo((prev) => new Map(prev).set(nombreCsv, val === "" || val === "ignorar" ? null : "manual"));
+                    }}
+                    style={{ width: 200 }}
+                  >
+                    <option value="">— Sin vincular —</option>
+                    {players.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                    <option value="ignorar">No es mi jugador (ignorar)</option>
+                  </DsSelect>
+                </DsCard>
+              );
+            })}
+          </div>
+
+          {pendientes > 0 && (
+            <div style={{ marginTop: 12, fontSize: 12, color: ds.warning }}>
+              {pendientes} jugador{pendientes === 1 ? "" : "es"} todavía sin vincular ni ignorar — sus tests no se guardarán hasta que elijas una opción para cada uno.
+            </div>
+          )}
+
+          {errorGuardado && <div style={{ marginTop: 12, fontSize: 12.5, color: ds.danger }}>{errorGuardado}</div>}
+
+          <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+            <DsButton onClick={confirmarGuardado} disabled={guardando}>{guardando ? "Guardando…" : "Guardar en Control de fatiga"}</DsButton>
+            <DsButton variant="secondary" onClick={limpiarSeleccion} disabled={guardando}>Cancelar</DsButton>
+          </div>
+        </div>
+      ) : null}
+
+      {resultado && (
+        <div style={{ marginTop: 20 }}>
+          <DsCard status="done" style={{ padding: 14, fontSize: 13 }}>
+            Guardado: {resultado.guardados} test{resultado.guardados === 1 ? "" : "s"} de {resultado.jugadoresGuardados} jugador{resultado.jugadoresGuardados === 1 ? "" : "es"}.
+            {resultado.ignorados > 0 && ` ${resultado.ignorados} jugador(es) ignorados.`}
+            {resultado.pendientes > 0 && ` ${resultado.pendientes} quedaron sin vincular (no se guardaron sus tests) — vuelve a subir el mismo CSV cuando quieras resolverlo.`}
+          </DsCard>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------- PROGRAMACIÓN (calcado de programacion.jsx) ----------
 
@@ -8385,6 +9238,9 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
   }
   if (coachModulo === "programacion") {
     return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
+  }
+  if (coachModulo === "fatiga") {
+    return <ControlFatigaModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
 
   return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
