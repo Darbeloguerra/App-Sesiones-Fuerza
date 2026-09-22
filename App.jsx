@@ -83,13 +83,14 @@ function GlobalStyles() {
       .ds-button:disabled { opacity: 0.55; cursor: not-allowed; transform: none !important; }
 
       .ds-card {
-        background: ${ds.surface}; border: 1px solid ${ds.border}; border-radius: ${dsR.lg}px;
-        padding: ${dsSp[5]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
-        box-shadow: ${dsSh.elevation2};
+        background: linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%);
+        border: 1px solid ${ds.borderSoft}; border-radius: ${dsR.xl}px;
+        padding: ${dsSp[6]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
+        box-shadow: ${dsSh.elevation2}, inset 0 1px 0 rgba(255,255,255,0.03);
         transition: box-shadow 160ms ease-out, border-color 160ms ease-out, transform 160ms ease-out;
       }
       .ds-card--interactive { cursor: pointer; }
-      .ds-card--interactive:hover { box-shadow: ${dsSh.elevation3}; border-color: ${ds.borderMuted}; transform: translateY(-1px); }
+      .ds-card--interactive:hover { box-shadow: ${dsSh.elevation3}, inset 0 1px 0 rgba(255,255,255,0.05); border-color: ${ds.borderMuted}; transform: translateY(-2px); }
       .ds-card--interactive:active { transform: translateY(0) scale(0.995); }
       .ds-card--done { border-color: ${ds.successBorderSubtle}; background: linear-gradient(180deg, ${ds.success}0d, ${ds.surface} 40%); }
       .ds-card--error { border-color: ${ds.dangerBorderSubtle}; }
@@ -158,13 +159,14 @@ function GlobalStyles() {
       .ds-navitem svg { flex-shrink: 0; }
 
       .ds-stattile {
-        background: ${ds.surface}; border: 1px solid ${ds.border}; border-radius: ${dsR.xl}px;
+        background: linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%);
+        border: 1px solid ${ds.borderSoft}; border-radius: ${dsR.xl}px;
         padding: ${dsSp[6]}px; display: flex; flex-direction: column; gap: ${dsSp[4]}px;
-        box-shadow: ${dsSh.elevation2}; transition: transform 160ms ease-out, box-shadow 160ms ease-out;
+        box-shadow: ${dsSh.elevation2}, inset 0 1px 0 rgba(255,255,255,0.03); transition: transform 160ms ease-out, box-shadow 160ms ease-out;
       }
-      .ds-stattile:hover { transform: translateY(-2px); box-shadow: ${dsSh.elevation3}; }
-      .ds-stattile__label { font-family: ${dsF.mono}; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; color: ${ds.inkMuted}; text-transform: uppercase; }
-      .ds-stattile__value { font-family: ${dsF.display}; font-size: 28px; font-weight: 700; color: ${ds.ink}; }
+      .ds-stattile:hover { transform: translateY(-2px); box-shadow: ${dsSh.elevation3}, inset 0 1px 0 rgba(255,255,255,0.05); }
+      .ds-stattile__label { font-family: ${dsF.mono}; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; color: ${ds.inkMuted}; text-transform: uppercase; }
+      .ds-stattile__value { font-family: ${dsF.display}; font-size: 32px; font-weight: 800; color: ${ds.ink}; line-height: 1.05; }
       .ds-stattile__delta { display: flex; align-items: center; gap: 4px; font-size: 11.5px; }
       .ds-stattile__delta--up { color: ${ds.success}; }
       .ds-stattile__delta--down { color: ${ds.danger}; }
@@ -1839,7 +1841,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (fallosDeConexion && coachPin == null && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10, color: ds.danger }}>No se pudo conectar</div>
@@ -1863,7 +1865,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   if (coachPin == null && !creatingPin && !resultado) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10 }}>Primer acceso</div>
@@ -1882,7 +1884,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
     return screenWrap(
       <div style={{ width: "100%", maxWidth: 320 }}>
         <div style={{ textAlign: "center", marginBottom: 20 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
             ENTRENAMIENTO DE FUERZA
           </div>
           <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700 }}>Crea tu código de entrenador</div>
@@ -1943,7 +1945,7 @@ function PortalAcceso({ onEnterCoach, onEnterPlayer }) {
   return screenWrap(
     <div style={{ width: "100%", maxWidth: 320 }}>
       <div style={{ textAlign: "center", marginBottom: 28 }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.accent, marginBottom: 6 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>
           ENTRENAMIENTO DE FUERZA
         </div>
         <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700 }}>Introduce tu código</div>
@@ -2562,7 +2564,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
     <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>USUARIOS</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
             {activos} activos · {suspendidos} suspendidos · {independientes} independientes
@@ -4372,7 +4374,7 @@ function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="historial" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>HISTORIAL</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>HISTORIAL</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
@@ -4469,7 +4471,7 @@ function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="fatiga" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>CONTROL DE FATIGA</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>CONTROL DE FATIGA</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Salto CMJ</h1>
         </div>
         <DsTabSwitcher tabs={TABS} active={vista} onChange={setVista} />
@@ -5753,7 +5755,7 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
     <PantallaEntrenadorAncha activo="programacion" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>PROGRAMACIÓN</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>PROGRAMACIÓN</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
         </div>
@@ -6355,7 +6357,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             ← Volver al dashboard
           </button>
           <div style={{ marginBottom: 18 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>SESIONES DE HOY</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>SESIONES DE HOY</div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>{player.name}</h1>
             <div style={{ fontSize: 12.5, color: ds.inkSecondary, textTransform: "capitalize" }}>{fmtDateLabel(date)} · elige cuál trabajar ahora</div>
           </div>
@@ -6715,7 +6717,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         <div>
           <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
             <div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.accent, marginBottom: 4, textTransform: "uppercase" }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>
                 HOY · {fmtDateLabel(date).toUpperCase()}
               </div>
               <h1 style={{ fontFamily: dsF.display, fontSize: 23, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Hola, {player.name}</h1>
@@ -6951,7 +6953,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           </button>
         )}
         <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>
             HOY · {fmtDateLabel(date).toUpperCase()}
           </div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>Sesión de hoy</h1>
@@ -7579,7 +7581,7 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
       <div>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>BIBLIOTECA</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>BIBLIOTECA</div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ejercicios</h1>
             <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{ejercicios.length} ejercicios creados</div>
           </div>
@@ -9067,7 +9069,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
@@ -9726,7 +9728,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.accent, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
           <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE DE LA DINÁMICA</span>
