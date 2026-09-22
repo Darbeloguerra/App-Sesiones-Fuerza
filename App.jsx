@@ -4472,7 +4472,7 @@ function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
         <div style={{ marginTop: 16 }}>
           {vista === "subir" && <CmjSubirCsvReal />}
           {vista === "estado" && <CmjProximamente titulo="Estado actual" texto="El semáforo semanal por jugador (con umbrales individualizados y detección de divergencia) llega en el siguiente paso, una vez tengas microciclos y algún CSV ya cargados." />}
-          {vista === "microciclos" && <CmjProximamente titulo="Microciclos" texto="Aquí definirás las fechas de Inicio / MD-2 / MD+1 de cada semana. Todavía no está construido." />}
+          {vista === "microciclos" && <CmjMicrociclosReal />}
           {vista === "ranking" && <CmjProximamente titulo="Ranking" texto="El ranking histórico por jugador llega al final de este módulo, cuando el resto ya esté funcionando." />}
         </div>
       </div>
@@ -4486,6 +4486,160 @@ function CmjProximamente({ titulo, texto }) {
       <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 6 }}>{titulo}</div>
       <div style={{ fontSize: 12.5, lineHeight: 1.5, maxWidth: 420, margin: "0 auto" }}>{texto}</div>
     </DsCard>
+  );
+}
+
+const CMJ_MICROCICLO_FORM_VACIO = { id: null, numero: "", inicio: "", md2: "", md1: "" };
+
+function CmjMicrociclosReal() {
+  const [microciclos, setMicrociclos] = useState([]);
+  const [loaded, setLoaded] = useState(false);
+  const [form, setForm] = useState(CMJ_MICROCICLO_FORM_VACIO);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+
+  const cargar = useCallback(async () => {
+    const { data, error } = await supabase.from("cmj_microciclos").select("*");
+    if (!error) setMicrociclos(data || []);
+    setLoaded(true);
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const ordenados = useMemo(() => cmjOrderedMicroList(microciclos), [microciclos]);
+  const actual = useMemo(() => cmjFindCurrentMicroId(ordenados), [ordenados]);
+  const isEditing = form.id != null;
+
+  const empezarNuevo = useCallback(() => {
+    setForm({ ...CMJ_MICROCICLO_FORM_VACIO, numero: cmjSuggestNextNumero(microciclos) });
+  }, [microciclos]);
+
+  // En cuanto se cargan los microciclos por primera vez, se rellena el
+  // formulario con el siguiente número sugerido — así el campo nunca
+  // aparece vacío sin motivo.
+  useEffect(() => {
+    if (loaded && form.id == null && form.numero === "") empezarNuevo();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loaded]);
+
+  function empezarEdicion(m) {
+    setForm({
+      id: m.id,
+      numero: m.numero || "",
+      inicio: m.inicio ? m.inicio.slice(0, 10) : "",
+      md2: m.md2 ? m.md2.slice(0, 10) : "",
+      md1: m.md1 ? m.md1.slice(0, 10) : "",
+    });
+  }
+
+  async function guardar() {
+    if (!form.numero.trim()) return;
+    setGuardando(true);
+    setError("");
+    const row = {
+      id: form.id || genId("cmjmicro"),
+      numero: form.numero.trim(),
+      inicio: form.inicio || null,
+      md2: form.md2 || null,
+      md1: form.md1 || null,
+    };
+    const { error } = await supabase.from("cmj_microciclos").upsert(row, { onConflict: "id" });
+    if (error) {
+      setError(error.message);
+    } else {
+      await cargar();
+      empezarNuevo();
+    }
+    setGuardando(false);
+  }
+
+  async function eliminar(id) {
+    const { error } = await supabase.from("cmj_microciclos").delete().eq("id", id);
+    if (!error) {
+      await cargar();
+      if (form.id === id) empezarNuevo();
+    }
+  }
+
+  if (!loaded) return <LoadingBlock />;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  return (
+    <div>
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>{isEditing ? `Editando microciclo Nº ${form.numero || "—"}` : "Nuevo microciclo"}</div>
+        <div style={{ fontSize: 12, color: ds.inkMuted, lineHeight: 1.5 }}>
+          Número y fechas de Inicio / MD-2 / MD+1. Puedes dejar alguna fecha en blanco si esa semana no toca ese test, y programar fechas futuras.
+        </div>
+      </div>
+
+      <DsCard style={{ padding: 14, marginBottom: 20 }}>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ minWidth: 90 }}>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 4 }}>Número</div>
+            <DsInput value={form.numero} onChange={(e) => setForm({ ...form, numero: e.target.value })} placeholder="ej. 12" style={{ width: 80 }} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: CMJ_TAG_META.inicio.color, marginBottom: 4 }}>Inicio microciclo</div>
+            <DsInput type="date" value={form.inicio} onChange={(e) => setForm({ ...form, inicio: e.target.value })} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: CMJ_TAG_META.md2.color, marginBottom: 4 }}>MD-2</div>
+            <DsInput type="date" value={form.md2} onChange={(e) => setForm({ ...form, md2: e.target.value })} />
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: CMJ_TAG_META.md1.color, marginBottom: 4 }}>MD+1</div>
+            <DsInput type="date" value={form.md1} onChange={(e) => setForm({ ...form, md1: e.target.value })} />
+          </div>
+        </div>
+        {error && <div style={{ marginTop: 10, fontSize: 12, color: ds.danger }}>{error}</div>}
+        <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
+          <DsButton size="sm" onClick={guardar} disabled={guardando || !form.numero.trim()}>
+            {guardando ? "Guardando…" : isEditing ? "Guardar cambios" : "Guardar microciclo"}
+          </DsButton>
+          {isEditing && (
+            <DsButton size="sm" variant="secondary" onClick={empezarNuevo} disabled={guardando}>
+              Cancelar edición
+            </DsButton>
+          )}
+        </div>
+      </DsCard>
+
+      <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 8 }}>Microciclos registrados</div>
+      {ordenados.length === 0 ? (
+        <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Aún no hay ninguno guardado.</div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {ordenados.map((m) => {
+            const ref = cmjMicroRefDate(m);
+            const refDate = ref ? new Date(ref + "T00:00:00") : null;
+            const cuando = m.id === actual.id ? "Actual" : refDate && refDate > today ? "Futuro" : "Pasado";
+            const cuandoColor = cuando === "Actual" ? ds.accent : cuando === "Futuro" ? ds.chart2 : ds.inkMuted;
+            return (
+              <DsCard key={m.id} style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 12px", flexWrap: "wrap" }}>
+                <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 13, minWidth: 40 }}>Nº{m.numero}</div>
+                <div style={{ display: "flex", gap: 14, flex: 1, minWidth: 220, fontSize: 12 }}>
+                  <div><span style={{ color: CMJ_TAG_META.inicio.color }}>Inicio</span> {m.inicio ? fmtDateShort(m.inicio) : "—"}</div>
+                  <div><span style={{ color: CMJ_TAG_META.md2.color }}>MD-2</span> {m.md2 ? fmtDateShort(m.md2) : "—"}</div>
+                  <div><span style={{ color: CMJ_TAG_META.md1.color }}>MD+1</span> {m.md1 ? fmtDateShort(m.md1) : "—"}</div>
+                </div>
+                <div style={{ fontSize: 11.5, fontWeight: 600, color: cuandoColor }}>{cuando}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => empezarEdicion(m)} style={{ background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12, cursor: "pointer", padding: 0 }}>
+                    Editar
+                  </button>
+                  <button onClick={() => eliminar(m.id)} style={{ background: "transparent", border: "none", color: ds.danger, fontSize: 12, cursor: "pointer", padding: 0 }}>
+                    Eliminar
+                  </button>
+                </div>
+              </DsCard>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
 
