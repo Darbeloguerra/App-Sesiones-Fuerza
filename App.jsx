@@ -6378,17 +6378,27 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 />
               </label>
             )}
-              <div style={{ width: 1, background: ds.border, margin: "0 12px" }} />
-              <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-                <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
-                <input
-                  value={registro.rir}
-                  onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
-                  placeholder="—"
-                  style={{ background: "transparent", border: "none", borderBottom: `2px solid ${ds.border}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
-                />
-              </label>
+              {tarea.pideRir !== false && (
+                <>
+                  <div style={{ width: 1, background: ds.border, margin: "0 12px" }} />
+                  <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                    <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
+                    <input
+                      value={registro.rir}
+                      onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
+                      placeholder="—"
+                      style={{ background: "transparent", border: "none", borderBottom: `2px solid ${ds.border}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
+                    />
+                  </label>
+                </>
+              )}
             </div>
+            {tarea.pideRir === false && (
+              // Carga ligera (<65% 1RM): a esa intensidad el RIR autopercibido
+              // pierde fiabilidad, así que no se le pide al jugador. La carga
+              // sugerida ya viene calculada a partir de su 1RM estimado.
+              <div style={{ fontSize: 11, color: ds.inkMuted }}>Carga ligera: no hace falta indicar RIR</div>
+            )}
           </div>
         </div>
       )}
@@ -6870,6 +6880,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
         const carga = Number(it.cargaReal);
         if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+        if (reps > REPS_MAX_RIR_FIABLE) return null;
         const pct = pct1RMporRTF(reps + rir);
         return pct ? carga / pct : null;
       })
@@ -7002,6 +7013,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         !esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && mejorE1rmPorNombre.has(nombre)
           ? Math.round(((mejorE1rmPorNombre.get(nombre) * Number(t.pct1rm)) / 100 / 2.5)) * 2.5
           : null,
+      // A menos del 65% del 1RM el RIR autopercibido deja de ser fiable (a
+      // esa intensidad el fallo está muy lejos y cuesta "sentir" cuántas
+      // repeticiones quedan en la recámara), así que en cargas por %1RM por
+      // debajo de ese umbral no se le pide RIR al jugador.
+      pideRir: !(!esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && Number(t.pct1rm) < 65),
       // Vídeo por variante (material + modo): si hay uno grabado para la
       // combinación exacta, se usa; si no, cae al vídeo genérico del
       // ejercicio. Cuando la tarea deja elegir material, no se fija un solo
@@ -7891,6 +7907,13 @@ function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo)
 // ejercicio) — el margen de error real es de varios puntos porcentuales,
 // mayor cuanto más se aleje el RTF de 1-10 o más difieran las reps.
 const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75 };
+// Por encima de ~12 repeticiones, el RIR reportado por el jugador deja de
+// ser fiable (la relación reps-%1RM ya no es lineal y la autopercepción del
+// RIR se degrada mucho en series largas — ver conversación) y la tabla de
+// arriba ni siquiera cubre ese RTF. Cualquier cálculo de e1RM basado en RIR
+// descarta las series por encima de este umbral en vez de forzarlas dentro
+// de la tabla (lo que antes producía un e1RM muy por debajo del real).
+const REPS_MAX_RIR_FIABLE = 12;
 function pct1RMporRTF(rtf) {
   const rtfClamp = Math.max(1, Math.min(10, rtf));
   const base = Math.floor(rtfClamp);
@@ -7915,6 +7938,7 @@ function calcularCargaSugerida(registroRef, repsHoy, rirHoy, redondeo = 2.5) {
   const repsObjetivo = Number(repsHoy);
   const rirObjetivo = rirHoy !== "" && rirHoy != null ? Number(rirHoy) : null;
   if (!cargaRef || Number.isNaN(cargaRef) || Number.isNaN(repsRef) || rirRef == null || Number.isNaN(repsObjetivo) || rirObjetivo == null) return null;
+  if (repsRef > REPS_MAX_RIR_FIABLE || repsObjetivo > REPS_MAX_RIR_FIABLE) return null;
   if (Math.abs(repsObjetivo - repsRef) > 4) return null;
   const pctRef = pct1RMporRTF(repsRef + rirRef);
   const pctHoy = pct1RMporRTF(repsObjetivo + rirObjetivo);
@@ -9019,11 +9043,17 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
   const opciones = [];
   matrices.forEach((m) => {
-    if (!coincideBloque(m)) return;
-    const variantes = (variantesPorMatriz[m.id] || []).filter((v) => coincideBloque(v) && coincideTexto(v));
-    if (coincideTexto(m) || variantes.length) {
+    // Igual que en la Biblioteca: la familia se muestra si la MATRIZ o
+    // CUALQUIERA de sus variantes encaja con el bloque/texto buscado — antes
+    // se exigía que la matriz en sí encajara con el bloque, así que una
+    // variante guardada en otro bloque (p. ej. matriz en "Movilidad" con una
+    // variante pensada para "Fuerza") quedaba invisible aquí aunque sí
+    // apareciera en la Biblioteca general.
+    const matrizCoincide = coincideBloque(m) && coincideTexto(m);
+    const variantesCoinciden = (variantesPorMatriz[m.id] || []).filter((v) => coincideBloque(v) && coincideTexto(v));
+    if (matrizCoincide || variantesCoinciden.length) {
       opciones.push(m);
-      variantes.forEach((v) => opciones.push({ ...v, esVariante: true }));
+      variantesCoinciden.forEach((v) => opciones.push({ ...v, esVariante: true }));
     }
   });
 
