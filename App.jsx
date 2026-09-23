@@ -3355,7 +3355,7 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
 // registro trae (reps, RIR) además de la fecha y el valor que ya se veían.
 // Por defecto el último punto está seleccionado, para no cambiar lo que ya
 // se veía si nadie toca nada.
-function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
+function GraficaProgresoCargaReal({ puntos, unidad = "kg", mostrarListaCompleta = true }) {
   // Id único por instancia: puede haber varias de estas gráficas montadas a
   // la vez en la misma pantalla (una por tarea), y los <defs> de SVG son
   // globales al documento — sin esto, dos gráficas compartirían el mismo
@@ -3441,35 +3441,71 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg" }) {
         <text x={coordX(0)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{fmtDateShort(primero.date)}</text>
         <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
       </svg>
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
-        {[...puntos].reverse().map((p, iRev) => {
-          const i = puntos.length - 1 - iRev;
-          const esActivo = i === indiceActivo;
+      {mostrarListaCompleta ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+          {[...puntos].reverse().map((p, iRev) => {
+            const i = puntos.length - 1 - iRev;
+            const esActivo = i === indiceActivo;
+            return (
+              <div
+                key={i}
+                onClick={() => setSeleccionado(i)}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: ds.inkSecondary,
+                  fontFamily: dsF.mono,
+                  cursor: "pointer",
+                  padding: "3px 6px",
+                  margin: "0 -6px",
+                  borderRadius: dsR.sm,
+                  background: esActivo ? ds.accentSubtle : "transparent",
+                }}
+              >
+                <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(p.date)}</span>
+                <span style={{ color: ds.ink }}>
+                  {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        // Vista jugador: no se enseña el histórico completo (eso lo reserva
+        // el entrenador), solo el registro más reciente — la ficha de arriba
+        // ya cubre el resto al tocar cualquier punto de la gráfica.
+        (() => {
+          const iUltimo = puntos.length - 1;
+          const pUltimo = puntos[iUltimo];
+          const esActivo = iUltimo === indiceActivo;
           return (
-            <div
-              key={i}
-              onClick={() => setSeleccionado(i)}
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                fontSize: 11.5,
-                color: ds.inkSecondary,
-                fontFamily: dsF.mono,
-                cursor: "pointer",
-                padding: "3px 6px",
-                margin: "0 -6px",
-                borderRadius: dsR.sm,
-                background: esActivo ? ds.accentSubtle : "transparent",
-              }}
-            >
-              <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(p.date)}</span>
-              <span style={{ color: ds.ink }}>
-                {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
-              </span>
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, marginBottom: 4 }}>MÁS RECIENTE</div>
+              <div
+                onClick={() => setSeleccionado(iUltimo)}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: ds.inkSecondary,
+                  fontFamily: dsF.mono,
+                  cursor: "pointer",
+                  padding: "3px 6px",
+                  margin: "0 -6px",
+                  borderRadius: dsR.sm,
+                  background: esActivo ? ds.accentSubtle : "transparent",
+                }}
+              >
+                <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(pUltimo.date)}</span>
+                <span style={{ color: ds.ink }}>
+                  {pUltimo.valor}{unidad}{pUltimo.rir !== "" && pUltimo.rir != null ? ` · RIR${pUltimo.rir}` : ""}
+                </span>
+              </div>
             </div>
           );
-        })}
-      </div>
+        })()
+      )}
     </div>
   );
 }
@@ -4040,92 +4076,191 @@ function cmjSuggestNextNumero(microciclos) {
   return nums.length === 0 ? "1" : String(Math.max(...nums) + 1);
 }
 
-// "Mi progreso" — versión ligera de la pestaña "Progreso por tarea" de
-// HistorialPorJugador, para la propia vista del jugador: sin selector de
-// jugador (siempre es el suyo), sin filtro de fechas, sin herramientas de
-// entrenador. Deliberadamente sencilla — solo lo que pidió: información de
-// interés a partir de datos que ya se registran, sin profundizar más.
-function MiProgresoJugadorReal({ items, loaded }) {
-  const [tareaSel, setTareaSel] = useState("");
+// "Mi progreso" — para la propia vista del jugador: sin selector de jugador
+// (siempre es el suyo), sin filtro de fechas, sin herramientas de entrenador.
+// Tres secciones:
+//  1. Progreso por ejercicio — 1RM estimado (o RTF en reps si el ejercicio
+//     nunca lleva carga, p. ej. dominadas) agrupado solo por EJERCICIO, no
+//     por esquema exacto de reps/RIR — así periodizar no "resetea" la curva.
+//     El gráfico solo aparece tras elegir un ejercicio, y en el jugador se
+//     recortan a los últimos 5 registros (el histórico completo lo ve el
+//     entrenador en Historial, con el mismo componente sin recortar).
+//  2. Constancia — racha de semanas cumpliendo el plan, más allá de la
+//     semana actual que ya se ve en el Dashboard.
+//  3. Volumen de entrenamiento — series completadas por semana.
+function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSemanas = 0 }) {
+  const [ejercicioSel, setEjercicioSel] = useState("");
 
   if (!loaded) return <LoadingBlock />;
 
-  // Resumen de cumplimiento: sesiones distintas (fecha) con al menos una
-  // tarea completada, en los últimos 30 días — un número de un vistazo,
-  // no un informe.
-  const hace30dias = new Date();
-  hace30dias.setDate(hace30dias.getDate() - 30);
-  const hace30str = hace30dias.toISOString().slice(0, 10);
-  const fechasCompletadas = new Set(items.filter((it) => it.done && it.date >= hace30str).map((it) => it.date));
+  const elegibles = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ");
 
-  const combinacionesPorClave = new Map();
-  items
-    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
-    .forEach((it) => {
-      const equipo = materialEfectivo(it);
-      const clave = claveDisenoTarea(it.name, equipo, it.unilateral, it.reps, it.rir);
-      if (combinacionesPorClave.has(clave)) return;
-      const detalleEquipo = equipo && equipo !== "std" ? ` · ${equipo}` : "";
-      const detalleRir = it.rir !== "" && it.rir != null ? ` · RIR${it.rir}` : "";
-      const detalleLateral = it.unilateral ? " · unilateral" : "";
-      combinacionesPorClave.set(clave, { clave, etiqueta: `${it.name}${detalleEquipo} · ${it.reps} ${it.unidad || "reps"}${detalleRir}${detalleLateral}` });
-    });
-  const combinaciones = [...combinacionesPorClave.values()].sort((a, b) => a.etiqueta.localeCompare(b.etiqueta));
-  const claveActiva = tareaSel || combinaciones[0]?.clave || "";
-  const puntos = claveActiva
-    ? items
-        .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null && claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir) === claveActiva)
-        .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((it) => ({ date: it.date, valor: Number(it.cargaReal), rir: it.rirReal, reps: it.repsReal }))
-    : [];
+  // ¿Este ejercicio se ha trabajado alguna vez con carga registrada? Si sí,
+  // se compara en 1RM estimado (kg); si nunca lleva carga (dominadas,
+  // fondos...), se compara en RTF — reps estimadas hasta el fallo — mismo
+  // motor que ya usamos para las recomendaciones de carga y "Tus récords"
+  // del Dashboard, solo que aquí no se da el último paso a kg cuando no hay
+  // con qué darlo.
+  const tieneCargaPorNombre = new Set();
+  elegibles.forEach((it) => {
+    if (it.cargaReal !== "" && it.cargaReal != null && Number(it.cargaReal) > 0) tieneCargaPorNombre.add(it.name);
+  });
 
-  // Cabecera de número grande: valor más reciente + variación desde el
-  // primer registro visible, en semanas — mismo criterio de jerarquía por
-  // tamaño (WHOOP) que el resto de la app: el dato que más importa se lee
-  // antes que ningún otro elemento de la pantalla.
-  let cabeceraProgreso = null;
-  if (puntos.length >= 2) {
-    const primero = puntos[0];
-    const ultimo = puntos[puntos.length - 1];
-    const deltaValor = ultimo.valor - primero.valor;
-    const semanas = Math.max(1, Math.round((new Date(ultimo.date) - new Date(primero.date)) / (7 * 86400000)));
-    cabeceraProgreso = { valor: ultimo.valor, deltaValor, semanas };
-  }
+  const datosPorNombre = new Map();
+  elegibles.forEach((it) => {
+    const reps = Number(it.repsReal);
+    const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+    if (it.repsReal === "" || it.repsReal == null || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return;
+    if (reps > REPS_MAX_RIR_FIABLE) return;
+    const conCarga = tieneCargaPorNombre.has(it.name);
+    let valor;
+    let unidad;
+    if (conCarga) {
+      const carga = Number(it.cargaReal);
+      if (!carga || Number.isNaN(carga)) return; // este registro concreto no tiene carga -> no comparable en esta rama
+      const pct = pct1RMporRTF(reps + rir);
+      if (!pct) return;
+      valor = Math.round((carga / pct) * 10) / 10;
+      unidad = "kg";
+    } else {
+      valor = reps + rir;
+      unidad = " reps";
+    }
+    if (!datosPorNombre.has(it.name)) datosPorNombre.set(it.name, { unidad, puntos: [] });
+    datosPorNombre.get(it.name).puntos.push({ date: it.date, valor, rir: it.rirReal, reps: it.repsReal });
+  });
+  datosPorNombre.forEach((v) => v.puntos.sort((a, b) => (a.date < b.date ? -1 : 1)));
+
+  const combinaciones = [...datosPorNombre.keys()].sort((a, b) => a.localeCompare(b));
+  const datosActivos = ejercicioSel ? datosPorNombre.get(ejercicioSel) : null;
+  const puntos = datosActivos ? datosActivos.puntos.slice(-5) : [];
 
   return (
-    <div>
-      <DsCard style={{ padding: "14px 16px", marginBottom: 16 }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 4 }}>ÚLTIMOS 30 DÍAS</div>
-        <div style={{ fontSize: 20, fontWeight: 700, color: ds.ink }}>
-          {fechasCompletadas.size} {fechasCompletadas.size === 1 ? "sesión completada" : "sesiones completadas"}
-        </div>
-      </DsCard>
-
-      <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6, letterSpacing: "0.05em" }}>PROGRESO POR EJERCICIO</div>
-      <DsSelect value={claveActiva} onChange={(e) => setTareaSel(e.target.value)} style={{ marginBottom: 14 }}>
-        {combinaciones.length === 0 && <option value="">Sin tareas con carga registrada todavía</option>}
-        {combinaciones.map((c) => (
-          <option key={c.clave} value={c.clave}>
-            {c.etiqueta}
-          </option>
-        ))}
-      </DsSelect>
-
-      <DsCard style={{ padding: "16px 18px" }}>
-        {cabeceraProgreso && (
-          <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 4 }}>
-            <span style={{ fontFamily: dsF.display, fontSize: 34, fontWeight: 800, color: ds.ink, lineHeight: 1 }}>
-              {cabeceraProgreso.valor}<span style={{ fontSize: 18, fontWeight: 700, color: ds.inkSecondary }}>kg</span>
-            </span>
-            {cabeceraProgreso.deltaValor !== 0 && (
-              <span style={{ fontSize: 12.5, fontWeight: 700, color: cabeceraProgreso.deltaValor > 0 ? ds.success : ds.danger, marginLeft: "auto" }}>
-                {cabeceraProgreso.deltaValor > 0 ? "+" : ""}{cabeceraProgreso.deltaValor}kg en {cabeceraProgreso.semanas} {cabeceraProgreso.semanas === 1 ? "semana" : "semanas"}
-              </span>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* 1. PROGRESO POR EJERCICIO */}
+      <div>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 8, letterSpacing: "0.05em" }}>PROGRESO POR EJERCICIO</div>
+        <DsSelect value={ejercicioSel} onChange={(e) => setEjercicioSel(e.target.value)} style={{ marginBottom: ejercicioSel ? 10 : 0 }}>
+          <option value="">Elige un ejercicio…</option>
+          {combinaciones.length === 0 && <option value="" disabled>Sin registros todavía</option>}
+          {combinaciones.map((nombre) => (
+            <option key={nombre} value={nombre}>
+              {nombre}
+            </option>
+          ))}
+        </DsSelect>
+        {ejercicioSel && (
+          <DsCard style={{ padding: "16px 18px" }}>
+            {puntos.length >= 2 ? (
+              <>
+                <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 10 }}>
+                  {datosActivos.unidad === "kg" ? "1RM estimado" : "Reps estimadas al fallo"} · últimos {puntos.length} registros
+                  {datosActivos.puntos.length > 5 ? " (el histórico completo lo ve tu entrenador)" : ""}
+                </div>
+                <GraficaProgresoCargaReal puntos={puntos} unidad={datosActivos.unidad} mostrarListaCompleta={false} />
+              </>
+            ) : (
+              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "12px 0", textAlign: "center" }}>
+                Hace falta al menos 2 registros de este ejercicio para trazar la evolución.
+              </div>
             )}
-          </div>
+          </DsCard>
         )}
-        <GraficaProgresoCargaReal puntos={puntos} />
-      </DsCard>
+      </div>
+
+      {/* 2. CONSTANCIA — desplegable, con mini-preview siempre visible */}
+      {historialSemanas.length > 0 && (
+        <details>
+          <summary style={{ cursor: "pointer", listStyle: "none", display: "block" }}>
+            <div style={{ background: `linear-gradient(135deg, ${ds.success}14, ${ds.bgElevated})`, border: `1px solid ${ds.success}55`, borderRadius: dsR.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={{ width: 34, height: 34, borderRadius: 10, background: `${ds.success}22`, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.success }}>
+                <Zap size={17} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 2 }}>CONSTANCIA</div>
+                <div style={{ fontSize: 14 }}>
+                  <b style={{ color: ds.ink, fontWeight: 800 }}>{rachaSemanas} {rachaSemanas === 1 ? "semana" : "semanas"}</b> <span style={{ color: ds.inkSecondary }}>cumpliendo tu plan</span>
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 26, flexShrink: 0 }}>
+                {historialSemanas.map((s, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      width: 4,
+                      height: `${s.pct != null ? Math.max(15, s.pct) : 15}%`,
+                      background: i === historialSemanas.length - 1 ? ds.accent : s.pct != null && s.pct >= 80 ? ds.success : ds.border,
+                      borderRadius: 2,
+                    }}
+                  />
+                ))}
+              </div>
+              <span style={{ color: ds.inkMuted, fontSize: 15, flexShrink: 0 }}>▸</span>
+            </div>
+          </summary>
+          <div style={{ marginTop: 8, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "16px 18px" }}>
+            <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, marginBottom: 6 }}>ÚLTIMAS {historialSemanas.length} SEMANAS</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 60 }}>
+              {historialSemanas.map((s, i) => (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                  <div
+                    style={{
+                      width: "100%",
+                      height: `${s.pct != null ? Math.max(6, s.pct) : 6}%`,
+                      background: s.pct != null && s.pct >= 80 ? ds.success : s.pct != null ? `${ds.success}55` : ds.border,
+                      borderRadius: 3,
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, marginTop: 6 }}>
+              <span>hace {historialSemanas.length} sem.</span>
+              <span>esta semana</span>
+            </div>
+            <div style={{ fontSize: 11, color: ds.inkSecondary, marginTop: 10 }}>Cumples ≥80% de lo pautado esa semana → cuenta como semana en racha.</div>
+          </div>
+        </details>
+      )}
+
+      {/* 3. VOLUMEN DE ENTRENAMIENTO — desplegable, con mini-sparkline */}
+      {historialSemanas.length > 0 && (() => {
+        const volActual = historialSemanas[historialSemanas.length - 1]?.volumen ?? 0;
+        const maxVol = Math.max(1, ...historialSemanas.map((s) => s.volumen));
+        const puntosSpark = historialSemanas.map((s, i) => `${(i / (historialSemanas.length - 1 || 1)) * 44 + 1},${25 - (s.volumen / maxVol) * 22}`).join(" ");
+        return (
+          <details>
+            <summary style={{ cursor: "pointer", listStyle: "none", display: "block" }}>
+              <div style={{ background: `linear-gradient(135deg, ${ds.accent}14, ${ds.bgElevated})`, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.lg, padding: "14px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+                <div style={{ width: 34, height: 34, borderRadius: 10, background: ds.accentSubtle, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.accent }}>
+                  <Activity size={17} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 2 }}>VOLUMEN</div>
+                  <div style={{ fontSize: 14 }}>
+                    <b style={{ color: ds.ink, fontWeight: 800 }}>{volActual} series</b> <span style={{ color: ds.inkSecondary }}>esta semana</span>
+                  </div>
+                </div>
+                <svg width="46" height="26" viewBox="0 0 46 26" style={{ flexShrink: 0 }}>
+                  <polyline points={puntosSpark} fill="none" stroke={ds.accent} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                <span style={{ color: ds.inkMuted, fontSize: 15, flexShrink: 0 }}>▸</span>
+              </div>
+            </summary>
+            <div style={{ marginTop: 8, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "16px 18px" }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 10 }}>series completadas por semana · últimas {historialSemanas.length} semanas</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 60 }}>
+                {historialSemanas.map((s, i) => (
+                  <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                    <div style={{ width: "100%", height: `${Math.max(6, (s.volumen / maxVol) * 100)}%`, background: ds.accent, borderRadius: 3 }} />
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: ds.inkSecondary, marginTop: 10 }}>Sube el número de series completadas, no solo el peso — para ver si el volumen total de trabajo también progresa.</div>
+            </div>
+          </details>
+        );
+      })()}
     </div>
   );
 }
@@ -5701,6 +5836,41 @@ function formatearDetalleTareaCoach(t) {
   return `${cantidad}${lateralidad}${cargaObjetivo}`;
 }
 
+// "REF. ANTERIOR" en la fila de tarea del entrenador (diseñar sesión): antes
+// nunca se rellenaba — tarea.referencia no lo pone nadie — así que siempre
+// aparecía "Sin registro previo" aunque el ejercicio ya se hubiera pautado
+// antes. Es un recordatorio para el entrenador, no un dato del jugador (una
+// sesión puede ir dirigida a varios), así que se calcula a partir de la
+// última vez (por fecha ya pasada) que ESTE ejercicio apareció en cualquier
+// sesión — sin contar la que se está editando ahora mismo — usando el mismo
+// formato que ya se usa en el resumen de Programación.
+function useReferenciasPorEjercicio(sesionActualId) {
+  const [tareasHistoricas, , tareasHistoricasLoaded] = useEntityList("tareas");
+  const [sesionesHistoricas, , sesionesHistoricasLoaded] = useEntityList("sesiones");
+  return useMemo(() => {
+    if (!tareasHistoricasLoaded || !sesionesHistoricasLoaded) return {};
+    const hoy = todayStr();
+    const fechaMasRecientePorSesion = new Map();
+    sesionesHistoricas.forEach((s) => {
+      const fechas = (s.fechas || []).filter((f) => f && f <= hoy);
+      if (fechas.length) fechaMasRecientePorSesion.set(s.id, fechas.slice().sort().slice(-1)[0]);
+    });
+    const porEjercicio = new Map();
+    tareasHistoricas.forEach((t) => {
+      if (!t.ejercicio_id || t.sesion_id === sesionActualId) return;
+      const fecha = fechaMasRecientePorSesion.get(t.sesion_id);
+      if (!fecha) return;
+      const actual = porEjercicio.get(t.ejercicio_id);
+      if (!actual || fecha > actual.fecha) porEjercicio.set(t.ejercicio_id, { fecha, tarea: t });
+    });
+    const resultado = {};
+    porEjercicio.forEach((v, ejercicioId) => {
+      resultado[ejercicioId] = formatearDetalleTareaCoach(v.tarea);
+    });
+    return resultado;
+  }, [tareasHistoricas, sesionesHistoricas, tareasHistoricasLoaded, sesionesHistoricasLoaded, sesionActualId]);
+}
+
 function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }) {
   const [abierta, setAbierta] = useState(esHoy);
   const [confirmando, setConfirmando] = useState(false);
@@ -6224,6 +6394,20 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   )}
                   {tarea.modoCarga === "pct1rm" && tarea.pct1rmObjetivo != null && tarea.cargaSugeridaPct1rm == null && (
                     <div style={{ color: ds.inkMuted, marginTop: 2 }}>Sin datos suficientes para estimar tu 1RM todavía</div>
+                  )}
+                  {/* Referencia/carga sugerida en modo RIR: antes solo se veía
+                      al desplegar la tarjeta — se repite aquí colapsada (igual
+                      que ya pasa con %1RM arriba) para los casos sin elección
+                      de material, que son la mayoría. Con material a elegir
+                      sigue haciendo falta desplegar, porque la referencia
+                      depende de cuál elijas. */}
+                  {tarea.modoCarga !== "pct1rm" && !tarea.eligeEquipo && tarea.cargaSugerida != null && (
+                    <div style={{ color: ds.accent, fontWeight: 700, marginTop: 2 }}>Carga recomendada: ~{tarea.cargaSugerida} kg</div>
+                  )}
+                  {tarea.modoCarga !== "pct1rm" && !tarea.eligeEquipo && tarea.referencia && (
+                    <div style={{ color: ds.inkMuted, marginTop: 2, fontWeight: 400 }}>
+                      {tarea.referenciaMismoDiseno ? "Última vez" : "Tu referencia más reciente"}: {tarea.referencia}
+                    </div>
                   )}
                 </div>
               )}
@@ -6810,6 +6994,30 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const adherenciaSemanaAnterior = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemanaAnterior, domingoSemanaAnterior));
   const deltaAdherenciaSemana = adherenciaSemanaActual != null && adherenciaSemanaAnterior != null ? adherenciaSemanaActual - adherenciaSemanaAnterior : null;
 
+  // Para la pestaña "Progreso" — Constancia (racha de semanas cumpliendo el
+  // plan) y Volumen (series completadas por semana). Últimas 8 semanas de
+  // calendario (lunes-domingo), la actual con el mismo límite superior "hoy"
+  // que adherenciaSemanaActual (si no, a mitad de semana se contaría como
+  // "pendiente" lo que aún no ha llegado). rachaSemanas cuenta semanas
+  // consecutivas (empezando por la más reciente hacia atrás) con ≥80% de
+  // adherencia — la misma frontera "cumplida" que ya usa el badge del
+  // Dashboard.
+  const N_SEMANAS_HISTORIAL = 8;
+  const historialSemanas = [];
+  for (let i = N_SEMANAS_HISTORIAL - 1; i >= 0; i--) {
+    const inicio = sumarDiasFecha(lunesSemana, -7 * i);
+    const finCalendario = sumarDiasFecha(inicio, 6);
+    const fin = i === 0 ? date : finCalendario;
+    const pct = calcularAdherenciaJugador(fechasAsignadasJugador(inicio, fin));
+    const volumen = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= inicio && it.date <= finCalendario).length;
+    historialSemanas.push({ inicio, pct, volumen });
+  }
+  let rachaSemanas = 0;
+  for (let i = historialSemanas.length - 1; i >= 0; i--) {
+    if (historialSemanas[i].pct != null && historialSemanas[i].pct >= 80) rachaSemanas++;
+    else break;
+  }
+
   // Paso 2 (calendario semanal, versión mínima): qué días concretos de esta
   // semana tienen sesión pautada para este jugador, y su estado — no solo el
   // % agregado. "L M X J V S D", lunes-domingo, igual semana que la
@@ -6835,23 +7043,44 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   // Récord de carga: se agrupa por NOMBRE de ejercicio (no por diseño exacto
   // de tarea) porque un PR es del ejercicio, no de una variante concreta de
-  // reps/RIR — y se destaca el PR más reciente, con el % sobre el máximo
-  // anterior a ese PR: 110kg de sentadilla no es "más logro" que 90kg de
-  // press banca, así que el kg en bruto no es comparable entre ejercicios,
-  // el % sobre el propio récord anterior sí.
+  // reps/RIR. ANTES comparaba el kg en bruto de la marca más pesada, lo que
+  // se rompía si cambiabas reps/RIR entre una marca y otra (la misma
+  // fragmentación que ya arreglamos en Progreso: 5 reps a RIR2 con menos kg
+  // puede ser más fuerza real que 12 reps a RIR0 con más kg). AHORA se
+  // compara el 1RM ESTIMADO (e1RM, mismo motor RTF que las recomendaciones
+  // de carga) de cada marca, así que el PR es fiel a la fuerza real
+  // conseguida sin importar con qué reps/RIR se logró. Solo entran marcas
+  // con reps/RIR fiables (ver REPS_MAX_RIR_FIABLE) — el resto no aporta un
+  // e1RM utilizable y se ignora para el récord.
   const registrosPorEjercicio = new Map();
   registrosConCarga.forEach((it) => {
     if (!registrosPorEjercicio.has(it.name)) registrosPorEjercicio.set(it.name, []);
     registrosPorEjercicio.get(it.name).push(it);
   });
+  const e1rmDeRegistro = (it) => {
+    const reps = Number(it.repsReal);
+    const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+    const carga = Number(it.cargaReal);
+    if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+    if (reps > REPS_MAX_RIR_FIABLE) return null;
+    const pct = pct1RMporRTF(reps + rir);
+    return pct ? carga / pct : null;
+  };
+  // mejorE1rmPorNombre: el mejor e1RM estimado de ESTE jugador para cada
+  // ejercicio — se reutiliza más abajo para sugerir cargas de tareas en
+  // modo %1RM (ver construirTareaVisual).
+  const mejorE1rmPorNombre = new Map();
   let recordCarga = null;
   registrosPorEjercicio.forEach((regs, nombre) => {
-    const ordenados = [...regs].sort((a, b) => Number(b.cargaReal) - Number(a.cargaReal));
+    const conE1rm = regs.map((it) => ({ it, e1rm: e1rmDeRegistro(it) })).filter((x) => x.e1rm != null);
+    if (!conE1rm.length) return;
+    const ordenados = [...conE1rm].sort((a, b) => b.e1rm - a.e1rm);
+    mejorE1rmPorNombre.set(nombre, ordenados[0].e1rm);
     const maxActual = ordenados[0];
-    const maxAnterior = ordenados.find((it) => it.id !== maxActual.id && Number(it.cargaReal) < Number(maxActual.cargaReal));
-    const pctSobreAnterior = maxAnterior ? ((Number(maxActual.cargaReal) - Number(maxAnterior.cargaReal)) / Number(maxAnterior.cargaReal)) * 100 : null;
-    if (!recordCarga || maxActual.date > recordCarga.fecha) {
-      recordCarga = { nombre, valor: Number(maxActual.cargaReal), fecha: maxActual.date, pctSobreAnterior };
+    const maxAnterior = ordenados.find((x) => x.it.id !== maxActual.it.id && x.e1rm < maxActual.e1rm);
+    const pctSobreAnterior = maxAnterior ? ((maxActual.e1rm - maxAnterior.e1rm) / maxAnterior.e1rm) * 100 : null;
+    if (!recordCarga || maxActual.it.date > recordCarga.fecha) {
+      recordCarga = { nombre, valor: Math.round(maxActual.e1rm), fecha: maxActual.it.date, pctSobreAnterior };
     }
   });
 
@@ -6864,53 +7093,52 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     mejorHistoricoPorNombre.set(nombre, Math.max(...regs.map((it) => Number(it.cargaReal))));
   });
 
-  // Modo %1RM: cuando el entrenador pauta la tarea como porcentaje del 1RM
-  // en vez de por RIR, hace falta un 1RM estimado (e1RM) del jugador para
-  // ese ejercicio. Se calcula el e1RM implícito de CADA marca histórica
-  // (carga / %1RM de su propio RTF, ver pct1RMporRTF) y se toma el mayor —
-  // es la mejor estimación disponible con los datos que hay, igual que un
-  // e1RM calculado a partir de cualquier serie con reps y RIR conocidos.
-  // Agrupado solo por nombre de ejercicio (no por material), mismo criterio
-  // que mejorHistoricoPorNombre / el récord de carga.
-  const mejorE1rmPorNombre = new Map();
-  registrosPorEjercicio.forEach((regs, nombre) => {
-    const e1rms = regs
-      .map((it) => {
-        const reps = Number(it.repsReal);
-        const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+  // Cambios esta semana frente a la propia media reciente de cada
+  // EJERCICIO. ANTES agrupaba por diseño exacto de tarea (mismo ejercicio +
+  // material + lateralidad + reps + RIR objetivo), así que cambiar la
+  // pauta entre semanas (habitual al periodizar) rompía la comparación —
+  // igual fragmentación que ya arreglamos en Progreso y en "Tus récords".
+  // AHORA se agrupa solo por nombre de ejercicio y se compara el 1RM
+  // estimado (e1RM) cuando el ejercicio maneja carga, o las reps al fallo
+  // estimadas (RTF: reps + RIR) cuando nunca se registra carga (p. ej.
+  // dominadas) — así ningún ejercicio se queda fuera solo por no llevar
+  // peso, y la comparación sigue siendo fiel aunque varíen reps/RIR/%1RM de
+  // una semana a otra. No nos quedamos solo con el mayor: se guardan todos
+  // los deltas (positivos, negativos y empatados) para poder mostrar el
+  // mayor de cada signo + cuántos más se movieron en la misma dirección.
+  const registrosPorNombreTodos = new Map();
+  historyItems
+    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .forEach((it) => {
+      if (!registrosPorNombreTodos.has(it.name)) registrosPorNombreTodos.set(it.name, []);
+      registrosPorNombreTodos.get(it.name).push(it);
+    });
+  const cambiosSemana = [];
+  registrosPorNombreTodos.forEach((regs, nombre) => {
+    const conCarga = registrosPorEjercicio.has(nombre);
+    // valorEstimado: e1RM (kg) si el ejercicio maneja carga, RTF (reps al
+    // fallo estimadas) si nunca la lleva — mismo criterio que Progreso.
+    const valorEstimado = (it) => {
+      const reps = Number(it.repsReal);
+      const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+      if (Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+      if (conCarga) {
         const carga = Number(it.cargaReal);
-        if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-        if (reps > REPS_MAX_RIR_FIABLE) return null;
+        if (!carga || Number.isNaN(carga) || reps > REPS_MAX_RIR_FIABLE) return null;
         const pct = pct1RMporRTF(reps + rir);
         return pct ? carga / pct : null;
-      })
-      .filter((v) => v != null);
-    if (e1rms.length) mejorE1rmPorNombre.set(nombre, Math.max(...e1rms));
-  });
-
-  // Cambios de carga esta semana frente a la propia media histórica de cada
-  // tarea, agrupando por diseño exacto (ejercicio + material + lateralidad +
-  // reps + RIR objetivo — igual criterio que cambioPctPorId en el
-  // historial). No nos quedamos solo con el mayor: se guardan todos los
-  // deltas (positivos, negativos y empatados) para poder mostrar el mayor de
-  // cada signo + cuántos más se movieron en la misma dirección, en vez de
-  // una tendencia por zona corporal que mezclaba ejercicios distintos.
-  const historialPorClave = new Map();
-  registrosConCarga.forEach((it) => {
-    const clave = claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir);
-    if (!historialPorClave.has(clave)) historialPorClave.set(clave, []);
-    historialPorClave.get(clave).push(it);
-  });
-  const cambiosSemana = [];
-  historialPorClave.forEach((regs) => {
-    const deEstaSemana = regs.filter((it) => it.date >= inicioSemanaActual);
-    const deAntes = regs.filter((it) => it.date < inicioSemanaActual);
+      }
+      return reps + rir;
+    };
+    const conValor = regs.map((it) => ({ it, v: valorEstimado(it) })).filter((x) => x.v != null);
+    const deEstaSemana = conValor.filter((x) => x.it.date >= inicioSemanaActual);
+    const deAntes = conValor.filter((x) => x.it.date < inicioSemanaActual);
     if (!deEstaSemana.length || !deAntes.length) return;
-    const mediaAntes = deAntes.reduce((s, it) => s + Number(it.cargaReal), 0) / deAntes.length;
+    const mediaAntes = deAntes.reduce((s, x) => s + x.v, 0) / deAntes.length;
     if (mediaAntes <= 0) return;
-    const ultimoEstaSemana = [...deEstaSemana].sort((a, b) => (a.date < b.date ? 1 : -1))[0];
-    const pct = ((Number(ultimoEstaSemana.cargaReal) - mediaAntes) / mediaAntes) * 100;
-    cambiosSemana.push({ nombre: ultimoEstaSemana.name, pct });
+    const ultimoEstaSemana = [...deEstaSemana].sort((a, b) => (a.it.date < b.it.date ? 1 : -1))[0];
+    const pct = ((ultimoEstaSemana.v - mediaAntes) / mediaAntes) * 100;
+    cambiosSemana.push({ nombre, pct });
   });
   const mejorasSemana = cambiosSemana.filter((c) => c.pct > 0).sort((a, b) => b.pct - a.pct);
   const descensosSemana = cambiosSemana.filter((c) => c.pct < 0).sort((a, b) => a.pct - b.pct);
@@ -7315,7 +7543,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                     <div style={{ fontFamily: dsF.display, fontSize: 19, fontWeight: 700, marginTop: 6 }}>
                       {recordCarga.valor}<span style={{ fontSize: 12.5, fontWeight: 400, color: ds.inkSecondary }}> kg</span>
                     </div>
-                    <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginTop: 2 }}>{recordCarga.nombre} · récord</div>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginTop: 2 }}>{recordCarga.nombre} · 1RM est. · récord</div>
                     {recordCarga.pctSobreAnterior != null && (
                       <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.success, marginTop: 4 }}>
                         +{recordCarga.pctSobreAnterior.toFixed(0)}% sobre tu récord anterior
@@ -7347,7 +7575,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>Mejora destacada</div>
                     <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
-                      {mejorasSemana[0].nombre}: <b style={{ color: ds.success, fontWeight: 700 }}>+{mejorasSemana[0].pct.toFixed(0)}%</b> respecto a tu media reciente.
+                      {mejorasSemana[0].nombre}: <b style={{ color: ds.success, fontWeight: 700 }}>+{mejorasSemana[0].pct.toFixed(0)}%</b> de {registrosPorEjercicio.has(mejorasSemana[0].nombre) ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
                     </div>
                     {mejorasSemana.length > 1 && (
                       <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.success, marginTop: 6 }}>
@@ -7378,7 +7606,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>Descenso destacado</div>
                     <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
-                      {descensosSemana[0].nombre}: <b style={{ color: ds.danger, fontWeight: 700 }}>{descensosSemana[0].pct.toFixed(0)}%</b> respecto a tu media reciente.
+                      {descensosSemana[0].nombre}: <b style={{ color: ds.danger, fontWeight: 700 }}>{descensosSemana[0].pct.toFixed(0)}%</b> de {registrosPorEjercicio.has(descensosSemana[0].nombre) ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
                     </div>
                     {descensosSemana.length > 1 && (
                       <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.danger, marginTop: 6 }}>
@@ -7593,7 +7821,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             </button>
           </div>
           <div style={{ marginTop: 18 }} />
-          <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} />
+          <MiProgresoJugadorReal items={historyItems} loaded={historyLoaded} historialSemanas={historialSemanas} rachaSemanas={rachaSemanas} />
           <div style={{ height: 100 }} />
         </div>
       </PantallaBase>
@@ -8768,7 +8996,7 @@ function NotaTareaReal({ nota, onCambiar }) {
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar }) {
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio }) {
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
   const etiquetaModo = { reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" };
   const ciclarModo = () => {
@@ -8887,7 +9115,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             )}
             <div style={{ flex: "1 1 100px", minWidth: 100 }}>
               <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 3 }}>REF. ANTERIOR (informativo)</div>
-              <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.3 }}>{tarea.referencia ? tarea.referencia : "Sin registro previo"}</div>
+              <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.3 }}>
+                {(referenciasPorEjercicio?.[tarea.ejercicioId] || tarea.referencia) ?? "Sin registro previo"}
+              </div>
             </div>
           </>
         )}
@@ -9162,7 +9392,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito, referenciasPorEjercicio }) {
   const tareas = circuito.tareas;
   const rondas = circuito.rondas || 1;
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
@@ -9252,6 +9482,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
               onEliminar={() => eliminarTarea(t.key)}
               onSubir={i > 0 ? () => mover(i, -1) : null}
               onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null}
+              referenciasPorEjercicio={referenciasPorEjercicio}
             />
           )
         )}
@@ -9379,6 +9610,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     addEjercicioLocal(actualizado);
     return actualizado;
   };
+  // Para "REF. ANTERIOR" en cada fila de tarea de Fuerza — ver
+  // useReferenciasPorEjercicio.
+  const referenciasPorEjercicio = useReferenciasPorEjercicio(sesionExistente?.id || null);
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
@@ -10235,6 +10469,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         mostrarCarga={true}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
+                        referenciasPorEjercicio={referenciasPorEjercicio}
                         onCambiar={(nuevo) => setTareasFuerza((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                         onEliminar={() => setTareasFuerza((prev) => prev.filter((x) => x.key !== t.key))}
                         onSubir={
@@ -10271,6 +10506,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onError={setError}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
+                        referenciasPorEjercicio={referenciasPorEjercicio}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                         onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
@@ -10344,6 +10580,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
     addEjercicioLocal(actualizado);
     return actualizado;
   };
+  const referenciasPorEjercicio = useReferenciasPorEjercicio(sesionExistente?.id || null);
 
   const [nombreBloque, setNombreBloque] = useState("");
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
@@ -10656,6 +10893,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 mostrarCarga={true}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
+                referenciasPorEjercicio={referenciasPorEjercicio}
                 onCambiar={(nuevo) => setTareasBloque((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                 onEliminar={() => setTareasBloque((prev) => prev.filter((x) => x.key !== t.key))}
               />
@@ -10672,6 +10910,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                         onError={setError}
                 materialesDisponibles={materialesDisponibles}
                 onAgregarMaterial={agregarMaterial}
+                referenciasPorEjercicio={referenciasPorEjercicio}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                 onCambiarRondas={(r) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                 onEliminarCircuito={() => setCircuitosBloque((prev) => prev.filter((x) => x.key !== c.key))}
