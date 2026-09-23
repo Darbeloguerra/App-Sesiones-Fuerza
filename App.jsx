@@ -6220,7 +6220,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                       un dato secundario — se ve directamente sin desplegar la
                       tarjeta, a diferencia de la referencia por RIR. */}
                   {tarea.modoCarga === "pct1rm" && tarea.cargaSugeridaPct1rm != null && (
-                    <div style={{ color: ds.ink, fontWeight: 700, marginTop: 2 }}>≈ {tarea.cargaSugeridaPct1rm} kg</div>
+                    <div style={{ color: ds.ink, fontWeight: 700, marginTop: 2 }}>Carga recomendada: ~{tarea.cargaSugeridaPct1rm} kg</div>
                   )}
                   {tarea.modoCarga === "pct1rm" && tarea.pct1rmObjetivo != null && tarea.cargaSugeridaPct1rm == null && (
                     <div style={{ color: ds.inkMuted, marginTop: 2 }}>Sin datos suficientes para estimar tu 1RM todavía</div>
@@ -6261,7 +6261,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 : "Sin registro previo"}
             </div>
             {cargaSugerida != null && (
-              <div style={{ color: ds.accent, fontWeight: 600 }}>Carga sugerida para hoy: ~{cargaSugerida} kg</div>
+              <div style={{ color: ds.accent, fontWeight: 600 }}>Carga recomendada: ~{cargaSugerida} kg</div>
             )}
           </div>
         );
