@@ -348,7 +348,7 @@ const NUMERIC_DEFAULTS = {
   ejercicios: { orden_rotacion: null },
   sesiones: { preventivo_activo: 0 },
   circuitos: { rondas: null },
-  tareas: { series: null, cantidad: null, rir: null, orden_en_circuito: null },
+  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null },
   registros: { reps_hechas: null, carga_kg: null, rir: null },
 };
 function sanitizeNumericos(entity, out) {
@@ -1072,6 +1072,8 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     series: t.series ?? "",
     cantidad: t.cantidad ?? "",
     rir: t.rir ?? "",
+    modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
+    pct1rm: t.pct1rm ?? "",
     tipoResistencia: t.tipo_resistencia || "Peso libre",
     materiales,
     lateralidad: t.lateralidad || "bilateral",
@@ -5690,8 +5692,13 @@ function formatearDetalleTareaCoach(t) {
   // Igual que en la pantalla del jugador: la lateralidad depende solo de si
   // el ejercicio la tiene desactivada, no de si la tarea es por tiempo.
   const lateralidad = t.sin_lateralidad !== "si" ? ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}` : "";
-  const rir = t.rir !== "" && t.rir != null ? ` · RIR ${t.rir}` : "";
-  return `${cantidad}${lateralidad}${rir}`;
+  const cargaObjetivo =
+    t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null
+      ? ` · ${t.pct1rm}% 1RM`
+      : t.rir !== "" && t.rir != null
+      ? ` · RIR ${t.rir}`
+      : "";
+  return `${cantidad}${lateralidad}${cargaObjetivo}`;
 }
 
 function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }) {
@@ -6204,7 +6211,20 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   {tarea.series ? `${tarea.series} × ` : ""}
                   {tarea.cantidad} {tarea.unidad}
                   {tarea.unilateral ? " · cada lado" : ""}
-                  {tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>}
+                  {tarea.modoCarga === "pct1rm" && tarea.pct1rmObjetivo != null ? (
+                    <span style={{ color: ds.accent, fontWeight: 700 }}> · {tarea.pct1rmObjetivo}% 1RM</span>
+                  ) : (
+                    tarea.rirObjetivo != null && <span style={{ color: ds.accent, fontWeight: 700 }}> · RIR {tarea.rirObjetivo}</span>
+                  )}
+                  {/* En modo %1RM la carga sugerida ES el objetivo a levantar, no
+                      un dato secundario — se ve directamente sin desplegar la
+                      tarjeta, a diferencia de la referencia por RIR. */}
+                  {tarea.modoCarga === "pct1rm" && tarea.cargaSugeridaPct1rm != null && (
+                    <div style={{ color: ds.ink, fontWeight: 700, marginTop: 2 }}>≈ {tarea.cargaSugeridaPct1rm} kg</div>
+                  )}
+                  {tarea.modoCarga === "pct1rm" && tarea.pct1rmObjetivo != null && tarea.cargaSugeridaPct1rm == null && (
+                    <div style={{ color: ds.inkMuted, marginTop: 2 }}>Sin datos suficientes para estimar tu 1RM todavía</div>
+                  )}
                 </div>
               )}
             </>
@@ -6219,19 +6239,33 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
         </div>
       </div>
-      {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
-        <div style={{ fontSize: 11.5, color: ds.inkMuted, marginLeft: 55 }}>
-          {tarea.eligeEquipo
-            ? registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)
-              ? tarea.referenciasPorEquipo?.[registro.subtipo]
-                ? `Última vez (${registro.subtipo}): ${tarea.referenciasPorEquipo[registro.subtipo]}`
-                : `Sin registro previo con ${registro.subtipo}`
-              : "Elige qué material vas a utilizar"
-            : tarea.referencia
-            ? `Última vez: ${tarea.referencia}`
-            : "Sin registro previo"}
-        </div>
-      )}
+      {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (() => {
+        // Si no hay marca con este mismo diseño (reps/RIR), se muestra
+        // igualmente la más reciente con otro diseño, dejándolo claro, en
+        // vez de "sin registro" solo porque cambió el RIR — y, en ese caso,
+        // una carga sugerida para el diseño de hoy (ver calcularCargaSugerida).
+        const subtipoEquipoValido = tarea.eligeEquipo && registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo);
+        const referenciaTexto = tarea.eligeEquipo ? (subtipoEquipoValido ? tarea.referenciasPorEquipo?.[registro.subtipo] : null) : tarea.referencia;
+        const mismoDiseno = tarea.eligeEquipo ? tarea.referenciasPorEquipoMismoDiseno?.[registro.subtipo] : tarea.referenciaMismoDiseno;
+        const cargaSugerida = tarea.eligeEquipo ? tarea.cargasSugeridasPorEquipo?.[registro.subtipo] : tarea.cargaSugerida;
+        const sufijoEquipo = tarea.eligeEquipo ? ` (${registro.subtipo})` : "";
+        return (
+          <div style={{ fontSize: 11.5, color: ds.inkMuted, marginLeft: 55, display: "flex", flexDirection: "column", gap: 2 }}>
+            <div>
+              {tarea.eligeEquipo && !subtipoEquipoValido
+                ? "Elige qué material vas a utilizar"
+                : referenciaTexto
+                ? `${mismoDiseno ? "Última vez" : "Tu referencia más reciente"}${sufijoEquipo}: ${referenciaTexto}`
+                : tarea.eligeEquipo
+                ? `Sin registro previo con ${registro.subtipo}`
+                : "Sin registro previo"}
+            </div>
+            {cargaSugerida != null && (
+              <div style={{ color: ds.accent, fontWeight: 600 }}>Carga sugerida para hoy: ~{cargaSugerida} kg</div>
+            )}
+          </div>
+        );
+      })()}
       {tarea.materiales && tarea.materiales.length > 0 && (
         <div style={{ marginLeft: 55, display: "flex", gap: 6, flexWrap: "wrap" }}>
           {tarea.materiales.map((m) => (
@@ -6735,7 +6769,6 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // preguntas distintas: "¿cumplo lo que me mandan?" vs. "¿progreso en cada
   // ejercicio?").
   const lunesSemana = inicioSemanaCalendario(date);
-  const domingoSemana = sumarDiasFecha(lunesSemana, 6);
   const lunesSemanaAnterior = sumarDiasFecha(lunesSemana, -7);
   const domingoSemanaAnterior = sumarDiasFecha(lunesSemana, -1);
   const fechasConRegistro = new Set(historyItems.map((it) => it.date));
@@ -6758,9 +6791,35 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
     return Math.round((cumplidas / fechas.length) * 100);
   };
-  const adherenciaSemanaActual = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemana, domingoSemana));
+  // OJO: el límite superior es HOY, no el domingo de la semana — igual
+  // criterio que ResumenFichaJugadorReal (fechasAsignadas(lunes, hoy)). Si se
+  // usara el domingo, a mitad de semana se contarían como "pendientes"
+  // sesiones que todavía no han llegado, y el jugador vería una adherencia
+  // baja aunque hubiera cumplido el 100% de lo que ya tocaba hasta hoy.
+  const adherenciaSemanaActual = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemana, date));
   const adherenciaSemanaAnterior = calcularAdherenciaJugador(fechasAsignadasJugador(lunesSemanaAnterior, domingoSemanaAnterior));
   const deltaAdherenciaSemana = adherenciaSemanaActual != null && adherenciaSemanaAnterior != null ? adherenciaSemanaActual - adherenciaSemanaAnterior : null;
+
+  // Paso 2 (calendario semanal, versión mínima): qué días concretos de esta
+  // semana tienen sesión pautada para este jugador, y su estado — no solo el
+  // % agregado. "L M X J V S D", lunes-domingo, igual semana que la
+  // adherencia de arriba.
+  const DIAS_SEMANA_ETIQUETA = ["L", "M", "X", "J", "V", "S", "D"];
+  const diasSemana = DIAS_SEMANA_ETIQUETA.map((etiqueta, i) => {
+    const fecha = sumarDiasFecha(lunesSemana, i);
+    const pautado = fechasAsignadasJugador(fecha, fecha).length > 0;
+    const cumplido = fechasConRegistro.has(fecha);
+    const esHoy = fecha === date;
+    const esFuturo = fecha > date;
+    let estado = "sin-sesion";
+    if (pautado) {
+      if (cumplido) estado = "cumplido";
+      else if (esHoy) estado = "hoy";
+      else if (esFuturo) estado = "futuro";
+      else estado = "pendiente"; // pautado, ya pasó, no se hizo
+    }
+    return { fecha, etiqueta, pautado, estado, esHoy };
+  });
 
   const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
@@ -6795,6 +6854,29 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     mejorHistoricoPorNombre.set(nombre, Math.max(...regs.map((it) => Number(it.cargaReal))));
   });
 
+  // Modo %1RM: cuando el entrenador pauta la tarea como porcentaje del 1RM
+  // en vez de por RIR, hace falta un 1RM estimado (e1RM) del jugador para
+  // ese ejercicio. Se calcula el e1RM implícito de CADA marca histórica
+  // (carga / %1RM de su propio RTF, ver pct1RMporRTF) y se toma el mayor —
+  // es la mejor estimación disponible con los datos que hay, igual que un
+  // e1RM calculado a partir de cualquier serie con reps y RIR conocidos.
+  // Agrupado solo por nombre de ejercicio (no por material), mismo criterio
+  // que mejorHistoricoPorNombre / el récord de carga.
+  const mejorE1rmPorNombre = new Map();
+  registrosPorEjercicio.forEach((regs, nombre) => {
+    const e1rms = regs
+      .map((it) => {
+        const reps = Number(it.repsReal);
+        const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+        const carga = Number(it.cargaReal);
+        if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+        const pct = pct1RMporRTF(reps + rir);
+        return pct ? carga / pct : null;
+      })
+      .filter((v) => v != null);
+    if (e1rms.length) mejorE1rmPorNombre.set(nombre, Math.max(...e1rms));
+  });
+
   // Cambios de carga esta semana frente a la propia media histórica de cada
   // tarea, agrupando por diseño exacto (ejercicio + material + lateralidad +
   // reps + RIR objetivo — igual criterio que cambioPctPorId en el
@@ -6823,14 +6905,45 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const descensosSemana = cambiosSemana.filter((c) => c.pct < 0).sort((a, b) => a.pct - b.pct);
   const sinCambioSemana = cambiosSemana.filter((c) => c.pct === 0);
 
+  // Referencia de "última vez que hice esto": se busca primero por diseño
+  // EXACTO (mismas reps/RIR objetivo) porque es la comparación más fiel,
+  // pero si el entrenador cambia el RIR o las reps de una semana a otra
+  // (algo habitual al periodizar) esa clave exacta no existe todavía y el
+  // jugador se quedaba sin ninguna referencia aunque tenga historial de
+  // sobra con ese ejercicio. lastValueByExercise es el resultado más
+  // reciente para el mismo ejercicio + material + lateralidad, sea cual sea
+  // el diseño — sirve de respaldo, y como el texto que se muestra incluye
+  // siempre las reps/RIR de esa marca (ver formatearReferencia), el jugador
+  // ve igualmente con qué reps/RIR se consiguió.
   const lastValueByName = {};
+  const lastValueByExercise = {};
   [...historyItems]
     .filter((it) => it.date < date && (it.cargaReal !== "" || it.rirReal !== "" || it.repsReal !== ""))
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .forEach((it) => {
       const eq = materialEfectivo(it);
       lastValueByName[claveDisenoTarea(it.name, eq, it.unilateral, it.reps, it.rir)] = it;
+      lastValueByExercise[`${(it.name || "").toLowerCase()}::${eq}::${it.unilateral ? "uni" : "bi"}`] = it;
     });
+
+  // Resuelve la referencia de un ejercicio+material+lateralidad para el
+  // diseño (reps/RIR) de la tarea de hoy: exacta si existe, si no la más
+  // reciente con otro diseño. Cuando cae al respaldo (mismoDiseno=false),
+  // además calcula una carga sugerida para el diseño de hoy vía RIR/RTF
+  // (ver calcularCargaSugerida) — no tiene sentido "sugerir" nada cuando ya
+  // hay una marca con el mismo diseño exacto, ahí la referencia ya es
+  // directamente aplicable.
+  const resolverReferencia = (nombreEj, equipo, unilateral, repsHoy, rirHoy) => {
+    const claveExacta = claveDisenoTarea(nombreEj, equipo, unilateral, repsHoy, rirHoy);
+    const exacto = lastValueByName[claveExacta];
+    if (exacto) return { registro: exacto, mismoDiseno: true, cargaSugerida: null };
+    const fallback = lastValueByExercise[`${(nombreEj || "").toLowerCase()}::${equipo}::${unilateral ? "uni" : "bi"}`];
+    return {
+      registro: fallback || null,
+      mismoDiseno: false,
+      cargaSugerida: fallback ? calcularCargaSugerida(fallback, repsHoy, rirHoy) : null,
+    };
+  };
 
   // Última vez que esta misma tarea se hizo con peso corporal, qué eligió el
   // jugador (corporal puro / con asistencia / con lastre) — o, si la tarea
@@ -6876,6 +6989,19 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       rirObjetivo: t.rir !== "" && t.rir != null ? t.rir : null,
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
+      // Alternativa al RIR para pautar la carga: un % directo del 1RM
+      // estimado del jugador, para las cargas ligeras donde el RIR deja de
+      // ser una herramienta fiable (por debajo de ~10 reps hasta el fallo /
+      // ~75% 1RM la relación reps-%1RM ya no es lineal ni la autopercepción
+      // del RIR es precisa — ver conversación). Se calcula sobre
+      // mejorE1rmPorNombre, el mejor e1RM estimado de ESTE jugador para
+      // este ejercicio a partir de su propio historial.
+      modoCarga: !esResistencia && t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
+      pct1rmObjetivo: !esResistencia && t.pct1rm !== "" && t.pct1rm != null ? Number(t.pct1rm) : null,
+      cargaSugeridaPct1rm:
+        !esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && mejorE1rmPorNombre.has(nombre)
+          ? Math.round(((mejorE1rmPorNombre.get(nombre) * Number(t.pct1rm)) / 100 / 2.5)) * 2.5
+          : null,
       // Vídeo por variante (material + modo): si hay uno grabado para la
       // combinación exacta, se usa; si no, cae al vídeo genérico del
       // ejercicio. Cuando la tarea deja elegir material, no se fija un solo
@@ -6912,15 +7038,26 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // el jugador en pantalla, no de una sola fija de antemano.
       // La clave incluye también modo, reps y RIR objetivo: cambiar el RIR o
       // pasar de bilateral a unilateral cuenta como una tarea distinta, con
-      // su propia referencia — solo el número de series (volumen) no la cambia.
-      referencia: eligeEquipo
-        ? null
-        : formatearReferencia(lastValueByName[claveDisenoTarea(nombre, equipoUnico || "std", t.lateralidad === "unilateral", t.cantidad, t.rir)]),
-      referenciasPorEquipo: eligeEquipo
-        ? Object.fromEntries(
-            equiposEnTarea.map((eq) => [eq, formatearReferencia(lastValueByName[claveDisenoTarea(nombre, eq, t.lateralidad === "unilateral", t.cantidad, t.rir)])])
-          )
-        : null,
+      // su propia referencia — solo el número de series (volumen) no la
+      // cambia. Si no hay marca con ese diseño exacto, se cae a la última
+      // marca de ese mismo ejercicio+material sea cual sea el diseño
+      // (mismoDiseno = false), para no dejar al jugador sin ninguna
+      // referencia solo porque cambió el RIR o las reps — y en ese caso se
+      // añade además una carga sugerida (ver resolverReferencia).
+      ...(() => {
+        const refPrincipal = eligeEquipo ? null : resolverReferencia(nombre, equipoUnico || "std", t.lateralidad === "unilateral", t.cantidad, t.rir);
+        const refsPorEquipo = eligeEquipo
+          ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, resolverReferencia(nombre, eq, t.lateralidad === "unilateral", t.cantidad, t.rir)]))
+          : null;
+        return {
+          referencia: refPrincipal ? formatearReferencia(refPrincipal.registro) : null,
+          referenciaMismoDiseno: refPrincipal ? refPrincipal.mismoDiseno : null,
+          cargaSugerida: refPrincipal ? refPrincipal.cargaSugerida : null,
+          referenciasPorEquipo: refsPorEquipo ? Object.fromEntries(Object.entries(refsPorEquipo).map(([eq, r]) => [eq, formatearReferencia(r.registro)])) : null,
+          referenciasPorEquipoMismoDiseno: refsPorEquipo ? Object.fromEntries(Object.entries(refsPorEquipo).map(([eq, r]) => [eq, r.mismoDiseno])) : null,
+          cargasSugeridasPorEquipo: refsPorEquipo ? Object.fromEntries(Object.entries(refsPorEquipo).map(([eq, r]) => [eq, r.cargaSugerida])) : null,
+        };
+      })(),
     };
   };
 
@@ -7065,6 +7202,37 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                       {deltaAdherenciaSemana > 0 ? "▲" : "▼"} {Math.abs(deltaAdherenciaSemana)} vs. semana pasada
                     </span>
                   )}
+                </div>
+              )}
+              {diasSemana.some((d) => d.pautado) && (
+                <div style={{ marginTop: 8, display: "flex", gap: 5 }}>
+                  {diasSemana.map((d) => {
+                    const colorFondo =
+                      d.estado === "cumplido" ? ds.success : d.estado === "pendiente" ? ds.danger : d.estado === "hoy" ? ds.accent : d.estado === "futuro" ? ds.bgElevated : "transparent";
+                    const colorTexto = d.estado === "cumplido" || d.estado === "pendiente" ? ds.accentInk : d.estado === "hoy" ? ds.accentInk : d.estado === "futuro" ? ds.inkSecondary : ds.inkMuted;
+                    return (
+                      <div
+                        key={d.fecha}
+                        title={`${fmtDateLabel(d.fecha)}${d.pautado ? (d.estado === "cumplido" ? " · sesión hecha" : d.estado === "hoy" ? " · sesión de hoy" : d.estado === "futuro" ? " · sesión pautada" : " · sesión no hecha") : " · sin sesión"}`}
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: dsR.full,
+                          background: colorFondo,
+                          border: d.pautado ? "none" : `1px solid ${ds.border}`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontFamily: dsF.mono,
+                          fontSize: 9.5,
+                          fontWeight: 700,
+                          color: d.pautado ? colorTexto : ds.inkMuted,
+                        }}
+                      >
+                        {d.etiqueta}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -7712,6 +7880,47 @@ function materialEfectivo(it) {
 
 function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo) {
   return [(nombre || "").toLowerCase(), equipo || "std", unilateral ? "uni" : "bi", repsObjetivo ?? "", rirObjetivo ?? ""].join("::");
+}
+
+// Tabla RTF (repeticiones hasta el fallo) -> %1RM. RTF = reps realizadas +
+// RIR: el puente que conecta una marca con un diseño (reps/RIR) distinto al
+// de hoy. Valores medios de las fórmulas de Epley y Brzycki, coherentes con
+// la literatura de RIR/RPE en entrenamiento de fuerza (Zourdos et al. 2016)
+// y el mismo principio que usan los sistemas de autorregulación tipo RP o
+// RTS/Tuchscherer. Es una tabla GENERALISTA (mismo valor para cualquier
+// ejercicio) — el margen de error real es de varios puntos porcentuales,
+// mayor cuanto más se aleje el RTF de 1-10 o más difieran las reps.
+const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75 };
+function pct1RMporRTF(rtf) {
+  const rtfClamp = Math.max(1, Math.min(10, rtf));
+  const base = Math.floor(rtfClamp);
+  const resto = rtfClamp - base;
+  if (resto === 0 || base >= 10) return TABLA_PCT_1RM_POR_RTF[base];
+  return TABLA_PCT_1RM_POR_RTF[base] + (TABLA_PCT_1RM_POR_RTF[base + 1] - TABLA_PCT_1RM_POR_RTF[base]) * resto;
+}
+
+// A partir de una marca previa con OTRO diseño (reps/RIR distinto al de
+// hoy), estima una carga de partida para el diseño de hoy: calcula el e1RM
+// implícito en la marca previa (carga / %1RM de su RTF) y lo vuelve a bajar
+// al %1RM del RTF de hoy. Es una estimación de PARTIDA para que el jugador
+// ajuste en el primer set según cómo se sienta el RIR real — no una
+// prescripción cerrada. Por eso, si el salto de reps es mayor de 4, se
+// prefiere no sugerir nada (el margen de error ya no es útil) antes que dar
+// un número con falsa precisión.
+function calcularCargaSugerida(registroRef, repsHoy, rirHoy, redondeo = 2.5) {
+  if (!registroRef) return null;
+  const repsRef = Number(registroRef.repsReal);
+  const rirRef = registroRef.rirReal !== "" && registroRef.rirReal != null ? Number(registroRef.rirReal) : null;
+  const cargaRef = Number(registroRef.cargaReal);
+  const repsObjetivo = Number(repsHoy);
+  const rirObjetivo = rirHoy !== "" && rirHoy != null ? Number(rirHoy) : null;
+  if (!cargaRef || Number.isNaN(cargaRef) || Number.isNaN(repsRef) || rirRef == null || Number.isNaN(repsObjetivo) || rirObjetivo == null) return null;
+  if (Math.abs(repsObjetivo - repsRef) > 4) return null;
+  const pctRef = pct1RMporRTF(repsRef + rirRef);
+  const pctHoy = pct1RMporRTF(repsObjetivo + rirObjetivo);
+  if (!pctRef) return null;
+  const e1RM = cargaRef / pctRef;
+  return Math.round((e1RM * pctHoy) / redondeo) * redondeo;
 }
 
 // Clave para el vídeo de demostración de una variante concreta. Más simple
@@ -8618,9 +8827,40 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         </CampoEtiquetadoDiseno>
         {mostrarCarga && (
           <>
-            <CampoEtiquetadoDiseno etiqueta="RIR" w={40}>
-              <input value={tarea.rir} onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
+            {/* Alternativa al RIR: pautar por % directo del 1RM estimado del
+                jugador. El RIR deja de ser una herramienta fiable a cargas
+                ligeras (por debajo de ~10 reps hasta el fallo la relación
+                reps-%1RM ya no es lineal, y la autopercepción del RIR se
+                degrada mucho en series largas) — para esos casos, %1RM. */}
+            <CampoEtiquetadoDiseno etiqueta="CARGA POR" w={62}>
+              <button
+                onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })}
+                style={{
+                  fontFamily: dsF.mono,
+                  fontSize: 10,
+                  color: tarea.modoCarga === "pct1rm" ? ds.accent : ds.inkSecondary,
+                  background: tarea.modoCarga === "pct1rm" ? ds.accentSubtle : ds.border,
+                  border: `1px solid ${tarea.modoCarga === "pct1rm" ? ds.accent : ds.border}`,
+                  borderRadius: 5,
+                  padding: "5px 4px",
+                  width: "100%",
+                  textAlign: "center",
+                  cursor: "pointer",
+                }}
+                title="Alternar entre pautar por RIR o por % directo del 1RM estimado (recomendado para cargas ligeras)"
+              >
+                {tarea.modoCarga === "pct1rm" ? "%1RM" : "RIR"}
+              </button>
             </CampoEtiquetadoDiseno>
+            {tarea.modoCarga === "pct1rm" ? (
+              <CampoEtiquetadoDiseno etiqueta="% 1RM" w={48}>
+                <input value={tarea.pct1rm ?? ""} onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
+              </CampoEtiquetadoDiseno>
+            ) : (
+              <CampoEtiquetadoDiseno etiqueta="RIR" w={40}>
+                <input value={tarea.rir} onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
+              </CampoEtiquetadoDiseno>
+            )}
             <div style={{ flex: "1 1 100px", minWidth: 100 }}>
               <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 3 }}>REF. ANTERIOR (informativo)</div>
               <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.3 }}>{tarea.referencia ? tarea.referencia : "Sin registro previo"}</div>
@@ -8930,7 +9170,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     const base =
       bloque === "Resistencia"
         ? { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
-        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
+        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", modoCarga: "rir", pct1rm: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
     onCambiarTareas([...tareas, base]);
   };
 
@@ -9000,6 +9240,8 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
     series: "",
     cantidad: "",
     rir: "",
+    modoCarga: "rir",
+    pct1rm: "",
     tipoResistencia: "Peso libre",
     materiales: [],
     lateralidad: "bilateral",
@@ -9259,6 +9501,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           series: t.series ?? "",
           cantidad: t.cantidad ?? "",
           rir: t.rir ?? "",
+          modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
+          pct1rm: t.pct1rm ?? "",
           tipoResistencia: t.tipo_resistencia || "Peso libre",
           materiales,
           lateralidad: t.lateralidad || "bilateral",
@@ -9445,6 +9689,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           series: esResistencia ? "" : t.series,
           cantidad: esResistencia ? "" : t.cantidad,
           rir: esResistencia ? "" : t.rir,
+          modo_carga: esResistencia ? "" : t.modoCarga || "rir",
+          pct1rm: esResistencia ? "" : t.pct1rm || "",
           resistencia_data: esResistencia ? serializarResistencia(t) : "",
           tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
           material: JSON.stringify(t.materiales || []), // el material se guarda siempre, aunque el bloque no muestre carga (antes se perdía en Core)
@@ -9471,6 +9717,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
               series: esResistencia ? "" : t.series,
               cantidad: esResistencia ? "" : t.cantidad,
               rir: esResistencia ? "" : t.rir,
+              modo_carga: esResistencia ? "" : t.modoCarga || "rir",
+              pct1rm: esResistencia ? "" : t.pct1rm || "",
               resistencia_data: esResistencia ? serializarResistencia(t) : "",
               tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
               material: JSON.stringify(t.materiales || []), // idem: antes se perdía en Core al ir dentro de un circuito
@@ -10135,6 +10383,8 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           series: t.series ?? "",
           cantidad: t.cantidad ?? "",
           rir: t.rir ?? "",
+          modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
+          pct1rm: t.pct1rm ?? "",
           tipoResistencia: t.tipo_resistencia || "Peso libre",
           materiales,
           lateralidad: t.lateralidad || "bilateral",
