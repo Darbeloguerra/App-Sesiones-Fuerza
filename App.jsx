@@ -4284,22 +4284,86 @@ function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSema
   );
 }
 
-function HistorialPorJugador({ players, jugadorInicial }) {
+// ---------- Historial (entrenador) — carga de datos ----------
+// Todo el Historial se lee de una única fuente fresca: una sola pasada de
+// red a sesiones/tareas/registros/ejercicios cada vez que el entrenador
+// entra en esta pantalla, sin ningún caché intermedio de por medio. Antes
+// cada una de las 3 pestañas tenía su propio mecanismo (useTareasForSesiones,
+// usePlayerHistory con useEntityByIds anidado dentro...), cada uno con su
+// propia clave de caché — bastaba con que uno solo se quedara con una foto
+// vieja para que el entrenador viera "nadie ha enviado nada" sin ningún
+// aviso, aunque los datos estuvieran bien guardados. Ahora las 3 pestañas
+// leen todas de la misma fotografía, cargada aquí una sola vez y sin caché
+// (así que no hay nada que pueda quedarse "pegado").
+function useHistorialData() {
+  const [state, setState] = useState({ loaded: false, error: null, sesiones: [], tareas: [], registros: [], ejercicios: [] });
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setState((s) => ({ ...s, loaded: false, error: null }));
+    Promise.all([api.list("sesiones"), api.list("tareas"), api.list("registros"), api.list("ejercicios")])
+      .then(([sesiones, tareas, registros, ejercicios]) => {
+        if (cancelled) return;
+        setState({ loaded: true, error: null, sesiones: sesiones || [], tareas: tareas || [], registros: registros || [], ejercicios: ejercicios || [] });
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setState((s) => ({ ...s, loaded: true, error: e?.message || "No se pudo cargar el historial. Comprueba tu conexión." }));
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tick]);
+  const retry = useCallback(() => setTick((t) => t + 1), []);
+  return { ...state, retry };
+}
+
+// Convierte Registros crudos en la misma "ficha" de tarea+ejercicio+sesión
+// que ya usaba el resto de la app (usePlayerHistory) — pero como un cálculo
+// síncrono sobre datos que ya están en memoria, no como otro hook con su
+// propia carga y su propio caché que se pueda desincronizar.
+function construirItemsHistorial(registros, tareasById, ejerciciosById, sesionesById) {
+  return registros.map((r) => {
+    const t = tareasById.get(r.tarea_id) || {};
+    const e = ejerciciosById.get(t.ejercicio_id) || {};
+    const s = sesionesById.get(t.sesion_id) || {};
+    return {
+      id: r.id,
+      date: normalizarFecha(r.fecha),
+      sesionId: t.sesion_id || "",
+      md: s.md || "",
+      name: e.nombre || "(tarea eliminada)",
+      sets: t.series,
+      reps: t.cantidad,
+      rir: t.rir,
+      tipos: e.tags_descriptivos || [],
+      done: !!r.hecho,
+      cargaReal: r.carga_kg ?? "",
+      rirReal: r.rir ?? "",
+      repsReal: r.reps_hechas ?? "",
+      unidad: UNIDAD_POR_MODO[t.modo] || "reps",
+      bloque: t.bloque_sesion || "General",
+      nota: t.nota || "",
+      materiales: parseMateriales(t.material),
+      subtipoCorporal: r.subtipo_corporal || "",
+      unilateral: t.lateralidad === "unilateral",
+      esResistencia: t.bloque_sesion === "Resistencia",
+      objetivoResistencia: t.bloque_sesion === "Resistencia" ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data)) : null,
+    };
+  });
+}
+
+function HistorialPorJugador({ players, jugadorInicial, tareasById, ejerciciosById, sesionesById, registros }) {
   const [jugadorSel, setJugadorSel] = useState(jugadorInicial || players[0]?.id || "");
   const [desde, setDesde] = useState("");
   const [hasta, setHasta] = useState("");
   const [vista, setVista] = useState("dia");
   const [tareaSel, setTareaSel] = useState("");
-  const { loaded, items, retry } = usePlayerHistory(jugadorSel || null);
-  // Los registros los envía el jugador desde su propio dispositivo — la
-  // caché en memoria de esta pantalla puede llevar rato sin enterarse de
-  // envíos nuevos, así que se fuerza un dato fresco cada vez que se entra
-  // aquí (y al cambiar de jugador), en vez de confiar en lo que ya hubiera
-  // en caché de una visita anterior.
-  useEffect(() => {
-    retry();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jugadorSel]);
+  const items = useMemo(() => {
+    const propios = jugadorSel ? registros.filter((r) => r.jugador_id === jugadorSel) : [];
+    return construirItemsHistorial(propios, tareasById, ejerciciosById, sesionesById);
+  }, [jugadorSel, registros, tareasById, ejerciciosById, sesionesById]);
 
   // % de cambio de carga respecto a la vez anterior que se hizo la MISMA
   // tarea en las mismas condiciones (mismo ejercicio, mismo equipo, misma
@@ -4440,9 +4504,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
           <DsInput type="date" value={hasta} onChange={(e) => setHasta(e.target.value)} style={{ fontSize: 12.5, padding: "7px 8px" }} />
         </label>
       </div>
-      {!loaded ? (
-        <LoadingBlock />
-      ) : vista === "tarea" ? (
+      {vista === "tarea" ? (
         <GraficaProgresoCargaReal puntos={puntosTarea} />
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -4458,92 +4520,142 @@ function HistorialPorJugador({ players, jugadorInicial }) {
   );
 }
 
-function HistorialPorSesion({ players }) {
-  const [sesiones, , sesionesLoaded, , retrySesiones] = useEntityList("sesiones");
-  const [fechaSesionSel, setFechaSesionSel] = useState("");
-  const enviadas = sesiones
-    .filter((s) => s.enviada)
-    .sort((a, b) => ((a.fechas || [])[0] < (b.fechas || [])[0] ? 1 : -1));
-  const sesionSel = enviadas.find((s) => s.id === fechaSesionSel) || enviadas[0] || null;
+// Identidad "visible" de una sesión enviada — misma fecha(s) + mismo MD +
+// mismo objetivo. Si alguna vez dos filas de la tabla `sesiones` terminan
+// siendo, sin querer, la misma sesión duplicada (p. ej. un doble clic en
+// "Enviar"), el entrenador vería una de las dos copias en el desplegable —
+// justo la que no tuviera tareas ni registros — sin ninguna pista de que
+// existía la otra. Agrupando por esta clave, el desplegable muestra UNA
+// sola entrada por sesión real, con las tareas y los registros de todas las
+// filas que compartan esa identidad ya sumados.
+function claveSesionVisible(s) {
+  return `${(s.fechas || []).slice().sort().join(",")}__${s.md || ""}__${s.objetivo || ""}`;
+}
 
-  const sesionIdForTareas = sesionSel?.id;
-  const [tareas, tareasLoaded] = useTareasForSesiones(sesionIdForTareas ? [sesionIdForTareas] : []);
-  const tareaIds = tareas.map((t) => t.id);
-  const [registrosTodos, , registrosLoaded, , retryRegistros] = useEntityList("registros");
-  const registros = tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id)) : [];
-  // Igual que en "Por jugador": quién ha enviado la sesión lo decide un
-  // registro que crea EL JUGADOR desde su propio dispositivo — la caché en
-  // memoria de esta pantalla puede haberse quedado con la foto de antes de
-  // que enviara nada, así que se fuerza un dato fresco cada vez que se entra
-  // a esta vista, en vez de confiar en lo que ya hubiera en caché.
-  useEffect(() => {
-    retrySesiones();
-    retryRegistros();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+function HistorialPorSesion({ players, sesiones, tareas, registros }) {
+  const [claveSel, setClaveSel] = useState("");
+  const [busqueda, setBusqueda] = useState("");
 
-  if (!sesionesLoaded) return <LoadingBlock />;
-  if (!enviadas.length) {
+  const grupos = useMemo(() => {
+    const porClave = new Map();
+    sesiones
+      .filter((s) => s.enviada)
+      .forEach((s) => {
+        const clave = claveSesionVisible(s);
+        if (!porClave.has(clave)) {
+          porClave.set(clave, { clave, fechas: s.fechas || [], md: s.md || "", objetivo: s.objetivo || "", sesionIds: [], jugadoresDestino: null });
+        }
+        const g = porClave.get(clave);
+        g.sesionIds.push(s.id);
+        // Si CUALQUIERA de las filas agrupadas va dirigida a todo el equipo
+        // (sin restricción), se trata como "todo el equipo" — restringir de
+        // más por error es peor que enseñar a alguien de más.
+        if (s.jugadores_destino && s.jugadores_destino.length && g.jugadoresDestino !== false) {
+          g.jugadoresDestino = g.jugadoresDestino ? [...new Set([...g.jugadoresDestino, ...s.jugadores_destino])] : [...s.jugadores_destino];
+        } else {
+          g.jugadoresDestino = false; // false = "todo el equipo", se resuelve abajo
+        }
+      });
+    return [...porClave.values()].sort((a, b) => ((a.fechas[0] || "") < (b.fechas[0] || "") ? 1 : -1));
+  }, [sesiones]);
+
+  const grupoSel = grupos.find((g) => g.clave === claveSel) || grupos[0] || null;
+
+  const tareasGrupo = useMemo(() => {
+    if (!grupoSel) return [];
+    const ids = new Set(grupoSel.sesionIds);
+    return tareas.filter((t) => ids.has(t.sesion_id));
+  }, [grupoSel, tareas]);
+
+  const registrosGrupo = useMemo(() => {
+    if (!tareasGrupo.length) return [];
+    const ids = new Set(tareasGrupo.map((t) => t.id));
+    return registros.filter((r) => ids.has(r.tarea_id));
+  }, [tareasGrupo, registros]);
+
+  if (!grupos.length) {
     return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no se ha enviado ninguna sesión.</div>;
   }
 
-  const targets = sesionSel?.jugadores_destino?.length ? players.filter((p) => sesionSel.jugadores_destino.includes(p.id)) : players;
-  const loaded = tareasLoaded && (tareaIds.length ? registrosLoaded : true);
-  const estados = loaded
-    ? targets.map((p) => {
-        // Antes exigía TODAS las tareas hechas para contar como "enviada" —
-        // una sola tarea sin registrar (o añadida a mitad de semana) dejaba
-        // a un jugador como "sin enviar" aunque hubiera mandado casi todo.
-        // Ahora "enviada" es "ha mandado algo", con la fracción real al lado
-        // (ej. 8/10) para que se vea de un vistazo cuánto le falta.
-        const hechas = tareas.filter((t) => registros.some((r) => r.tarea_id === t.id && r.jugador_id === p.id && r.hecho)).length;
-        const enviado = hechas > 0;
-        return { jugador: p.name, enviado, hechas, total: tareas.length };
-      })
-    : [];
-  const enviadosCount = estados.filter((e) => e.enviado).length;
+  const targets = grupoSel?.jugadoresDestino ? players.filter((p) => grupoSel.jugadoresDestino.includes(p.id)) : players;
+  // Antes exigía TODAS las tareas hechas para contar como "enviada" — una
+  // sola tarea sin registrar (o añadida a mitad de semana) dejaba a un
+  // jugador como "sin enviar" aunque hubiera mandado casi todo. Ahora
+  // "enviada" es "ha mandado algo", con la fracción real al lado (ej. 8/10)
+  // para que se vea de un vistazo cuánto le falta.
+  const todosLosEstados = targets.map((p) => {
+    const hechas = tareasGrupo.filter((t) => registrosGrupo.some((r) => r.tarea_id === t.id && r.jugador_id === p.id && r.hecho)).length;
+    return { jugador: p.name, enviado: hechas > 0, hechas, total: tareasGrupo.length };
+  });
+  const enviadosCount = todosLosEstados.filter((e) => e.enviado).length;
+  const pct = todosLosEstados.length ? Math.round((enviadosCount / todosLosEstados.length) * 100) : 0;
+  const q = busqueda.trim().toLowerCase();
+  const estados = todosLosEstados
+    .filter((e) => !q || e.jugador.toLowerCase().includes(q))
+    .sort((a, b) => (a.enviado === b.enviado ? a.jugador.localeCompare(b.jugador) : a.enviado ? 1 : -1));
+  const circunferencia = 2 * Math.PI * 15.5;
 
   return (
     <>
       <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
         <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>SESIÓN</span>
-        <DsSelect value={sesionSel?.id || ""} onChange={(e) => setFechaSesionSel(e.target.value)} style={{ maxWidth: 280 }}>
-          {enviadas.map((s) => (
-            <option key={s.id} value={s.id}>
-              {(s.fechas || []).map((f) => fmtDateShort(f)).join(", ")}
-              {s.md ? ` · ${s.md}` : ""}
-              {s.objetivo ? ` · ${s.objetivo}` : ""}
+        <DsSelect value={grupoSel?.clave || ""} onChange={(e) => setClaveSel(e.target.value)} style={{ maxWidth: 320 }}>
+          {grupos.map((g) => (
+            <option key={g.clave} value={g.clave}>
+              {(g.fechas || []).map((f) => fmtDateShort(f)).join(", ")}
+              {g.md ? ` · ${g.md}` : ""}
+              {g.objetivo ? ` · ${g.objetivo}` : ""}
             </option>
           ))}
         </DsSelect>
       </label>
-      {!loaded ? (
-        <LoadingBlock />
-      ) : (
-        <>
-          <div style={{ fontSize: 12, color: ds.inkSecondary, marginBottom: 12, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 12px" }}>
-            <strong style={{ color: enviadosCount === estados.length && estados.length > 0 ? ds.success : ds.warning }}>
-              {enviadosCount}/{estados.length}
-            </strong>{" "}
-            jugadores han enviado esta sesión
+
+      <DsCard style={{ padding: "14px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14 }}>
+        <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
+          <svg viewBox="0 0 36 36" style={{ width: 52, height: 52, transform: "rotate(-90deg)" }}>
+            <circle cx="18" cy="18" r="15.5" fill="none" stroke={ds.border} strokeWidth="3.5" />
+            <circle
+              cx="18"
+              cy="18"
+              r="15.5"
+              fill="none"
+              stroke={pct === 100 ? ds.success : pct > 0 ? ds.accent : ds.warning}
+              strokeWidth="3.5"
+              strokeLinecap="round"
+              strokeDasharray={`${(pct / 100) * circunferencia} ${circunferencia}`}
+            />
+          </svg>
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: ds.ink }}>{pct}%</div>
+        </div>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 700, color: ds.ink }}>
+            {enviadosCount}/{todosLosEstados.length} jugadores han enviado
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {estados.map((e) => {
-              const completo = e.enviado && e.hechas === e.total;
-              const color = e.enviado ? (completo ? ds.success : ds.accent) : ds.warning;
-              return (
-                <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "10px 14px" }}>
-                  <span style={{ width: 9, height: 9, borderRadius: dsR.full, background: e.enviado ? color : ds.border, border: e.enviado ? "none" : `1px solid ${ds.warning}`, flexShrink: 0 }} />
-                  <span style={{ flex: 1, fontSize: 13.5, color: ds.ink }}>{e.jugador}</span>
-                  <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color }}>
-                    {e.enviado ? `✓ Enviada (${e.hechas}/${e.total})` : "Sin enviar"}
-                  </span>
-                </div>
-              );
-            })}
+          <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>
+            {tareasGrupo.length} tarea{tareasGrupo.length === 1 ? "" : "s"} en esta sesión
+            {grupoSel.sesionIds.length > 1 ? ` · combinada de ${grupoSel.sesionIds.length} envíos` : ""}
           </div>
-        </>
+        </div>
+      </DsCard>
+
+      {todosLosEstados.length > 6 && (
+        <DsInput placeholder="Buscar jugador…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} style={{ marginBottom: 10, fontSize: 13 }} />
       )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {estados.map((e) => {
+          const completo = e.enviado && e.hechas === e.total;
+          const color = e.enviado ? (completo ? ds.success : ds.accent) : ds.warning;
+          return (
+            <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "10px 14px" }}>
+              <span style={{ width: 9, height: 9, borderRadius: dsR.full, background: e.enviado ? color : ds.border, border: e.enviado ? "none" : `1px solid ${ds.warning}`, flexShrink: 0 }} />
+              <span style={{ flex: 1, fontSize: 13.5, color: ds.ink }}>{e.jugador}</span>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color }}>{e.enviado ? `✓ Enviada (${e.hechas}/${e.total})` : "Sin enviar"}</span>
+            </div>
+          );
+        })}
+        {estados.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Ningún jugador coincide con la búsqueda.</div>}
+      </div>
     </>
   );
 }
@@ -4552,16 +4664,14 @@ function HistorialPorSesion({ players }) {
 // Progresión de carga de UN diseño de tarea concreto para un jugador — no
 // solo el ejercicio en general, sino la combinación exacta de ejercicio +
 // material + modo + reps objetivo + RIR objetivo.
-function HistorialPorTarea({ players }) {
+function HistorialPorTarea({ players, tareasById, ejerciciosById, sesionesById, registros }) {
   const [jugadorSel, setJugadorSel] = useState(players[0]?.id || "");
   const [ejercicioSel, setEjercicioSel] = useState("");
   const [disenoSel, setDisenoSel] = useState("");
-  const { loaded, items, retry } = usePlayerHistory(jugadorSel || null);
-
-  useEffect(() => {
-    retry();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [jugadorSel]);
+  const items = useMemo(() => {
+    const propios = jugadorSel ? registros.filter((r) => r.jugador_id === jugadorSel) : [];
+    return construirItemsHistorial(propios, tareasById, ejerciciosById, sesionesById);
+  }, [jugadorSel, registros, tareasById, ejerciciosById, sesionesById]);
 
   if (!players.length) {
     return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
@@ -4615,59 +4725,53 @@ function HistorialPorTarea({ players }) {
         </DsSelect>
       </label>
 
-      {!loaded ? (
-        <LoadingBlock />
-      ) : (
-        <>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>EJERCICIO</span>
-            <DsSelect
-              value={ejercicioSel}
-              onChange={(e) => {
-                setEjercicioSel(e.target.value);
-                setDisenoSel("");
+      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
+        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>EJERCICIO</span>
+        <DsSelect
+          value={ejercicioSel}
+          onChange={(e) => {
+            setEjercicioSel(e.target.value);
+            setDisenoSel("");
+          }}
+          style={{ maxWidth: 280 }}
+        >
+          <option value="">— Elige un ejercicio —</option>
+          {ejerciciosDisponibles.map((nombre) => (
+            <option key={nombre} value={nombre}>
+              {nombre}
+            </option>
+          ))}
+        </DsSelect>
+      </label>
+
+      {ejercicioSel && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
+          {disenos.map((d) => (
+            <button
+              key={d.clave}
+              onClick={() => setDisenoSel(d.clave)}
+              style={{
+                fontSize: 12,
+                padding: "6px 10px",
+                borderRadius: dsR.md,
+                border: `1px solid ${disenoSel === d.clave ? ds.accent : ds.border}`,
+                background: disenoSel === d.clave ? ds.accentSubtle : "transparent",
+                color: disenoSel === d.clave ? ds.accent : ds.inkSecondary,
+                cursor: "pointer",
               }}
-              style={{ maxWidth: 280 }}
             >
-              <option value="">— Elige un ejercicio —</option>
-              {ejerciciosDisponibles.map((nombre) => (
-                <option key={nombre} value={nombre}>
-                  {nombre}
-                </option>
-              ))}
-            </DsSelect>
-          </label>
-
-          {ejercicioSel && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
-              {disenos.map((d) => (
-                <button
-                  key={d.clave}
-                  onClick={() => setDisenoSel(d.clave)}
-                  style={{
-                    fontSize: 12,
-                    padding: "6px 10px",
-                    borderRadius: dsR.md,
-                    border: `1px solid ${disenoSel === d.clave ? ds.accent : ds.border}`,
-                    background: disenoSel === d.clave ? ds.accentSubtle : "transparent",
-                    color: disenoSel === d.clave ? ds.accent : ds.inkSecondary,
-                    cursor: "pointer",
-                  }}
-                >
-                  {etiquetaDiseno(d)} ({d.registros.length})
-                </button>
-              ))}
-            </div>
-          )}
-
-          {disenoActivo &&
-            (puntos.length ? (
-              <GraficoProgresionCarga puntos={puntos} />
-            ) : (
-              <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
-            ))}
-        </>
+              {etiquetaDiseno(d)} ({d.registros.length})
+            </button>
+          ))}
+        </div>
       )}
+
+      {disenoActivo &&
+        (puntos.length ? (
+          <GraficoProgresionCarga puntos={puntos} />
+        ) : (
+          <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
+        ))}
     </>
   );
 }
@@ -4735,20 +4839,58 @@ function GraficoProgresionCarga({ puntos }) {
 }
 
 function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
-  const [players, , playersLoaded] = usePlayers();
-  const [vista, setVista] = useState("jugador");
+  const [players, , playersLoaded, , retryPlayers] = usePlayers();
+  const [vista, setVista] = useState("sesion");
+  const { loaded: datosLoaded, error, sesiones, tareas, registros, ejercicios, retry } = useHistorialData();
+
+  // Cada vez que se entra en Historial se pide todo de cero — ver la nota
+  // en useHistorialData. Los envíos de los jugadores llegan desde sus
+  // propios móviles y esta pantalla no se entera sola de que han pasado.
+  useEffect(() => {
+    retryPlayers();
+    retry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const tareasById = useMemo(() => new Map(tareas.map((t) => [t.id, t])), [tareas]);
+  const ejerciciosById = useMemo(() => new Map(ejercicios.map((e) => [e.id, e])), [ejercicios]);
+  const sesionesById = useMemo(() => new Map(sesiones.map((s) => [s.id, s])), [sesiones]);
+
+  const cargando = !playersLoaded || !datosLoaded;
+  const actualizando = cargando; // mismo botón sirve para el primer arranque y para "reintentar"
 
   return (
     <PantallaEntrenadorAncha activo="historial" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <div style={{ marginBottom: 16 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>HISTORIAL</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
+        <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>HISTORIAL</div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
+          </div>
+          <button
+            onClick={() => {
+              retryPlayers();
+              retry();
+            }}
+            disabled={actualizando}
+            style={{
+              fontSize: 12,
+              padding: "7px 12px",
+              borderRadius: dsR.md,
+              border: `1px solid ${ds.border}`,
+              background: "transparent",
+              color: ds.inkSecondary,
+              cursor: actualizando ? "default" : "pointer",
+              flexShrink: 0,
+            }}
+          >
+            {actualizando ? "Actualizando…" : "↻ Actualizar"}
+          </button>
         </div>
         <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
           {[
-            { id: "jugador", label: "Por jugador" },
             { id: "sesion", label: "Por sesión" },
+            { id: "jugador", label: "Por jugador" },
             { id: "tarea", label: "Por tarea" },
           ].map((v) => (
             <button
@@ -4768,14 +4910,35 @@ function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             </button>
           ))}
         </div>
-        {!playersLoaded ? (
+        {error && (
+          <div
+            style={{
+              fontSize: 12.5,
+              color: ds.danger,
+              background: ds.surface,
+              border: `1px solid ${ds.dangerBorderSubtle}`,
+              borderRadius: dsR.md,
+              padding: "8px 12px",
+              marginBottom: 14,
+            }}
+          >
+            {error}{" "}
+            <button
+              onClick={retry}
+              style={{ color: ds.danger, textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0, font: "inherit" }}
+            >
+              reintentar
+            </button>
+          </div>
+        )}
+        {cargando ? (
           <LoadingBlock />
-        ) : vista === "jugador" ? (
-          <HistorialPorJugador players={players} />
         ) : vista === "sesion" ? (
-          <HistorialPorSesion players={players} />
+          <HistorialPorSesion players={players} sesiones={sesiones} tareas={tareas} registros={registros} />
+        ) : vista === "jugador" ? (
+          <HistorialPorJugador players={players} tareasById={tareasById} ejerciciosById={ejerciciosById} sesionesById={sesionesById} registros={registros} />
         ) : (
-          <HistorialPorTarea players={players} />
+          <HistorialPorTarea players={players} tareasById={tareasById} ejerciciosById={ejerciciosById} sesionesById={sesionesById} registros={registros} />
         )}
       </div>
     </PantallaEntrenadorAncha>
@@ -11847,6 +12010,14 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
   const [pestana, setPestana] = useState("resumen");
+  const { loaded: historialLoaded, sesiones, tareas, registros, ejercicios, retry: retryHistorial } = useHistorialData();
+  useEffect(() => {
+    if (pestana === "historial") retryHistorial();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pestana, jugador?.id]);
+  const tareasById = useMemo(() => new Map(tareas.map((t) => [t.id, t])), [tareas]);
+  const ejerciciosById = useMemo(() => new Map(ejercicios.map((e) => [e.id, e])), [ejercicios]);
+  const sesionesById = useMemo(() => new Map(sesiones.map((s) => [s.id, s])), [sesiones]);
 
   if (!playersLoaded || !categoriasLoaded || !gruposLoaded) return <LoadingBlock />;
 
@@ -11905,7 +12076,18 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
         {pestana === "resumen" ? (
           <ResumenFichaJugadorReal jugador={actual} />
         ) : pestana === "historial" ? (
-          <HistorialPorJugador players={players} jugadorInicial={actual.id} />
+          !historialLoaded ? (
+            <LoadingBlock />
+          ) : (
+            <HistorialPorJugador
+              players={players}
+              jugadorInicial={actual.id}
+              tareasById={tareasById}
+              ejerciciosById={ejerciciosById}
+              sesionesById={sesionesById}
+              registros={registros}
+            />
+          )
         ) : (
           <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
         )}
