@@ -442,12 +442,29 @@ function applyFilters(query, filters) {
 }
 
 const api = {
+  // CRÍTICO: Supabase/PostgREST devuelve como máximo 1000 filas por
+  // consulta si no se le pide explícitamente un rango — no da ningún error,
+  // simplemente corta ahí. Con tablas pequeñas nunca se nota, pero
+  // "registros" ya ha superado las 3000 filas y esa página de 1000 no
+  // tiene por qué ser la más reciente (puede devolver las primeras según
+  // el id, es decir las más ANTIGUAS) — así es como el entrenador dejó de
+  // ver sesiones enviadas hace poco: no faltaba el dato, es que nunca
+  // llegaba a pedirse. Aquí se pagina en bucle hasta traer la tabla
+  // entera, sea del tamaño que sea, para cualquier entidad.
   list: async (entity, filters) => {
-    let query = supabase.from(ENTITY_TABLE[entity]).select("*");
-    query = applyFilters(query, filters);
-    const { data, error } = await query;
-    throwIfError(error);
-    return (data || []).map((row) => transformFromDb(entity, row));
+    const PAGE = 1000;
+    let from = 0;
+    let all = [];
+    while (true) {
+      let query = supabase.from(ENTITY_TABLE[entity]).select("*").range(from, from + PAGE - 1);
+      query = applyFilters(query, filters);
+      const { data, error } = await query;
+      throwIfError(error);
+      all = all.concat(data || []);
+      if (!data || data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all.map((row) => transformFromDb(entity, row));
   },
   get: async (entity, id) => {
     const { data, error } = await supabase.from(ENTITY_TABLE[entity]).select("*").eq("id", id).maybeSingle();
