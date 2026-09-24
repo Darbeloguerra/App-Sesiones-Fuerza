@@ -4095,15 +4095,24 @@ function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSema
 
   const elegibles = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ");
 
-  // ¿Este ejercicio se ha trabajado alguna vez con carga registrada? Si sí,
-  // se compara en 1RM estimado (kg); si nunca lleva carga (dominadas,
+  // ¿Este ejercicio+EQUIPO se ha trabajado alguna vez con carga registrada?
+  // Si sí, se compara en 1RM estimado (kg); si nunca lleva carga (dominadas,
   // fondos...), se compara en RTF — reps estimadas hasta el fallo — mismo
   // motor que ya usamos para las recomendaciones de carga y "Tus récords"
   // del Dashboard, solo que aquí no se da el último paso a kg cuando no hay
-  // con qué darlo.
-  const tieneCargaPorNombre = new Set();
+  // con qué darlo. Se agrupa por ejercicio+equipo (no solo por ejercicio):
+  // un multipower y una barra libre no pesan lo mismo, así que cuentan como
+  // progresos distintos — el nombre solo lleva el equipo entre paréntesis
+  // cuando de verdad se ha trabajado el mismo ejercicio con más de uno.
+  const equiposPorNombre = new Map();
   elegibles.forEach((it) => {
-    if (it.cargaReal !== "" && it.cargaReal != null && Number(it.cargaReal) > 0) tieneCargaPorNombre.add(it.name);
+    const eq = materialEfectivo(it);
+    if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
+    equiposPorNombre.get(it.name).add(eq);
+  });
+  const tieneCargaPorClave = new Set();
+  elegibles.forEach((it) => {
+    if (it.cargaReal !== "" && it.cargaReal != null && Number(it.cargaReal) > 0) tieneCargaPorClave.add(`${it.name}::${materialEfectivo(it)}`);
   });
 
   const datosPorNombre = new Map();
@@ -4112,7 +4121,9 @@ function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSema
     const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
     if (it.repsReal === "" || it.repsReal == null || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return;
     if (reps > REPS_MAX_RIR_FIABLE) return;
-    const conCarga = tieneCargaPorNombre.has(it.name);
+    const equipo = materialEfectivo(it);
+    const clave = `${it.name}::${equipo}`;
+    const conCarga = tieneCargaPorClave.has(clave);
     let valor;
     let unidad;
     if (conCarga) {
@@ -4126,8 +4137,9 @@ function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSema
       valor = reps + rir;
       unidad = " reps";
     }
-    if (!datosPorNombre.has(it.name)) datosPorNombre.set(it.name, { unidad, puntos: [] });
-    datosPorNombre.get(it.name).puntos.push({ date: it.date, valor, rir: it.rirReal, reps: it.repsReal });
+    const etiqueta = (equiposPorNombre.get(it.name)?.size || 0) > 1 && equipo && equipo !== "std" ? `${it.name} (${equipo})` : it.name;
+    if (!datosPorNombre.has(etiqueta)) datosPorNombre.set(etiqueta, { unidad, puntos: [] });
+    datosPorNombre.get(etiqueta).puntos.push({ date: it.date, valor, rir: it.rirReal, reps: it.repsReal });
   });
   datosPorNombre.forEach((v) => v.puntos.sort((a, b) => (a.date < b.date ? -1 : 1)));
 
@@ -6275,6 +6287,7 @@ function resumenRegistroReal(tarea, registro) {
   if (tarea.esCmj) {
     return registro.carga !== "" && registro.carga != null ? `${registro.carga} cm` : "Registrado";
   }
+  if (tarea.esCore) return "Hecho";
   const partes = [];
   if (registro.reps !== "" && registro.reps != null) partes.push(`${registro.reps} ${tarea.unidad || "reps"}`);
   if (registro.carga !== "" && registro.carga != null) {
@@ -6295,7 +6308,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   // El CMJ ya no se despliega para editar nada: la altura ya no la
   // introduce el jugador (viene del CSV que sube el entrenador), así que no
   // hay campo que rellenar — solo queda marcarla como hecha cuando la haga.
-  const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj;
+  const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj && !tarea.esCore;
   const mostrarFormulario = puedeDesplegar && expandido;
   return (
     <DsCard
@@ -6388,11 +6401,14 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   )}
                   {/* En modo %1RM la carga sugerida ES el objetivo a levantar, no
                       un dato secundario — se ve directamente sin desplegar la
-                      tarjeta, a diferencia de la referencia por RIR. */}
-                  {tarea.modoCarga === "pct1rm" && tarea.cargaSugeridaPct1rm != null && (
+                      tarjeta, a diferencia de la referencia por RIR. Con
+                      material a elegir (p. ej. Barra o Multipower) la
+                      sugerencia depende de cuál elijas — igual que en modo
+                      RIR, hace falta desplegar para verla. */}
+                  {tarea.modoCarga === "pct1rm" && !tarea.eligeEquipo && tarea.cargaSugeridaPct1rm != null && (
                     <div style={{ color: ds.ink, fontWeight: 700, marginTop: 2 }}>Carga recomendada: ~{tarea.cargaSugeridaPct1rm} kg</div>
                   )}
-                  {tarea.modoCarga === "pct1rm" && tarea.pct1rmObjetivo != null && tarea.cargaSugeridaPct1rm == null && (
+                  {tarea.modoCarga === "pct1rm" && !tarea.eligeEquipo && tarea.pct1rmObjetivo != null && tarea.cargaSugeridaPct1rm == null && (
                     <div style={{ color: ds.inkMuted, marginTop: 2 }}>Sin datos suficientes para estimar tu 1RM todavía</div>
                   )}
                   {/* Referencia/carga sugerida en modo RIR: antes solo se veía
@@ -6431,7 +6447,18 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
         const subtipoEquipoValido = tarea.eligeEquipo && registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo);
         const referenciaTexto = tarea.eligeEquipo ? (subtipoEquipoValido ? tarea.referenciasPorEquipo?.[registro.subtipo] : null) : tarea.referencia;
         const mismoDiseno = tarea.eligeEquipo ? tarea.referenciasPorEquipoMismoDiseno?.[registro.subtipo] : tarea.referenciaMismoDiseno;
-        const cargaSugerida = tarea.eligeEquipo ? tarea.cargasSugeridasPorEquipo?.[registro.subtipo] : tarea.cargaSugerida;
+        // En modo %1RM la "carga recomendada" sale del e1RM estimado
+        // (ejercicio+equipo, ver mejorE1rmPorClave); en modo RIR, del RTF de
+        // la última marca. Multipower y Barra no comparten sugerencia — cada
+        // equipo lleva la suya.
+        const cargaSugerida =
+          tarea.modoCarga === "pct1rm"
+            ? tarea.eligeEquipo
+              ? tarea.cargasSugeridasPct1rmPorEquipo?.[registro.subtipo]
+              : tarea.cargaSugeridaPct1rm
+            : tarea.eligeEquipo
+            ? tarea.cargasSugeridasPorEquipo?.[registro.subtipo]
+            : tarea.cargaSugerida;
         const sufijoEquipo = tarea.eligeEquipo ? ` (${registro.subtipo})` : "";
         return (
           <div style={{ fontSize: 11.5, color: ds.inkMuted, marginLeft: 55, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -6444,8 +6471,14 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 ? `Sin registro previo con ${registro.subtipo}`
                 : "Sin registro previo"}
             </div>
-            {cargaSugerida != null && (
+            {cargaSugerida != null ? (
               <div style={{ color: ds.accent, fontWeight: 600 }}>Carga recomendada: ~{cargaSugerida} kg</div>
+            ) : (
+              tarea.modoCarga === "pct1rm" &&
+              tarea.pct1rmObjetivo != null &&
+              (!tarea.eligeEquipo || subtipoEquipoValido) && (
+                <div style={{ color: ds.inkMuted }}>Sin datos suficientes para estimar tu 1RM todavía{sufijoEquipo}</div>
+              )
             )}
           </div>
         );
@@ -6513,6 +6546,18 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                   {op.label}
                 </ChipSeleccionableReal>
               ))}
+            </div>
+          )}
+          {(tarea.equipoUnico === "Multipower" || (tarea.eligeEquipo && registro.subtipo === "Multipower")) && (
+            // Convención fija: en multipower se registran SOLO los discos que
+            // se añaden (el peso de la barra guiada varía de máquina a
+            // máquina y muchas veces ni se sabe, así que no cuenta); en barra
+            // libre sí se cuenta el peso de la barra además de los discos. Al
+            // no ser la misma magnitud, multipower y barra libre del mismo
+            // ejercicio se tratan como dos tareas distintas a efectos de
+            // progreso — ver equipo en registrosPorEjercicio/mejorE1rmPorClave.
+            <div style={{ fontSize: 11, color: ds.inkMuted, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 12px", lineHeight: 1.4 }}>
+              💡 En multipower registra <b style={{ color: ds.ink }}>solo el peso de los discos</b> que añades, sin contar la barra de la máquina (a diferencia de la barra libre, donde sí cuenta el peso de la barra). Tu progreso en multipower se sigue aparte del de barra libre.
             </div>
           )}
           <div style={{ background: ds.bgElevated, borderRadius: dsR.lg, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
@@ -6590,27 +6635,35 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   );
 }
 
-function CircuitoJugadorReal({ tareas, rondas = 1, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
+function CircuitoJugadorReal({ tareas, rondas = 1, nombreGrupo = "", esGrupo = false, hechoDraft, onToggle, getRegistro, onCambiarRegistro, onAmpliarGif, mostrarRegistro = true }) {
   return (
     <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.xl, padding: 14, display: "flex", flexDirection: "column", gap: 12, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, paddingLeft: 2 }}>
-        <DsBadge tone="accent">CIRCUITO</DsBadge>
-        <span style={{ fontSize: 11, color: ds.inkMuted }}>seguir orden</span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontFamily: dsF.mono,
-            fontSize: 11,
-            fontWeight: 700,
-            color: ds.accent,
-            background: ds.accentSubtle,
-            border: `1px solid ${ds.accentBorderSubtle}`,
-            borderRadius: dsR.sm,
-            padding: "3px 8px",
-          }}
-        >
-          {rondas} {rondas === 1 ? "RONDA" : "RONDAS"}
-        </span>
+        {esGrupo ? (
+          // Grupo: solo organiza las tareas bajo un título, no es un
+          // circuito con rondas — sin badge de rondas ni "seguir orden".
+          <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{nombreGrupo || "Grupo"}</span>
+        ) : (
+          <>
+            <DsBadge tone="accent">{nombreGrupo ? `CIRCUITO · ${nombreGrupo.toUpperCase()}` : "CIRCUITO"}</DsBadge>
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>seguir orden</span>
+            <span
+              style={{
+                marginLeft: "auto",
+                fontFamily: dsF.mono,
+                fontSize: 11,
+                fontWeight: 700,
+                color: ds.accent,
+                background: ds.accentSubtle,
+                border: `1px solid ${ds.accentBorderSubtle}`,
+                borderRadius: dsR.sm,
+                padding: "3px 8px",
+              }}
+            >
+              {rondas} {rondas === 1 ? "RONDA" : "RONDAS"}
+            </span>
+          </>
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {tareas.map((t, i) => (
@@ -7041,21 +7094,43 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
   const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
-  // Récord de carga: se agrupa por NOMBRE de ejercicio (no por diseño exacto
-  // de tarea) porque un PR es del ejercicio, no de una variante concreta de
-  // reps/RIR. ANTES comparaba el kg en bruto de la marca más pesada, lo que
-  // se rompía si cambiabas reps/RIR entre una marca y otra (la misma
-  // fragmentación que ya arreglamos en Progreso: 5 reps a RIR2 con menos kg
-  // puede ser más fuerza real que 12 reps a RIR0 con más kg). AHORA se
-  // compara el 1RM ESTIMADO (e1RM, mismo motor RTF que las recomendaciones
-  // de carga) de cada marca, así que el PR es fiel a la fuerza real
-  // conseguida sin importar con qué reps/RIR se logró. Solo entran marcas
-  // con reps/RIR fiables (ver REPS_MAX_RIR_FIABLE) — el resto no aporta un
-  // e1RM utilizable y se ignora para el récord.
-  const registrosPorEjercicio = new Map();
+  // A efectos de cuantificación y progreso, el mismo ejercicio hecho con
+  // equipos distintos (p. ej. Sentadilla en Multipower vs. Sentadilla con
+  // Barra libre) NO es comparable: el kg registrado en cada uno no
+  // significa lo mismo (la guiada de un multipower puede pesar más o menos
+  // que una barra olímpica de 20kg, y varía de máquina a máquina). Así que
+  // récord, e1RM para %1RM, mejora/descenso semanal y Progreso agrupan por
+  // EJERCICIO + EQUIPO (misma función materialEfectivo que ya usa la
+  // referencia/carga sugerida por equipo, ver resolverReferencia) — cada
+  // equipo cuenta como si fuera una tarea distinta para el progreso, no
+  // solo el ejercicio. El nombre que se muestra solo añade el equipo entre
+  // paréntesis cuando ESTE jugador ha trabajado de verdad el mismo
+  // ejercicio con más de un equipo — si siempre lo hace igual, no hace
+  // falta repetir "(Barra)" en todas partes.
+  const equiposPorNombre = new Map();
+  historyItems
+    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .forEach((it) => {
+      const eq = materialEfectivo(it);
+      if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
+      equiposPorNombre.get(it.name).add(eq);
+    });
+  const etiquetaProgreso = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
+
+  // Récord de carga: ANTES comparaba el kg en bruto de la marca más pesada,
+  // lo que se rompía si cambiabas reps/RIR entre una marca y otra (5 reps a
+  // RIR2 con menos kg puede ser más fuerza real que 12 reps a RIR0 con más
+  // kg). AHORA se compara el 1RM ESTIMADO (e1RM, mismo motor RTF que las
+  // recomendaciones de carga) de cada marca, así que el PR es fiel a la
+  // fuerza real conseguida sin importar con qué reps/RIR se logró. Solo
+  // entran marcas con reps/RIR fiables (ver REPS_MAX_RIR_FIABLE) — el resto
+  // no aporta un e1RM utilizable y se ignora para el récord.
+  const registrosPorEjercicio = new Map(); // clave "nombre::equipo" -> { nombre, equipo, regs }
   registrosConCarga.forEach((it) => {
-    if (!registrosPorEjercicio.has(it.name)) registrosPorEjercicio.set(it.name, []);
-    registrosPorEjercicio.get(it.name).push(it);
+    const equipo = materialEfectivo(it);
+    const clave = `${it.name}::${equipo}`;
+    if (!registrosPorEjercicio.has(clave)) registrosPorEjercicio.set(clave, { nombre: it.name, equipo, regs: [] });
+    registrosPorEjercicio.get(clave).regs.push(it);
   });
   const e1rmDeRegistro = (it) => {
     const reps = Number(it.repsReal);
@@ -7066,58 +7141,61 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const pct = pct1RMporRTF(reps + rir);
     return pct ? carga / pct : null;
   };
-  // mejorE1rmPorNombre: el mejor e1RM estimado de ESTE jugador para cada
-  // ejercicio — se reutiliza más abajo para sugerir cargas de tareas en
-  // modo %1RM (ver construirTareaVisual).
-  const mejorE1rmPorNombre = new Map();
+  // mejorE1rmPorClave: el mejor e1RM estimado de ESTE jugador para cada
+  // combinación ejercicio+equipo — se reutiliza más abajo para sugerir
+  // cargas de tareas en modo %1RM (ver construirTareaVisual).
+  const mejorE1rmPorClave = new Map();
   let recordCarga = null;
-  registrosPorEjercicio.forEach((regs, nombre) => {
+  registrosPorEjercicio.forEach(({ nombre, equipo, regs }, clave) => {
     const conE1rm = regs.map((it) => ({ it, e1rm: e1rmDeRegistro(it) })).filter((x) => x.e1rm != null);
     if (!conE1rm.length) return;
     const ordenados = [...conE1rm].sort((a, b) => b.e1rm - a.e1rm);
-    mejorE1rmPorNombre.set(nombre, ordenados[0].e1rm);
+    mejorE1rmPorClave.set(clave, ordenados[0].e1rm);
     const maxActual = ordenados[0];
     const maxAnterior = ordenados.find((x) => x.it.id !== maxActual.it.id && x.e1rm < maxActual.e1rm);
     const pctSobreAnterior = maxAnterior ? ((maxActual.e1rm - maxAnterior.e1rm) / maxAnterior.e1rm) * 100 : null;
     if (!recordCarga || maxActual.it.date > recordCarga.fecha) {
-      recordCarga = { nombre, valor: Math.round(maxActual.e1rm), fecha: maxActual.it.date, pctSobreAnterior };
+      recordCarga = { nombre: etiquetaProgreso(nombre, equipo), valor: Math.round(maxActual.e1rm), fecha: maxActual.it.date, pctSobreAnterior };
     }
   });
 
   // P6 — récord en vivo: el mejor valor de carga ya registrado (antes de
-  // hoy) por ejercicio, para poder avisar al jugador EN EL MOMENTO en que
-  // supera su marca dentro de la propia sesión, sin esperar a que se envíe
-  // ni a que aparezca en el resumen del dashboard.
-  const mejorHistoricoPorNombre = new Map();
-  registrosPorEjercicio.forEach((regs, nombre) => {
-    mejorHistoricoPorNombre.set(nombre, Math.max(...regs.map((it) => Number(it.cargaReal))));
+  // hoy) por ejercicio+equipo, para poder avisar al jugador EN EL MOMENTO en
+  // que supera su marca dentro de la propia sesión, sin esperar a que se
+  // envíe ni a que aparezca en el resumen del dashboard.
+  const mejorHistoricoPorClave = new Map();
+  registrosPorEjercicio.forEach(({ regs }, clave) => {
+    mejorHistoricoPorClave.set(clave, Math.max(...regs.map((it) => Number(it.cargaReal))));
   });
 
   // Cambios esta semana frente a la propia media reciente de cada
-  // EJERCICIO. ANTES agrupaba por diseño exacto de tarea (mismo ejercicio +
-  // material + lateralidad + reps + RIR objetivo), así que cambiar la
-  // pauta entre semanas (habitual al periodizar) rompía la comparación —
-  // igual fragmentación que ya arreglamos en Progreso y en "Tus récords".
-  // AHORA se agrupa solo por nombre de ejercicio y se compara el 1RM
-  // estimado (e1RM) cuando el ejercicio maneja carga, o las reps al fallo
-  // estimadas (RTF: reps + RIR) cuando nunca se registra carga (p. ej.
-  // dominadas) — así ningún ejercicio se queda fuera solo por no llevar
-  // peso, y la comparación sigue siendo fiel aunque varíen reps/RIR/%1RM de
-  // una semana a otra. No nos quedamos solo con el mayor: se guardan todos
-  // los deltas (positivos, negativos y empatados) para poder mostrar el
-  // mayor de cada signo + cuántos más se movieron en la misma dirección.
-  const registrosPorNombreTodos = new Map();
+  // EJERCICIO+EQUIPO. ANTES agrupaba por diseño exacto de tarea (mismo
+  // ejercicio + material + lateralidad + reps + RIR objetivo), así que
+  // cambiar la pauta entre semanas (habitual al periodizar) rompía la
+  // comparación — igual fragmentación que ya arreglamos en Progreso y en
+  // "Tus récords". AHORA se compara el 1RM estimado (e1RM) cuando el
+  // ejercicio+equipo maneja carga, o las reps al fallo estimadas (RTF: reps
+  // + RIR) cuando nunca se registra carga (p. ej. dominadas) — así ningún
+  // ejercicio se queda fuera solo por no llevar peso, y la comparación
+  // sigue siendo fiel aunque varíen reps/RIR/%1RM/equipo de una semana a
+  // otra. No nos quedamos solo con el mayor: se guardan todos los deltas
+  // (positivos, negativos y empatados) para poder mostrar el mayor de cada
+  // signo + cuántos más se movieron en la misma dirección.
+  const registrosPorClaveTodos = new Map();
   historyItems
     .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
     .forEach((it) => {
-      if (!registrosPorNombreTodos.has(it.name)) registrosPorNombreTodos.set(it.name, []);
-      registrosPorNombreTodos.get(it.name).push(it);
+      const equipo = materialEfectivo(it);
+      const clave = `${it.name}::${equipo}`;
+      if (!registrosPorClaveTodos.has(clave)) registrosPorClaveTodos.set(clave, { nombre: it.name, equipo, regs: [] });
+      registrosPorClaveTodos.get(clave).regs.push(it);
     });
   const cambiosSemana = [];
-  registrosPorNombreTodos.forEach((regs, nombre) => {
-    const conCarga = registrosPorEjercicio.has(nombre);
-    // valorEstimado: e1RM (kg) si el ejercicio maneja carga, RTF (reps al
-    // fallo estimadas) si nunca la lleva — mismo criterio que Progreso.
+  registrosPorClaveTodos.forEach(({ nombre, equipo, regs }, clave) => {
+    const conCarga = registrosPorEjercicio.has(clave);
+    // valorEstimado: e1RM (kg) si este ejercicio+equipo maneja carga, RTF
+    // (reps al fallo estimadas) si nunca la lleva — mismo criterio que
+    // Progreso.
     const valorEstimado = (it) => {
       const reps = Number(it.repsReal);
       const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
@@ -7138,7 +7216,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     if (mediaAntes <= 0) return;
     const ultimoEstaSemana = [...deEstaSemana].sort((a, b) => (a.it.date < b.it.date ? 1 : -1))[0];
     const pct = ((ultimoEstaSemana.v - mediaAntes) / mediaAntes) * 100;
-    cambiosSemana.push({ nombre, pct });
+    cambiosSemana.push({ nombre: etiquetaProgreso(nombre, equipo), pct, conCarga });
   });
   const mejorasSemana = cambiosSemana.filter((c) => c.pct > 0).sort((a, b) => b.pct - a.pct);
   const descensosSemana = cambiosSemana.filter((c) => c.pct < 0).sort((a, b) => a.pct - b.pct);
@@ -7203,12 +7281,36 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const circuitosById = new Map(circuitos.map((c) => [c.id, c]));
   const circuitoBuffer = {}; // circuito_id -> { nombreBloque, tareas: [...] }
 
-  const formatearReferencia = (lv) =>
-    lv
-      ? `${lv.repsReal !== "" && lv.repsReal != null ? `${lv.repsReal} ${lv.unidad || "reps"} · ` : ""}${
-          lv.subtipoCorporal === "asistencia" ? `banda ${lv.cargaReal || "—"}` : `${lv.cargaReal || "—"}kg${lv.subtipoCorporal && !EQUIPOS_AMBIGUOS.includes(lv.subtipoCorporal) ? ` (${lv.subtipoCorporal})` : ""}`
-        }${lv.rirReal !== "" && lv.rirReal != null ? ` · RIR${lv.rirReal}` : ""}`
-      : null;
+  // "75kg" a secas no dice si esa marca fue a 3 reps o a 15, a RIR0 o RIR5 —
+  // dos series muy distintas con el mismo kg. Cuando faltan reps y/o RIR en
+  // el registro histórico (por ejemplo, tareas antiguas a %1RM por debajo
+  // del 65% donde no se pedía RIR, o una carga registrada sin más detalle)
+  // se dice explícitamente que faltan, en vez de omitirlos en silencio — así
+  // se entiende también por qué esa marca no basta para estimar el 1RM. La
+  // fecha (hace X días) da además el contexto de cuán reciente es.
+  const formatearReferencia = (lv) => {
+    if (!lv) return null;
+    const tieneReps = lv.repsReal !== "" && lv.repsReal != null;
+    const tieneRir = lv.rirReal !== "" && lv.rirReal != null;
+    const partes = [];
+    if (tieneReps) partes.push(`${lv.repsReal} ${lv.unidad || "reps"}`);
+    partes.push(lv.subtipoCorporal === "asistencia" ? `banda ${lv.cargaReal || "—"}` : `${lv.cargaReal || "—"}kg${lv.subtipoCorporal && !EQUIPOS_AMBIGUOS.includes(lv.subtipoCorporal) ? ` (${lv.subtipoCorporal})` : ""}`);
+    if (tieneRir) partes.push(`RIR${lv.rirReal}`);
+    if (!tieneReps && !tieneRir) partes.push("sin reps/RIR registrados");
+    else if (!tieneReps) partes.push("sin reps registradas");
+    else if (!tieneRir) partes.push("sin RIR registrado");
+    return `${partes.join(" · ")} · ${fmtHaceDias(lv.date)}`;
+  };
+
+  // Sugerencia de carga en modo %1RM para un ejercicio+equipo concreto — ver
+  // mejorE1rmPorClave más arriba (no mezcla el e1RM de un multipower con el
+  // de una barra libre).
+  const calcularSugeridaPct1rm = (nombreEj, equipo, t, esResistencia) => {
+    if (esResistencia || t.modo_carga !== "pct1rm" || t.pct1rm === "" || t.pct1rm == null) return null;
+    const clave = `${nombreEj}::${equipo}`;
+    if (!mejorE1rmPorClave.has(clave)) return null;
+    return Math.round(((mejorE1rmPorClave.get(clave) * Number(t.pct1rm)) / 100 / 2.5)) * 2.5;
+  };
 
   const construirTareaVisual = (t) => {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
@@ -7233,14 +7335,15 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // ser una herramienta fiable (por debajo de ~10 reps hasta el fallo /
       // ~75% 1RM la relación reps-%1RM ya no es lineal ni la autopercepción
       // del RIR es precisa — ver conversación). Se calcula sobre
-      // mejorE1rmPorNombre, el mejor e1RM estimado de ESTE jugador para
-      // este ejercicio a partir de su propio historial.
+      // mejorE1rmPorClave (ejercicio+equipo, ver arriba) — el e1RM de un
+      // multipower no se mezcla con el de una barra libre, mismo criterio
+      // que la referencia/carga sugerida en modo RIR.
       modoCarga: !esResistencia && t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
       pct1rmObjetivo: !esResistencia && t.pct1rm !== "" && t.pct1rm != null ? Number(t.pct1rm) : null,
-      cargaSugeridaPct1rm:
-        !esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && mejorE1rmPorNombre.has(nombre)
-          ? Math.round(((mejorE1rmPorNombre.get(nombre) * Number(t.pct1rm)) / 100 / 2.5)) * 2.5
-          : null,
+      cargaSugeridaPct1rm: !eligeEquipo ? calcularSugeridaPct1rm(nombre, equipoUnico || "std", t, esResistencia) : null,
+      cargasSugeridasPct1rmPorEquipo: eligeEquipo
+        ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, calcularSugeridaPct1rm(nombre, eq, t, esResistencia)]))
+        : null,
       // A menos del 65% del 1RM el RIR autopercibido deja de ser fiable (a
       // esa intensidad el fallo está muy lejos y cuesta "sentir" cuántas
       // repeticiones quedan en la recámara), así que en cargas por %1RM por
@@ -7262,6 +7365,11 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
       unilateral: t.lateralidad === "unilateral",
       esCmj: t.bloque_sesion === "CMJ",
+      // Core: solo se marca como hecha, sin registrar carga ni reps — no
+      // tiene sentido pedirle al jugador un formulario de carga/RIR para
+      // trabajo de Core (planchas, antirrotación...), así que no se
+      // despliega ninguna tarjeta de registro (ver TareaCardReal).
+      esCore: t.bloque_sesion === "Core",
       // El MD de la sesión de hoy no importa aquí — se recuerda el último
       // test CMJ del CSV, sea de cuando sea, con su día de medida entre
       // paréntesis. Ya no es un dato que metiera el jugador: es solo
@@ -7325,6 +7433,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       tipo: "circuito",
       circuitoId,
       rondas: circuitosById.get(circuitoId)?.rondas || 1,
+      nombreGrupo: circuitosById.get(circuitoId)?.nombre || "",
+      esGrupo: circuitosById.get(circuitoId)?.tipo === "grupo",
       tareas: datos.tareas.sort((a, b) => a.orden - b.orden),
     });
   });
@@ -7350,7 +7460,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // - Corporal sin equipo (peso del propio cuerpo, sin lastre): no es peso libre -> exige reps, no carga.
   // - Cualquier otra (peso libre, con o sin elegir equipo): exige carga y reps.
   const registroIncompleto = (t) => {
-    if (t.esResistencia || t.esCmj) return false;
+    if (t.esResistencia || t.esCmj || t.esCore) return false;
     const r = getRegistro(t.id);
     if (t.esCorporal) {
       if (r.subtipo === "lastre") return !r.carga || !r.reps;
@@ -7575,7 +7685,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>Mejora destacada</div>
                     <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
-                      {mejorasSemana[0].nombre}: <b style={{ color: ds.success, fontWeight: 700 }}>+{mejorasSemana[0].pct.toFixed(0)}%</b> de {registrosPorEjercicio.has(mejorasSemana[0].nombre) ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
+                      {mejorasSemana[0].nombre}: <b style={{ color: ds.success, fontWeight: 700 }}>+{mejorasSemana[0].pct.toFixed(0)}%</b> de {mejorasSemana[0].conCarga ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
                     </div>
                     {mejorasSemana.length > 1 && (
                       <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.success, marginTop: 6 }}>
@@ -7606,7 +7716,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 600 }}>Descenso destacado</div>
                     <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 2, lineHeight: 1.4 }}>
-                      {descensosSemana[0].nombre}: <b style={{ color: ds.danger, fontWeight: 700 }}>{descensosSemana[0].pct.toFixed(0)}%</b> de {registrosPorEjercicio.has(descensosSemana[0].nombre) ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
+                      {descensosSemana[0].nombre}: <b style={{ color: ds.danger, fontWeight: 700 }}>{descensosSemana[0].pct.toFixed(0)}%</b> de {descensosSemana[0].conCarga ? "1RM estimado" : "reps al fallo estimadas"} respecto a tu media reciente.
                     </div>
                     {descensosSemana.length > 1 && (
                       <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.danger, marginTop: 6 }}>
@@ -7873,7 +7983,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       const r = getRegistro(t.id);
       const cargaNum = r.carga !== "" && r.carga != null ? Number(r.carga) : null;
       if (cargaNum == null || Number.isNaN(cargaNum)) return null;
-      const mejorPrevio = mejorHistoricoPorNombre.get(t.nombre);
+      // El equipo usado ahora mismo (elegido en el registro, o el único
+      // posible de la tarea) decide contra qué histórico se compara — un PR
+      // en multipower no se mide contra la marca en barra libre.
+      const equipoRegistro = t.eligeEquipo ? r.subtipo : t.equipoUnico || "std";
+      if (t.eligeEquipo && !equipoRegistro) return null; // sin material elegido todavía, no hay con qué comparar
+      const mejorPrevio = mejorHistoricoPorClave.get(`${t.nombre}::${equipoRegistro}`);
       if (mejorPrevio != null && cargaNum <= mejorPrevio) return null;
       const pct = mejorPrevio ? ((cargaNum - mejorPrevio) / mejorPrevio) * 100 : null;
       return { id: t.id, nombre: t.nombre, valor: cargaNum, mejorPrevio: mejorPrevio ?? null, pct };
@@ -7989,6 +8104,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                           key={item.circuitoId}
                           tareas={item.tareas}
                           rondas={item.rondas}
+                          nombreGrupo={item.nombreGrupo}
+                          esGrupo={item.esGrupo}
                           hechoDraft={hechoDraft}
                           onToggle={toggle}
                           getRegistro={getRegistro}
@@ -9106,11 +9223,32 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             </CampoEtiquetadoDiseno>
             {tarea.modoCarga === "pct1rm" ? (
               <CampoEtiquetadoDiseno etiqueta="% 1RM" w={48}>
-                <input value={tarea.pct1rm ?? ""} onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
+                <input
+                  value={tarea.pct1rm ?? ""}
+                  onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value })}
+                  onBlur={(e) => {
+                    const n = Number(e.target.value);
+                    if (e.target.value !== "" && !Number.isNaN(n)) onCambiar({ ...tarea, pct1rm: String(Math.min(100, Math.max(1, Math.round(n)))) });
+                  }}
+                  placeholder="—"
+                  style={campoStyleDiseno("100%")}
+                />
               </CampoEtiquetadoDiseno>
             ) : (
+              // El RIR se pauta en una escala corta (0 = al fallo, rara vez
+              // más de 5-6 en trabajo de fuerza) — si aquí aparece un número
+              // de dos cifras casi seguro es un %1RM tecleado por error sin
+              // cambiar antes a modo "%1RM" (ver el botón de al lado). Se
+              // avisa en vez de dejarlo pasar en silencio, porque luego el
+              // jugador ve "RIR 90" sin que tenga sentido.
               <CampoEtiquetadoDiseno etiqueta="RIR" w={40}>
-                <input value={tarea.rir} onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
+                <input
+                  value={tarea.rir}
+                  onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })}
+                  placeholder="—"
+                  style={{ ...campoStyleDiseno("100%"), ...(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10 ? { color: ds.danger, borderColor: ds.danger } : {}) }}
+                  title={tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10 ? "Un RIR tan alto no es habitual — ¿querías pautar por %1RM? Usa el botón de al lado para cambiar de modo." : undefined}
+                />
               </CampoEtiquetadoDiseno>
             )}
             <div style={{ flex: "1 1 100px", minWidth: 100 }}>
@@ -9392,9 +9530,14 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onEliminarCircuito, referenciasPorEjercicio }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onCambiarCircuito, onEliminarCircuito, referenciasPorEjercicio }) {
   const tareas = circuito.tareas;
   const rondas = circuito.rondas || 1;
+  // 'circuito' (con rondas, se repite en orden — el comportamiento de
+  // siempre) o 'grupo' (solo para organizar tareas bajo un título común, sin
+  // rondas ni repetición — p. ej. "Miembro superior" dentro de Fuerza, para
+  // ordenar sin que sea realmente un circuito).
+  const esGrupo = circuito.tipo === "grupo";
   const actualizarTarea = (key, nueva) => onCambiarTareas(tareas.map((t) => (t.key === key ? nueva : t)));
   const eliminarTarea = (key) => onCambiarTareas(tareas.filter((t) => t.key !== key));
   const mover = (index, dir) => {
@@ -9437,35 +9580,62 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
   return (
     <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.06em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "2px 7px" }}>CIRCUITO</span>
-        <span style={{ fontSize: 11, color: ds.inkMuted, flex: 1 }}>
-          {tareas.length} {tareas.length === 1 ? "ejercicio" : "ejercicios"} · en orden
+        <button
+          type="button"
+          onClick={() => onCambiarCircuito?.({ tipo: esGrupo ? "circuito" : "grupo" })}
+          title="Alternar entre circuito (con rondas, se repite en orden) o grupo (solo para agrupar bajo un título, sin rondas)"
+          style={{
+            fontFamily: dsF.mono,
+            fontSize: 10,
+            letterSpacing: "0.06em",
+            color: ds.accent,
+            background: ds.accentSubtle,
+            border: `1px solid ${ds.accentBorderSubtle}`,
+            borderRadius: 4,
+            padding: "2px 7px",
+            cursor: "pointer",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
+          {esGrupo ? "GRUPO" : "CIRCUITO"} ⇄
+        </button>
+        <input
+          value={circuito.nombre || ""}
+          onChange={(e) => onCambiarCircuito?.({ nombre: e.target.value })}
+          placeholder={esGrupo ? "Nombre del grupo, p. ej. Miembro superior" : "Nombre (opcional)"}
+          style={{ ...campoStyleDiseno("100%"), textAlign: "left", flex: 1, minWidth: 0 }}
+        />
+        <span style={{ fontSize: 11, color: ds.inkMuted, flexShrink: 0 }}>
+          {tareas.length} {tareas.length === 1 ? "ejercicio" : "ejercicios"}
         </span>
-        <button onClick={onEliminarCircuito} style={botonMiniStyleDiseno} title="Eliminar circuito completo">
+        <button onClick={onEliminarCircuito} style={botonMiniStyleDiseno} title={esGrupo ? "Eliminar grupo" : "Eliminar circuito completo"}>
           ×
         </button>
       </div>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, background: ds.bgElevated, border: `1px solid ${ds.accentSubtle}`, borderRadius: 8, padding: "8px 10px" }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.06em", color: ds.accent, fontWeight: 600 }}>RONDAS</span>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <button
-            type="button"
-            onClick={() => onCambiarRondas(Math.max(1, rondas - 1))}
-            style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-          >
-            −
-          </button>
-          <span style={{ fontSize: 16, fontWeight: 700, color: ds.ink, minWidth: 22, textAlign: "center" }}>{rondas}</span>
-          <button
-            type="button"
-            onClick={() => onCambiarRondas(rondas + 1)}
-            style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-          >
-            +
-          </button>
+      {!esGrupo && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: ds.bgElevated, border: `1px solid ${ds.accentSubtle}`, borderRadius: 8, padding: "8px 10px" }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.06em", color: ds.accent, fontWeight: 600 }}>RONDAS</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <button
+              type="button"
+              onClick={() => onCambiarRondas(Math.max(1, rondas - 1))}
+              style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+            >
+              −
+            </button>
+            <span style={{ fontSize: 16, fontWeight: 700, color: ds.ink, minWidth: 22, textAlign: "center" }}>{rondas}</span>
+            <button
+              type="button"
+              onClick={() => onCambiarRondas(rondas + 1)}
+              style={{ width: 26, height: 26, borderRadius: 6, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+            >
+              +
+            </button>
+          </div>
+          <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{rondas === 1 ? "vuelta al circuito" : "vueltas al circuito"}</span>
         </div>
-        <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{rondas === 1 ? "vuelta al circuito" : "vueltas al circuito"}</span>
-      </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
           bloque === "Resistencia" ? (
@@ -9628,6 +9798,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
   const [activacionEjercicioId, setActivacionEjercicioId] = useState("");
   const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("");
+  const [activacionMateriales, setActivacionMateriales] = useState([]);
   const [duracionActivacion, setDuracionActivacion] = useState("8");
   const [unidadActivacion, setUnidadActivacion] = useState("minutos");
   // A diferencia de Activación, CMJ no es rutina de cada sesión — es un día
@@ -9699,6 +9870,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     if (activacionTarea) {
       setDuracionActivacion(String(activacionTarea.cantidad || "8"));
       setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
+      setActivacionMateriales(parseMateriales(activacionTarea.material));
       const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
       if (eAct) {
         setActivacionEjercicioId(eAct.id);
@@ -9793,6 +9965,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
             key: c.id,
             circuitoId: c.id,
             rondas: c.rondas || 1,
+            nombre: c.nombre || "",
+            tipo: c.tipo === "grupo" ? "grupo" : "circuito",
             tareas: tareas
               .filter((t) => t.circuito_id === c.id)
               .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
@@ -9809,6 +9983,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       if (activacionTarea) {
         setDuracionActivacion(String(activacionTarea.cantidad || "8"));
         setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
+        setActivacionMateriales(parseMateriales(activacionTarea.material));
         setActivacionTareaId(activacionTarea.id);
         const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
         if (eAct) {
@@ -9887,6 +10062,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     }
     setActivacionEjercicioId(ejercicioId);
     setActivacionEjercicioNombre(nombre);
+    setActivacionMateriales([]); // ejercicio nuevo -> el material anterior no tiene por qué aplicar
   };
 
   const guardar = async (comoBorrador = false) => {
@@ -9968,7 +10144,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 
       const guardarCircuito = async (c, bloqueNombre, mostrarCarga) => {
         const esResistencia = bloqueNombre === "Resistencia";
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre, rondas: c.rondas || 1 });
+        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
@@ -9997,19 +10173,37 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       };
 
       // Activación: una única tarea con el ejercicio que el entrenador elija
-      // de la biblioteca (ya no fijo a "Bici estática").
-      if (activacionActiva && activacionEjercicioId) {
+      // de la biblioteca (ya no fijo a "Bici estática"). Si se deja el
+      // interruptor activado pero no se elige ejercicio, ANTES no se
+      // guardaba ninguna tarea y la Activación desaparecía sin más del plan
+      // del jugador (nada avisaba de que faltaba elegirlo) — ahora, en ese
+      // caso, se resuelve "Bici estática" como ejercicio por defecto (el
+      // comportamiento fijo que tenía Activación antes de poder elegir
+      // ejercicio), así que activarla ya basta para que aparezca.
+      let activacionEjercicioIdFinal = activacionEjercicioId;
+      if (activacionActiva && !activacionEjercicioIdFinal) {
+        try {
+          const porDefecto = await resolveEjercicio(ejercicios, { nombre: "Bici estática", bloque: "", tags_descriptivos: [] });
+          activacionEjercicioIdFinal = porDefecto.id;
+          addEjercicioLocal(porDefecto);
+        } catch (e) {
+          // Si ni siquiera se puede resolver el ejercicio por defecto (sin
+          // conexión, etc.), se sigue sin tarea de Activación esta vez, pero
+          // el resto de la sesión se guarda igual.
+        }
+      }
+      if (activacionActiva && activacionEjercicioIdFinal) {
         const saved = await api.save("tareas", {
           id: activacionTareaId || undefined,
           sesion_id: savedSesion.id,
           bloque_sesion: "Activación",
-          ejercicio_id: activacionEjercicioId,
+          ejercicio_id: activacionEjercicioIdFinal,
           modo: unidadActivacion === "segundos" ? "tiempo" : "minutos",
           series: "",
           cantidad: duracionActivacion,
           rir: "",
           tipo_resistencia: "",
-          material: "",
+          material: JSON.stringify(activacionMateriales || []),
           nota: "",
           circuito_id: "",
           orden_en_circuito: "",
@@ -10266,10 +10460,20 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                           <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicio</span>
                           <span style={{ fontSize: 13, color: activacionEjercicioNombre ? ds.ink : ds.inkMuted, fontWeight: activacionEjercicioNombre ? 600 : 400 }}>
-                            {activacionEjercicioNombre || "Sin elegir todavía"}
+                            {activacionEjercicioNombre || "Sin elegir todavía (se usará Bici estática por defecto)"}
                           </span>
                         </div>
                         <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} onAsignarZona={asignarZonaYActualizar} />
+                        {activacionEjercicioId && (
+                          <div style={{ maxWidth: 220 }}>
+                            <SelectorMaterialReal
+                              seleccionados={activacionMateriales}
+                              disponibles={materialesDisponibles}
+                              onCambiar={setActivacionMateriales}
+                              onAgregarMaterial={agregarMaterial}
+                            />
+                          </div>
+                        )}
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                           <span style={{ fontSize: 13, color: ds.inkSecondary }}>Duración</span>
                           <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
@@ -10381,6 +10585,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                         onCambiarRondas={(r) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosCore((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
@@ -10418,6 +10623,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onAgregarMaterial={agregarMaterial}
                         onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                         onCambiarRondas={(r) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
@@ -10509,6 +10715,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         referenciasPorEjercicio={referenciasPorEjercicio}
                         onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                         onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
                       />
                     ))}
@@ -10671,6 +10878,8 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           key: c.id,
           circuitoId: c.id,
           rondas: c.rondas || 1,
+          nombre: c.nombre || "",
+          tipo: c.tipo === "grupo" ? "grupo" : "circuito",
           tareas: tareas
             .filter((t) => t.circuito_id === c.id)
             .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
@@ -10762,7 +10971,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
       };
 
       const guardarCircuito = async (c) => {
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1 });
+        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
@@ -10913,6 +11122,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
                 referenciasPorEjercicio={referenciasPorEjercicio}
                 onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
                 onCambiarRondas={(r) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                onCambiarCircuito={(patch) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                 onEliminarCircuito={() => setCircuitosBloque((prev) => prev.filter((x) => x.key !== c.key))}
               />
             ))}
