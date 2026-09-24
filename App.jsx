@@ -1557,7 +1557,7 @@ function useEntityByIds(entity, ids) {
 // Historial completo de un jugador: sus Registros, unidos con la Tarea (series/reps/RIR
 // prescritos) y el Ejercicio (nombre, tipos, GIF) correspondientes. Todo en vivo, sin caché.
 function usePlayerHistory(playerId) {
-  const [registrosTraidos, , registrosLoaded] = useEntityList("registros", playerId ? { jugador_id: playerId } : false);
+  const [registrosTraidos, , registrosLoaded, , retryRegistros] = useEntityList("registros", playerId ? { jugador_id: playerId } : false);
   // Mismo blindaje que en la pantalla del jugador: el backend no filtra de
   // verdad por jugador_id, así que se filtra siempre aquí también.
   const registros = playerId ? registrosTraidos.filter((r) => r.jugador_id === playerId) : [];
@@ -1571,7 +1571,14 @@ function usePlayerHistory(playerId) {
   const [sesiones, sesionesLoaded] = useEntityByIds("sesiones", sesionIds);
 
   const loaded = registrosLoaded && tareasLoaded && ejerciciosLoaded && sesionesLoaded;
-  if (!loaded) return { loaded: false, items: [] };
+  // retryRegistros: los registros los crea el JUGADOR desde su propio
+  // dispositivo/sesión de navegador — la caché en memoria del entrenador
+  // (sharedDataCache) no se entera de eso sola, así que sin esto la pantalla
+  // de Historial podía quedarse enseñando para siempre la foto de la
+  // primera vez que se abrió (p. ej. "nadie ha hecho la sesión" aunque el
+  // jugador ya la hubiera enviado hace rato). Quien use este hook debe
+  // llamar a retry al entrar en la pantalla para forzar un dato fresco.
+  if (!loaded) return { loaded: false, items: [], retry: retryRegistros };
 
   const tareasById = new Map(tareas.map((t) => [t.id, t]));
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
@@ -1606,7 +1613,7 @@ function usePlayerHistory(playerId) {
     };
   });
 
-  return { loaded: true, items };
+  return { loaded: true, items, retry: retryRegistros };
 }
 
 // Igual que usePlayerHistory, pero sin filtrar por jugador — trae los
@@ -4283,7 +4290,16 @@ function HistorialPorJugador({ players, jugadorInicial }) {
   const [hasta, setHasta] = useState("");
   const [vista, setVista] = useState("dia");
   const [tareaSel, setTareaSel] = useState("");
-  const { loaded, items } = usePlayerHistory(jugadorSel || null);
+  const { loaded, items, retry } = usePlayerHistory(jugadorSel || null);
+  // Los registros los envía el jugador desde su propio dispositivo — la
+  // caché en memoria de esta pantalla puede llevar rato sin enterarse de
+  // envíos nuevos, así que se fuerza un dato fresco cada vez que se entra
+  // aquí (y al cambiar de jugador), en vez de confiar en lo que ya hubiera
+  // en caché de una visita anterior.
+  useEffect(() => {
+    retry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jugadorSel]);
 
   // % de cambio de carga respecto a la vez anterior que se hizo la MISMA
   // tarea en las mismas condiciones (mismo ejercicio, mismo equipo, misma
@@ -4443,7 +4459,7 @@ function HistorialPorJugador({ players, jugadorInicial }) {
 }
 
 function HistorialPorSesion({ players }) {
-  const [sesiones, , sesionesLoaded] = useEntityList("sesiones");
+  const [sesiones, , sesionesLoaded, , retrySesiones] = useEntityList("sesiones");
   const [fechaSesionSel, setFechaSesionSel] = useState("");
   const enviadas = sesiones
     .filter((s) => s.enviada)
@@ -4453,8 +4469,18 @@ function HistorialPorSesion({ players }) {
   const sesionIdForTareas = sesionSel?.id;
   const [tareas, tareasLoaded] = useTareasForSesiones(sesionIdForTareas ? [sesionIdForTareas] : []);
   const tareaIds = tareas.map((t) => t.id);
-  const [registrosTodos, , registrosLoaded] = useEntityList("registros");
+  const [registrosTodos, , registrosLoaded, , retryRegistros] = useEntityList("registros");
   const registros = tareaIds.length ? registrosTodos.filter((r) => tareaIds.includes(r.tarea_id)) : [];
+  // Igual que en "Por jugador": quién ha enviado la sesión lo decide un
+  // registro que crea EL JUGADOR desde su propio dispositivo — la caché en
+  // memoria de esta pantalla puede haberse quedado con la foto de antes de
+  // que enviara nada, así que se fuerza un dato fresco cada vez que se entra
+  // a esta vista, en vez de confiar en lo que ya hubiera en caché.
+  useEffect(() => {
+    retrySesiones();
+    retryRegistros();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!sesionesLoaded) return <LoadingBlock />;
   if (!enviadas.length) {
@@ -4530,7 +4556,12 @@ function HistorialPorTarea({ players }) {
   const [jugadorSel, setJugadorSel] = useState(players[0]?.id || "");
   const [ejercicioSel, setEjercicioSel] = useState("");
   const [disenoSel, setDisenoSel] = useState("");
-  const { loaded, items } = usePlayerHistory(jugadorSel || null);
+  const { loaded, items, retry } = usePlayerHistory(jugadorSel || null);
+
+  useEffect(() => {
+    retry();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jugadorSel]);
 
   if (!players.length) {
     return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
