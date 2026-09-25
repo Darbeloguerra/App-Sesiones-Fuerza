@@ -190,12 +190,10 @@ function GlobalStyles() {
       .ds-progressring__label { font-family: ${dsF.display}; font-weight: 700; fill: ${ds.ink}; }
 
       /* <details>/<summary> sin el marcador nativo — usado para el
-         despliegue por clic de "Quién necesita atención" y los "ver más"
-         del Dashboard, sin JS aparte. */
+         despliegue por clic de cada fila de "Quién necesita atención", sin
+         JS aparte. */
       .ds-details-plain > summary { list-style: none; cursor: pointer; }
       .ds-details-plain > summary::-webkit-details-marker { display: none; }
-      .ds-expand-toggle > summary::after { content: " ▾"; font-size: 9px; color: ${ds.inkMuted}; }
-      .ds-expand-toggle[open] > summary::after { content: " ▴"; }
     `}</style>
   );
 }
@@ -2941,6 +2939,10 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
             </div>
 
             <div style={{ marginBottom: 14 }}>
+              <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
               <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
             </div>
 
@@ -2953,19 +2955,7 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
               {datos.variaciones.length === 0 ? (
                 <div style={{ color: TEMA.textoMuted, fontSize: 12.5, padding: "8px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
               ) : (
-                <>
-                  {datos.variaciones.slice(0, 3).map((v) => (
-                    <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
-                  ))}
-                  {datos.variaciones.length > 3 && (
-                    <details className="ds-details-plain ds-expand-toggle" style={{ paddingTop: 6 }}>
-                      <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {datos.variaciones.length - 3} más</summary>
-                      {datos.variaciones.slice(3).map((v) => (
-                        <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
-                      ))}
-                    </details>
-                  )}
-                </>
+                datos.variaciones.map((v) => <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />)
               )}
             </div>
 
@@ -2982,19 +2972,7 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
               ) : datos.pendientesHoy.length === 0 ? (
                 <div style={{ color: ds.success, fontSize: 12.5, padding: "8px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
               ) : (
-                <>
-                  {datos.pendientesHoy.slice(0, 3).map((p) => (
-                    <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />
-                  ))}
-                  {datos.pendientesHoy.length > 3 && (
-                    <details className="ds-details-plain ds-expand-toggle" style={{ paddingTop: 6 }}>
-                      <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {datos.pendientesHoy.length - 3} más</summary>
-                      {datos.pendientesHoy.slice(3).map((p) => (
-                        <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />
-                      ))}
-                    </details>
-                  )}
-                </>
+                datos.pendientesHoy.map((p) => <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />)
               )}
             </div>
           </>
@@ -3301,40 +3279,38 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
           />
         </div>
 
+        <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} />
+
         <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={playersById} />
 
-        <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+        {/* Cada panel tiene AHORA su propio scroll interno (overflowY en el
+            panel, no solo en el contenedor) — así, al haber mucho más de 3
+            jugadores con dato real, la lista se ve entera (sin vaciar el
+            cajón ni truncar a 3) sin desbordar el borde de la tarjeta. */}
+        <div style={{ flex: "1 1 auto", minHeight: 0, display: "grid", gridTemplateColumns: "1.5fr 1fr", gridTemplateRows: "minmax(0, 1fr)", gap: 16 }}>
           <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2, flexShrink: 0 }}>
               <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Quién necesita atención</div>
               <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
             </div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10 }}>Variación de carga media vs. la semana pasada</div>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>Variación de carga media vs. la semana pasada</div>
             {variaciones.length === 0 ? (
               <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
             ) : (
-              <>
-                {variaciones.slice(0, 3).map((v) => (
+              <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+                {variaciones.map((v) => (
                   <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
                 ))}
-                {variaciones.length > 3 && (
-                  <details className="ds-details-plain ds-expand-toggle" style={{ marginTop: "auto", paddingTop: 6 }}>
-                    <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {variaciones.length - 3} más</summary>
-                    {variaciones.slice(3).map((v) => (
-                      <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
-                    ))}
-                  </details>
-                )}
-              </>
+              </div>
             )}
           </div>
 
           <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2, flexShrink: 0 }}>
               <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Pendientes de hoy</div>
               <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver equipo →</button>
             </div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10 }}>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>
               {sesionHoy ? "Aún sin registrar la sesión de hoy" : "No hay sesión publicada para hoy"}
             </div>
             {!sesionHoy ? (
@@ -3342,19 +3318,11 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
             ) : pendientesHoy.length === 0 ? (
               <div style={{ color: ds.success, fontSize: 12.5, padding: "10px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
             ) : (
-              <>
-                {pendientesHoy.slice(0, 3).map((p) => (
+              <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
+                {pendientesHoy.map((p) => (
                   <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />
                 ))}
-                {pendientesHoy.length > 3 && (
-                  <details className="ds-details-plain ds-expand-toggle" style={{ marginTop: "auto", paddingTop: 6 }}>
-                    <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {pendientesHoy.length - 3} más</summary>
-                    {pendientesHoy.slice(3).map((p) => (
-                      <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />
-                    ))}
-                  </details>
-                )}
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -3387,6 +3355,41 @@ function MiniStat({ icon, label, value, sub, accent }) {
           {sub && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, whiteSpace: "nowrap" }}>{sub}</span>}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Reserva el espacio de "Tu semana" (calendario del entrenador) ya en el
+// layout, tal y como pide el mockup — pero SIN datos, porque
+// calendario_asignaciones todavía no existe: mostrar días/avisos aquí sería
+// inventarlos. En cuanto se implemente Calendario (Fase 6), este placeholder
+// se sustituye por el panel real con los mismos huecos que ya tiene
+// reservados.
+function CalendarioPlaceholderDashboardReal({ onAbrirModulo }) {
+  return (
+    <div
+      style={{
+        flexShrink: 0,
+        marginBottom: 12,
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+        background: ds.surfaceRaised,
+        border: `1px solid ${ds.borderSoft}`,
+        borderRadius: dsR.xl,
+        padding: "10px 16px",
+      }}
+    >
+      <div style={{ width: 24, height: 24, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Calendar size={13} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tu semana</div>
+        <div style={{ fontSize: 11.5, color: ds.inkMuted }}>El calendario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
+      </div>
+      <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
+        Ver programación →
+      </button>
     </div>
   );
 }
