@@ -2794,99 +2794,14 @@ const MODULOS_DASHBOARD = [
   { id: "fatiga", nombre: "Control de fatiga", descripcion: "Salto CMJ, microciclos y estado del equipo", icono: "pulso" },
 ];
 
-function TarjetaModuloCompactaReal({ modulo, onClick }) {
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "flex-start",
-        gap: 8,
-        background: TEMA.superficie,
-        border: `1px solid ${TEMA.borde}`,
-        borderRadius: 10,
-        padding: "12px 12px",
-        cursor: "pointer",
-        textAlign: "left",
-      }}
-    >
-      <div style={{ width: 30, height: 30, borderRadius: 8, background: TEMA.fondoElevado, display: "flex", alignItems: "center", justifyContent: "center", color: TEMA.textoMuted }}>
-        <IconoModulo tipo={modulo.icono} />
-      </div>
-      <div style={{ fontSize: 12.5, fontWeight: 600, color: TEMA.texto, lineHeight: 1.25 }}>{modulo.nombre}</div>
-    </button>
-  );
-}
+// (La antigua TarjetaModuloCompactaReal, tarjeta grande de módulo, se
+// retiró: el acceso directo a módulos del Dashboard móvil ahora es una
+// cuadrícula de 4 columnas más pequeña, en línea dentro del propio
+// DashboardEntrenadorCompactoReal.)
 
-// Tarjeta de estado de hoy — lo primero que se ve al entrar. Antes el
-// Dashboard era solo una lista de botones sin decir nada; esto reutiliza
-// datos que ya se cargan en Programación para responder de un vistazo a
-// "¿tengo algo pendiente hoy?" sin tener que entrar a mirarlo. El texto
-// evita hablar de "sesión" como si fuera lo único que puede pasar hoy —
-// hoy es lo único que hay, pero la tarjeta no lo da por sentado para
-// siempre (cuando haya otros tipos de trabajo, esto es lo primero que
-// habrá que generalizar).
-function TarjetaEstadoHoyReal({ onAbrirModulo }) {
-  const { sesiones, loaded } = useBootstrapProgramacion();
-  const hoy = todayStr();
-  const sesionHoy = sesiones.find((s) => (s.fechas || []).includes(hoy));
-  const borradores = sesiones.filter((s) => !s.enviada).length;
-
-  if (!loaded) {
-    return <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 16, padding: "22px 22px", marginBottom: 14, minHeight: 96 }} />;
-  }
-
-  let titulo, detalle, accionLabel, accionModulo;
-  if (!sesionHoy) {
-    titulo = "Nada planificado para hoy";
-    detalle = "Cuando quieras, prepara el trabajo del día.";
-    accionLabel = "Planificar";
-    accionModulo = "diseno";
-  } else if (!sesionHoy.enviada) {
-    titulo = "Hay un borrador de hoy sin publicar";
-    detalle = sesionHoy.md ? `Marcado como ${sesionHoy.md}, a falta de enviarlo.` : "A falta de enviarlo para que lo vean.";
-    accionLabel = "Retomar borrador";
-    accionModulo = "programacion";
-  } else {
-    titulo = "Trabajo de hoy publicado";
-    detalle = sesionHoy.md ? `Marcado como ${sesionHoy.md}.` : "Ya está visible.";
-    accionLabel = "Ver quién ha registrado";
-    accionModulo = "historial";
-  }
-  const colorEstado = !sesionHoy ? TEMA.textoTenue : sesionHoy.enviada ? TEMA.exito : TEMA.alerta;
-
-  return (
-    <div
-      style={{
-        background: `linear-gradient(135deg, ${TEMA.superficieAlta}, ${TEMA.superficie})`,
-        border: `1px solid ${colorEstado}44`,
-        borderRadius: 16,
-        padding: "22px 22px",
-        marginBottom: 14,
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "absolute", top: 0, left: 0, bottom: 0, width: 4, background: colorEstado }} />
-      <div style={{ fontSize: 18, fontWeight: 700, color: TEMA.texto, marginBottom: 5 }}>{titulo}</div>
-      <div style={{ fontSize: 13, color: TEMA.textoMuted, marginBottom: 16, maxWidth: 420 }}>{detalle}</div>
-      <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-        <button
-          onClick={() => onAbrirModulo(accionModulo)}
-          style={{ background: TEMA.acento, border: `1px solid ${TEMA.acento}`, color: ds.accentInk, borderRadius: 8, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
-        >
-          {accionLabel}
-        </button>
-        {borradores > 0 && (
-          <span style={{ fontSize: 12, color: TEMA.textoTenue }}>
-            {borradores} {borradores === 1 ? "borrador más pendiente de enviar" : "borradores más pendientes de enviar"}
-          </span>
-        )}
-      </div>
-    </div>
-  );
-}
+// (La antigua TarjetaEstadoHoyReal, tarjeta grande de estado del día, se
+// retiró: el Dashboard móvil ahora usa la misma barra compacta de CTA que
+// el de escritorio/iPad, calculada en useDatosDashboardEntrenador.)
 
 // (La antigua TarjetaUsuariosGruposReal se retiró: el Dashboard móvil ahora
 // muestra el mismo bloque de MiniStat que el de escritorio/iPad, con más
@@ -2898,92 +2813,119 @@ function TarjetaEstadoHoyReal({ onAbrirModulo }) {
 // PantallaBase ya implementa el patrón correcto (capa fija + una única
 // región de scroll interno), el mismo que usa toda la vista del jugador —
 // no una excepción nueva, sino el mismo patrón de siempre.
+// Rediseño compacto: menos cajas, menos texto de relleno, acceso directo a
+// los módulos arriba (no al fondo de un scroll largo), y las dos listas de
+// jugadores con su propio alto máximo + scroll interno en vez de una fila
+// gigante por jugador — así 20+ jugadores no convierten el Dashboard en una
+// lista infinita.
+const LISTA_MOVIL_MAX_ALTO = 216;
+
 function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
   const datos = useDatosDashboardEntrenador();
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={720}>
+    <PantallaBase rol="entrenador" maxWidth={520}>
       <div>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <div>
-            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 25, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
-            <div style={{ fontSize: 12.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>
+            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 19, fontWeight: 700, margin: 0 }}>Buenas, David</h1>
+            <div style={{ fontSize: 10.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>
               {datos.loaded ? datos.hoyLabel : new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
             </div>
           </div>
-          <button
-            onClick={onCerrarSesion}
-            style={{ fontSize: 11.5, color: TEMA.textoMuted, background: "transparent", border: `1px solid ${TEMA.bordeSuave}`, borderRadius: 6, padding: "5px 10px", cursor: "pointer", flexShrink: 0, marginTop: 4 }}
-          >
+          <button onClick={onCerrarSesion} style={{ fontSize: 10.5, color: TEMA.textoMuted, background: "transparent", border: "none", padding: 0, cursor: "pointer", flexShrink: 0, textDecoration: "underline", textDecorationColor: TEMA.bordeSuave }}>
             Cerrar sesión
           </button>
         </div>
 
-        <TarjetaEstadoHoyReal onAbrirModulo={onAbrirModulo} />
+        {/* CTA de hoy — misma barra compacta que escritorio/iPad, no la
+            tarjeta grande de antes. */}
+        {datos.loaded && (
+          <button
+            onClick={() => onAbrirModulo(datos.heroAccionModulo)}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+              background: `linear-gradient(135deg, ${ds.accent}, #D89A1F)`,
+              color: ds.accentInk,
+              fontFamily: dsF.sans,
+              border: "none",
+              borderRadius: dsR.lg,
+              padding: "10px 14px",
+              marginBottom: 12,
+              cursor: "pointer",
+              textAlign: "left",
+            }}
+          >
+            <span style={{ fontSize: 12.5, fontWeight: 700 }}>{datos.heroTitulo}</span>
+            <span style={{ fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>{datos.heroAccionLabel} →</span>
+          </button>
+        )}
+
+        {/* Acceso directo a los módulos — arriba, no al fondo. */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 7, marginBottom: 14 }}>
+          {MODULOS_DASHBOARD.map((m) => (
+            <button
+              key={m.id}
+              onClick={() => onAbrirModulo(m.id)}
+              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 10, padding: "9px 4px", cursor: "pointer" }}
+            >
+              <div style={{ color: TEMA.textoMuted }}><IconoModulo tipo={m.icono} /></div>
+              <div style={{ fontSize: 9, fontWeight: 600, color: TEMA.texto, textAlign: "center", lineHeight: 1.15 }}>{m.nombre}</div>
+            </button>
+          ))}
+        </div>
 
         {!datos.loaded ? (
           <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 16, marginBottom: 20, minHeight: 90 }} />
         ) : (
           <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
-              <MiniStat icon={<User size={12} />} label="Usuarios activos" value={datos.activos.length} />
-              <MiniStat icon={<ClipboardList size={12} />} label="Grupos" value={datos.grupos.length} sub={`${datos.independientes} indep.`} />
-              <MiniStat icon={<Calendar size={12} />} label="Sesiones / semana" value={datos.ocurrenciasSemana} sub={`${datos.ocurrenciasRealizadas} hechas`} />
-              <MiniStat
-                icon={<TrendingUp size={12} />}
-                label="Adherencia · esta semana"
-                value={datos.adherenciaActual != null ? `${datos.adherenciaActual}%` : "—"}
-                sub={datos.asignacionesSemana.length ? `${datos.cumplidasSemana} / ${datos.asignacionesSemana.length} hechas` : "sin datos aún"}
-                accent
-              />
-            </div>
+            <TiraStatsCompactaReal datos={datos} />
 
-            <div style={{ marginBottom: 14 }}>
-              <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} />
-            </div>
+            <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} compact />
 
-            <div style={{ marginBottom: 14 }}>
+            <div style={{ marginBottom: 12 }}>
               <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
             </div>
 
-            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
-                <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: TEMA.texto }}>Quién necesita atención</div>
-                <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
+            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <div style={{ fontFamily: dsF.display, fontSize: 12.5, fontWeight: 800, color: TEMA.texto }}>Quién necesita atención</div>
+                <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Historial →</button>
               </div>
-              <div style={{ fontSize: 10.5, color: TEMA.textoMuted, marginBottom: 8 }}>Variación de carga media vs. la semana pasada</div>
               {datos.variaciones.length === 0 ? (
-                <div style={{ color: TEMA.textoMuted, fontSize: 12.5, padding: "8px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
+                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>Sin datos suficientes esta semana y la anterior.</div>
               ) : (
-                datos.variaciones.map((v) => <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />)
+                <div style={{ maxHeight: LISTA_MOVIL_MAX_ALTO, overflowY: "auto", marginTop: 2 }}>
+                  {datos.variaciones.map((v) => (
+                    <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} compact />
+                  ))}
+                </div>
               )}
             </div>
 
-            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 14, marginBottom: 20 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
-                <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: TEMA.texto }}>Pendientes de hoy</div>
-                <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver equipo →</button>
-              </div>
-              <div style={{ fontSize: 10.5, color: TEMA.textoMuted, marginBottom: 8 }}>
-                {datos.sesionHoy ? "Aún sin registrar la sesión de hoy" : "No hay sesión publicada para hoy"}
+            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 12, padding: "10px 12px", marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+                <div style={{ fontFamily: dsF.display, fontSize: 12.5, fontWeight: 800, color: TEMA.texto }}>Pendientes de hoy</div>
+                <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Equipo →</button>
               </div>
               {!datos.sesionHoy ? (
-                <div style={{ color: TEMA.textoMuted, fontSize: 12.5, padding: "8px 0" }}>Publica la sesión de hoy para ver aquí quién falta por registrarla.</div>
+                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>No hay sesión publicada para hoy.</div>
               ) : datos.pendientesHoy.length === 0 ? (
-                <div style={{ color: ds.success, fontSize: 12.5, padding: "8px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
+                <div style={{ color: ds.success, fontSize: 11.5, padding: "6px 0" }}>Todos han registrado hoy.</div>
               ) : (
-                datos.pendientesHoy.map((p) => <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />)
+                <div style={{ maxHeight: LISTA_MOVIL_MAX_ALTO, overflowY: "auto", marginTop: 2 }}>
+                  {datos.pendientesHoy.map((p) => (
+                    <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} compact />
+                  ))}
+                </div>
               )}
             </div>
           </>
         )}
-
-        <div style={{ fontSize: 11.5, fontWeight: 600, color: TEMA.textoTenue, marginBottom: 8 }}>Ir a</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 8 }}>
-          {MODULOS_DASHBOARD.map((m) => (
-            <TarjetaModuloCompactaReal key={m.id} modulo={m} onClick={() => onAbrirModulo(m.id)} />
-          ))}
-        </div>
       </div>
     </PantallaBase>
   );
@@ -3098,8 +3040,8 @@ function useDatosDashboardEntrenador() {
   const borradorHoy = sesiones.find((s) => !s.enviada && (s.fechas || []).includes(hoy));
   const borradores = sesiones.filter((s) => !s.enviada).length;
 
-  // CTA de la cabecera: mismo criterio que TarjetaEstadoHoyReal, pero
-  // resuelto aquí en línea para poder mostrarlo compacto junto al saludo.
+  // CTA de la cabecera (escritorio/iPad y móvil): estado del día resuelto
+  // aquí, compartido por ambas variantes del Dashboard.
   let heroTitulo, heroAccionLabel, heroAccionModulo;
   if (sesionHoy) {
     heroTitulo = "Trabajo de hoy publicado";
@@ -3359,13 +3301,40 @@ function MiniStat({ icon, label, value, sub, accent }) {
   );
 }
 
+// Los mismos 4 datos que MiniStat, pero como una única tira de 4 columnas
+// con separadores en vez de 4 cajas con borde propio — para el Dashboard
+// móvil, donde 4 tarjetas independientes son demasiado "ruido" visual para
+// lo poco que aportan cada una por separado.
+function TiraStatsCompactaReal({ datos }) {
+  const items = [
+    { icon: <User size={11} />, label: "Activos", value: datos.activos.length },
+    { icon: <ClipboardList size={11} />, label: "Grupos", value: datos.grupos.length },
+    { icon: <Calendar size={11} />, label: "Sesión/sem", value: datos.ocurrenciasSemana },
+    { icon: <TrendingUp size={11} />, label: "Adherencia", value: datos.adherenciaActual != null ? `${datos.adherenciaActual}%` : "—" },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "stretch", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "9px 2px", marginBottom: 12, flexShrink: 0 }}>
+      {items.map((it, i) => (
+        <React.Fragment key={it.label}>
+          {i > 0 && <div style={{ width: 1, background: ds.border, flexShrink: 0 }} />}
+          <div style={{ flex: 1, minWidth: 0, textAlign: "center", padding: "0 4px" }}>
+            <div style={{ display: "flex", justifyContent: "center", color: ds.inkMuted, marginBottom: 3 }}>{it.icon}</div>
+            <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink, lineHeight: 1 }}>{it.value}</div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 7.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 3, whiteSpace: "nowrap" }}>{it.label}</div>
+          </div>
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 // Reserva el espacio de "Tu semana" (calendario del entrenador) ya en el
 // layout, tal y como pide el mockup — pero SIN datos, porque
 // calendario_asignaciones todavía no existe: mostrar días/avisos aquí sería
 // inventarlos. En cuanto se implemente Calendario (Fase 6), este placeholder
 // se sustituye por el panel real con los mismos huecos que ya tiene
 // reservados.
-function CalendarioPlaceholderDashboardReal({ onAbrirModulo }) {
+function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact }) {
   return (
     <div
       style={{
@@ -3373,22 +3342,30 @@ function CalendarioPlaceholderDashboardReal({ onAbrirModulo }) {
         marginBottom: 12,
         display: "flex",
         alignItems: "center",
-        gap: 12,
+        gap: compact ? 8 : 12,
         background: ds.surfaceRaised,
         border: `1px solid ${ds.borderSoft}`,
-        borderRadius: dsR.xl,
-        padding: "10px 16px",
+        borderRadius: compact ? dsR.lg : dsR.xl,
+        padding: compact ? "8px 12px" : "10px 16px",
       }}
     >
-      <div style={{ width: 24, height: 24, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        <Calendar size={13} />
+      <div style={{ width: compact ? 20 : 24, height: compact ? 20 : 24, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Calendar size={compact ? 11 : 13} />
       </div>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tu semana</div>
-        <div style={{ fontSize: 11.5, color: ds.inkMuted }}>El calendario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
+      <div style={{ flex: 1, minWidth: 0, fontSize: compact ? 10.5 : 11.5, color: ds.inkMuted, whiteSpace: compact ? "nowrap" : "normal", overflow: compact ? "hidden" : "visible", textOverflow: compact ? "ellipsis" : "clip" }}>
+        {compact ? (
+          <span>
+            <span style={{ color: ds.inkSecondary, fontWeight: 600 }}>Tu semana</span> · llega con Fase 6
+          </span>
+        ) : (
+          <>
+            <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tu semana</div>
+            <div>El calendario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
+          </>
+        )}
       </div>
-      <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
-        Ver programación →
+      <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: compact ? 10.5 : 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
+        {compact ? "Ver →" : "Ver programación →"}
       </button>
     </div>
   );
@@ -3398,36 +3375,50 @@ const SEM_COLOR_DASHBOARD = { red: ds.danger, amber: ds.warning, green: ds.succe
 
 // Fila de "Quién necesita atención": nadie va destacado por defecto — el
 // semáforo da la severidad de un vistazo y el detalle solo se despliega al
-// clicar esa fila en concreto (<details> nativo, sin JS aparte).
-function FilaAtencionReal({ variacion, semaforo, onOpenHistory }) {
+// clicar esa fila en concreto (<details> nativo, sin JS aparte). "compact"
+// (móvil): fila más baja y sin el párrafo de detalle, para poder listar
+// muchos jugadores sin que cada uno ocupe tanto alto — el % ya dice lo
+// esencial, el detalle no aporta tanto como para pagar ese espacio en móvil.
+function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
   const { jugador, pct } = variacion;
   const positivo = pct >= 0;
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
+  const avatarSize = compact ? 18 : 22;
+  const pad = compact ? "5px 0" : "8px 0";
+  const fontSize = compact ? 11 : 11.5;
+
+  const fila = (
+    <summary style={{ display: "flex", alignItems: "center", gap: compact ? 7 : 9, padding: pad }}>
+      <span style={{ width: 6, height: 6, borderRadius: "50%", background: SEM_COLOR_DASHBOARD[semaforo], flexShrink: 0 }} />
+      <DsAvatar size={avatarSize} style={{ background: ds.chart2, fontSize: avatarSize * 0.43, flexShrink: 0 }}>{iniciales}</DsAvatar>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {onOpenHistory ? (
+          <button
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onOpenHistory(jugador);
+            }}
+            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
+          >
+            {jugador.name}
+          </button>
+        ) : (
+          <div style={{ fontSize, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
+        )}
+      </div>
+      <span style={{ fontFamily: dsF.mono, fontSize: compact ? 10 : 10.5, fontWeight: 700, color: positivo ? ds.success : ds.danger, flexShrink: 0, minWidth: 34, textAlign: "right" }}>
+        {positivo ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
+      </span>
+    </summary>
+  );
+
+  if (compact) {
+    return <div style={{ borderBottom: `1px solid ${ds.border}` }}>{fila}</div>;
+  }
   return (
     <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
-      <summary style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0" }}>
-        <span style={{ width: 6, height: 6, borderRadius: "50%", background: SEM_COLOR_DASHBOARD[semaforo], flexShrink: 0 }} />
-        <DsAvatar size={22} style={{ background: ds.chart2, fontSize: 9.5, flexShrink: 0 }}>{iniciales}</DsAvatar>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          {onOpenHistory ? (
-            <button
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                onOpenHistory(jugador);
-              }}
-              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
-            >
-              {jugador.name}
-            </button>
-          ) : (
-            <div style={{ fontSize: 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
-          )}
-        </div>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10.5, fontWeight: 700, color: positivo ? ds.success : ds.danger, flexShrink: 0, minWidth: 34, textAlign: "right" }}>
-          {positivo ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
-        </span>
-      </summary>
+      {fila}
       <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
         Carga media {positivo ? "por encima" : "por debajo"} de la semana pasada ({positivo ? "+" : ""}
         {pct.toFixed(0)}%).
@@ -3437,25 +3428,26 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory }) {
 }
 
 // Fila de "Pendientes de hoy" — solo jugadores sin registro hoy; los que ya
-// registraron simplemente no aparecen en la lista.
-function FilaPendienteReal({ jugador, gruposById, onOpenHistory }) {
+// registraron simplemente no aparecen en la lista. "compact": ver arriba.
+function FilaPendienteReal({ jugador, gruposById, onOpenHistory, compact }) {
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
   const nombreGrupo = (jugador.gruposIds || []).map((id) => gruposById.get(id)).filter(Boolean)[0];
+  const avatarSize = compact ? 18 : 22;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${ds.border}` }}>
-      <DsAvatar size={22} style={{ background: ds.chart3, fontSize: 9.5, flexShrink: 0 }}>{iniciales}</DsAvatar>
-      <div style={{ flex: 1, minWidth: 0 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: compact ? 7 : 10, padding: compact ? "5px 0" : "8px 0", borderBottom: `1px solid ${ds.border}` }}>
+      <DsAvatar size={avatarSize} style={{ background: ds.chart3, fontSize: avatarSize * 0.43, flexShrink: 0 }}>{iniciales}</DsAvatar>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", ...(compact ? { alignItems: "baseline", gap: 6 } : { flexDirection: "column" }) }}>
         {onOpenHistory ? (
           <button
             onClick={() => onOpenHistory(jugador)}
-            style={{ display: "block", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
+            style={{ display: compact ? "inline" : "block", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: compact ? 11 : 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: compact ? "60%" : "100%" }}
           >
             {jugador.name}
           </button>
         ) : (
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
+          <div style={{ fontSize: compact ? 11 : 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
         )}
-        <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>{nombreGrupo || "Independiente"}</div>
+        <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nombreGrupo || "Independiente"}</div>
       </div>
     </div>
   );
