@@ -188,6 +188,14 @@ function GlobalStyles() {
       .ds-progressring__track { fill: none; stroke: ${ds.surface}; }
       .ds-progressring__value { fill: none; stroke: ${ds.accent}; stroke-linecap: round; transition: stroke-dashoffset 300ms ease-out; }
       .ds-progressring__label { font-family: ${dsF.display}; font-weight: 700; fill: ${ds.ink}; }
+
+      /* <details>/<summary> sin el marcador nativo — usado para el
+         despliegue por clic de "Quién necesita atención" y los "ver más"
+         del Dashboard, sin JS aparte. */
+      .ds-details-plain > summary { list-style: none; cursor: pointer; }
+      .ds-details-plain > summary::-webkit-details-marker { display: none; }
+      .ds-expand-toggle > summary::after { content: " ▾"; font-size: 9px; color: ${ds.inkMuted}; }
+      .ds-expand-toggle[open] > summary::after { content: " ▴"; }
     `}</style>
   );
 }
@@ -2882,44 +2890,28 @@ function TarjetaEstadoHoyReal({ onAbrirModulo }) {
   );
 }
 
-// Resumen de usuarios y grupos — datos que ya existen (usePlayers, grupos)
-// pero que hasta ahora solo se veían al entrar en Usuarios. "Independiente"
-// se cuenta como dato neutro, no como aviso: es un estado válido y buscado,
-// no un problema por resolver.
-function TarjetaUsuariosGruposReal({ onAbrirModulo }) {
-  const [players, , playersLoaded] = usePlayers();
-  const [grupos, , gruposLoaded] = useEntityList("grupos");
-  if (!playersLoaded || !gruposLoaded) {
-    return <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "16px 16px", minHeight: 110 }} />;
-  }
-  const activos = players.filter((p) => p.estado === "activo").length;
-  const independientes = players.filter((p) => (p.gruposIds || []).length === 0).length;
-  return (
-    <button
-      onClick={() => onAbrirModulo("roster")}
-      style={{ textAlign: "left", cursor: "pointer", background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: "16px 16px", display: "flex", flexDirection: "column", gap: 10 }}
-    >
-      <div style={{ fontSize: 12, color: TEMA.textoMuted, fontWeight: 600 }}>Usuarios</div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span style={{ fontSize: 28, fontWeight: 700, color: TEMA.texto, fontFamily: TEMA.fuenteTitular }}>{activos}</span>
-        <span style={{ fontSize: 12.5, color: TEMA.textoMuted }}>activos</span>
-      </div>
-      <div style={{ fontSize: 12, color: TEMA.textoTenue }}>
-        {grupos.length} {grupos.length === 1 ? "grupo" : "grupos"} · {independientes} {independientes === 1 ? "independiente" : "independientes"}
-      </div>
-    </button>
-  );
-}
+// (La antigua TarjetaUsuariosGruposReal se retiró: el Dashboard móvil ahora
+// muestra el mismo bloque de MiniStat que el de escritorio/iPad, con más
+// datos — sesiones/semana y adherencia además de usuarios/grupos.)
 
-function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion }) {
-  const hoy = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" });
+// Versión móvil del Dashboard — mismo dato real que la de escritorio/iPad
+// (useDatosDashboardEntrenador), pero apilada en una sola columna. Aquí SÍ
+// puede hacer scroll de contenido: es la pantalla de móvil real, y
+// PantallaBase ya implementa el patrón correcto (capa fija + una única
+// región de scroll interno), el mismo que usa toda la vista del jugador —
+// no una excepción nueva, sino el mismo patrón de siempre.
+function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
+  const datos = useDatosDashboardEntrenador();
+
   return (
     <PantallaBase rol="entrenador" maxWidth={720}>
       <div>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 16 }}>
           <div>
-            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 27, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
-            <div style={{ fontSize: 12.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>{hoy}</div>
+            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 25, fontWeight: 600, margin: "0 0 4px" }}>Buenas, David</h1>
+            <div style={{ fontSize: 12.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>
+              {datos.loaded ? datos.hoyLabel : new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
+            </div>
           </div>
           <button
             onClick={onCerrarSesion}
@@ -2931,9 +2923,82 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion }) {
 
         <TarjetaEstadoHoyReal onAbrirModulo={onAbrirModulo} />
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 22 }}>
-          <TarjetaUsuariosGruposReal onAbrirModulo={onAbrirModulo} />
-        </div>
+        {!datos.loaded ? (
+          <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 16, marginBottom: 20, minHeight: 90 }} />
+        ) : (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+              <MiniStat icon={<User size={12} />} label="Usuarios activos" value={datos.activos.length} />
+              <MiniStat icon={<ClipboardList size={12} />} label="Grupos" value={datos.grupos.length} sub={`${datos.independientes} indep.`} />
+              <MiniStat icon={<Calendar size={12} />} label="Sesiones / semana" value={datos.ocurrenciasSemana} sub={`${datos.ocurrenciasRealizadas} hechas`} />
+              <MiniStat
+                icon={<TrendingUp size={12} />}
+                label="Adherencia · esta semana"
+                value={datos.adherenciaActual != null ? `${datos.adherenciaActual}%` : "—"}
+                sub={datos.asignacionesSemana.length ? `${datos.cumplidasSemana} / ${datos.asignacionesSemana.length} hechas` : "sin datos aún"}
+                accent
+              />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
+            </div>
+
+            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 14, marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+                <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: TEMA.texto }}>Quién necesita atención</div>
+                <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: TEMA.textoMuted, marginBottom: 8 }}>Variación de carga media vs. la semana pasada</div>
+              {datos.variaciones.length === 0 ? (
+                <div style={{ color: TEMA.textoMuted, fontSize: 12.5, padding: "8px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
+              ) : (
+                <>
+                  {datos.variaciones.slice(0, 3).map((v) => (
+                    <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
+                  ))}
+                  {datos.variaciones.length > 3 && (
+                    <details className="ds-details-plain ds-expand-toggle" style={{ paddingTop: 6 }}>
+                      <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {datos.variaciones.length - 3} más</summary>
+                      {datos.variaciones.slice(3).map((v) => (
+                        <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
+                      ))}
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 14, marginBottom: 20 }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+                <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: TEMA.texto }}>Pendientes de hoy</div>
+                <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver equipo →</button>
+              </div>
+              <div style={{ fontSize: 10.5, color: TEMA.textoMuted, marginBottom: 8 }}>
+                {datos.sesionHoy ? "Aún sin registrar la sesión de hoy" : "No hay sesión publicada para hoy"}
+              </div>
+              {!datos.sesionHoy ? (
+                <div style={{ color: TEMA.textoMuted, fontSize: 12.5, padding: "8px 0" }}>Publica la sesión de hoy para ver aquí quién falta por registrarla.</div>
+              ) : datos.pendientesHoy.length === 0 ? (
+                <div style={{ color: ds.success, fontSize: 12.5, padding: "8px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
+              ) : (
+                <>
+                  {datos.pendientesHoy.slice(0, 3).map((p) => (
+                    <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />
+                  ))}
+                  {datos.pendientesHoy.length > 3 && (
+                    <details className="ds-details-plain ds-expand-toggle" style={{ paddingTop: 6 }}>
+                      <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {datos.pendientesHoy.length - 3} más</summary>
+                      {datos.pendientesHoy.slice(3).map((p) => (
+                        <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} />
+                      ))}
+                    </details>
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        )}
 
         <div style={{ fontSize: 11.5, fontWeight: 600, color: TEMA.textoTenue, marginBottom: 8 }}>Ir a</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 8 }}>
@@ -3032,27 +3097,48 @@ function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWid
   );
 }
 
-function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
+// Datos del Dashboard del entrenador — extraído a un hook propio para que
+// la versión de escritorio/iPad (barra lateral) y la de móvil compartan
+// exactamente el mismo cálculo, en vez de duplicarlo entre las dos.
+function useDatosDashboardEntrenador() {
   const [players, , playersLoaded] = usePlayers();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
   const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
   const { items: equipoHistory, loaded: historyLoaded } = useEquipoHistory();
   const loaded = playersLoaded && gruposLoaded && progLoaded && historyLoaded;
 
-  if (!loaded) return <LoadingBlock />;
+  if (!loaded) return { loaded: false };
 
   const hoy = todayStr();
-  const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short" });
+  const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
   const activos = players.filter((p) => p.estado === "activo");
+  const playersById = new Map(players.map((p) => [p.id, p]));
   const independientes = activos.filter((p) => (p.gruposIds || []).length === 0).length;
   const gruposById = new Map(grupos.map((g) => [g.id, g.nombre || g.name || "Grupo"]));
 
   const sesionHoy = sesiones.find((s) => s.enviada && (s.fechas || []).includes(hoy));
+  const borradorHoy = sesiones.find((s) => !s.enviada && (s.fechas || []).includes(hoy));
+  const borradores = sesiones.filter((s) => !s.enviada).length;
+
+  // CTA de la cabecera: mismo criterio que TarjetaEstadoHoyReal, pero
+  // resuelto aquí en línea para poder mostrarlo compacto junto al saludo.
+  let heroTitulo, heroAccionLabel, heroAccionModulo;
+  if (sesionHoy) {
+    heroTitulo = "Trabajo de hoy publicado";
+    heroAccionLabel = "Ver quién ha registrado";
+    heroAccionModulo = "historial";
+  } else if (borradorHoy) {
+    heroTitulo = "Hay un borrador de hoy sin publicar";
+    heroAccionLabel = "Retomar borrador";
+    heroAccionModulo = "programacion";
+  } else {
+    heroTitulo = "Nada planificado para hoy";
+    heroAccionLabel = "Diseñar sesión de hoy";
+    heroAccionModulo = "diseno";
+  }
 
   const lunes = inicioSemanaCalendario(hoy);
   const domingo = sumarDiasFecha(lunes, 6);
-  const lunesAnterior = sumarDiasFecha(lunes, -7);
-  const domingoAnterior = sumarDiasFecha(lunes, -1);
 
   // Ocurrencias de sesión (sesión × fecha) dentro de la semana de
   // calendario, y cuántas de esas fechas ya han llegado (<= hoy).
@@ -3073,36 +3159,25 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
       });
     });
 
-  // Adherencia: de las asignaciones ya llegadas esta semana, cuántas tienen
-  // al menos un registro de ese jugador ese día. Aproximación: no distingue
-  // A QUÉ sesión pertenece el registro si un jugador tuviera más de una
-  // sesión el mismo día (caso raro, pero posible) — cuenta "algo registró
-  // ese día" como cumplido.
+  // Adherencia: SOLO la semana en curso, con el dato que la sostiene
+  // (cumplidas / planificadas). Ya NO se compara contra la semana anterior
+  // — esa comparación mezclaba cumplimiento real con disponibilidad de
+  // calendario (una semana con menos sesiones planificadas no es "peor
+  // adherencia"). Ver la corrección documentada en Fase 6 → Dashboard del
+  // entrenador.
   const registroPorJugadorFecha = new Set(equipoHistory.map((it) => `${it.jugadorId}::${it.date}`));
-  const calcularAdherencia = (asignaciones) => {
-    if (!asignaciones.length) return null;
-    const cumplidas = asignaciones.filter(({ jugadorId, date }) => registroPorJugadorFecha.has(`${jugadorId}::${date}`)).length;
-    return Math.round((cumplidas / asignaciones.length) * 100);
-  };
-  const adherenciaActual = calcularAdherencia(asignacionesSemana);
-
-  const asignacionesSemanaAnterior = [];
-  sesiones
-    .filter((s) => s.enviada)
-    .forEach((s) => {
-      const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : activos.map((p) => p.id);
-      (s.fechas || []).forEach((f) => {
-        if (f < lunesAnterior || f > domingoAnterior) return;
-        destino.forEach((jugadorId) => asignacionesSemanaAnterior.push({ jugadorId, date: f }));
-      });
-    });
-  const adherenciaAnterior = calcularAdherencia(asignacionesSemanaAnterior);
-  const deltaAdherencia = adherenciaActual != null && adherenciaAnterior != null ? adherenciaActual - adherenciaAnterior : null;
+  const cumplidasSemana = asignacionesSemana.filter(({ jugadorId, date }) => registroPorJugadorFecha.has(`${jugadorId}::${date}`)).length;
+  const adherenciaActual = asignacionesSemana.length ? Math.round((cumplidasSemana / asignacionesSemana.length) * 100) : null;
 
   // "Quién necesita atención": variación de la carga media de cada jugador
-  // esta semana vs. la anterior (mismo criterio de ventana que arriba).
-  // Bloque CMJ y tareas de Resistencia quedan fuera por no ser carga
-  // comparable de la misma forma.
+  // esta semana vs. la anterior. INTERINO: pendiente de sustituir por el
+  // motor previsto/real (carga real vs. cargaSugerida de cada tarea, ±5%)
+  // documentado en Fase 6 — eso requiere extraer calcularSugeridaPct1rm /
+  // mejorE1rmPorClave de Diseño de sesiones a una utilidad compartida, que
+  // no se ha hecho todavía. Bloque CMJ y tareas de Resistencia quedan fuera
+  // por no ser carga comparable de la misma forma.
+  const lunesAnterior = sumarDiasFecha(lunes, -7);
+  const domingoAnterior = sumarDiasFecha(lunes, -1);
   const cargaMedia = (jugadorId, desde, hasta) => {
     const regs = equipoHistory.filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= desde && it.date <= hasta);
     if (!regs.length) return null;
@@ -3118,125 +3193,399 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion }) {
     })
     .filter(Boolean)
     .sort((a, b) => a.pct - b.pct);
-  const jugadorEnRiesgo = variaciones.find((v) => v.pct <= -10) || null;
+  const atencionSemaforo = (pct) => (pct <= -8 ? "red" : pct < 0 ? "amber" : "green");
+
+  // "Pendientes de hoy" (antes "Usuarios"): solo jugadores activos que
+  // todavía no han registrado la sesión de hoy — si hoy no hay sesión
+  // publicada, no hay nadie "pendiente" que mostrar.
+  const pendientesHoy = sesionHoy ? activos.filter((p) => !registroPorJugadorFecha.has(`${p.id}::${hoy}`)) : [];
+
+  return {
+    loaded: true,
+    activos,
+    playersById,
+    grupos,
+    independientes,
+    gruposById,
+    hoyLabel,
+    borradores,
+    heroTitulo,
+    heroAccionLabel,
+    heroAccionModulo,
+    ocurrenciasSemana,
+    ocurrenciasRealizadas,
+    adherenciaActual,
+    cumplidasSemana,
+    asignacionesSemana,
+    variaciones,
+    atencionSemaforo,
+    sesionHoy,
+    pendientesHoy,
+  };
+}
+
+function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
+  const datos = useDatosDashboardEntrenador();
+  if (!datos.loaded) return <LoadingBlock />;
+  const {
+    activos,
+    playersById,
+    grupos,
+    independientes,
+    gruposById,
+    hoyLabel,
+    borradores,
+    heroTitulo,
+    heroAccionLabel,
+    heroAccionModulo,
+    ocurrenciasSemana,
+    ocurrenciasRealizadas,
+    adherenciaActual,
+    cumplidasSemana,
+    asignacionesSemana,
+    variaciones,
+    atencionSemaforo,
+    sesionHoy,
+    pendientesHoy,
+  } = datos;
 
   return (
     <div style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
       <GlobalStyles />
       <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
 
-      {/* ---------- Contenido ---------- */}
-      <div style={{ flex: 1, overflowY: "auto", padding: "22px 28px 40px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 22, gap: 16 }}>
-          <div style={{ flex: 1, maxWidth: 360, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 12px", color: ds.inkMuted, fontSize: 13 }}>
+      {/* ---------- Contenido: columna de alto fijo, nada de scroll de
+          página — solo el bloque de comparativas al final hace scroll
+          propio como red de seguridad si el contenido no cupiera. ---------- */}
+      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, padding: "20px 28px 20px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 16, flexShrink: 0 }}>
+          <div style={{ flex: 1, maxWidth: 320, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "7px 12px", color: ds.inkMuted, fontSize: 12.5 }}>
             🔍 Buscar jugador, ejercicio...
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>{hoyLabel}</span>
-            <div style={{ width: 34, height: 34, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}><Bell size={15} /></div>
-            <DsAvatar size={34}>D</DsAvatar>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
+            </span>
+            <div style={{ width: 30, height: 30, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}><Bell size={13} /></div>
+            <DsAvatar size={30}>D</DsAvatar>
           </div>
         </div>
 
-        <div style={{ marginBottom: 20 }}>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 800, margin: "0 0 4px" }}>Buenas, David</h1>
-          <div style={{ fontSize: 12.5, color: ds.inkMuted, textTransform: "capitalize" }}>{new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}</div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 12, flexWrap: "wrap", flexShrink: 0 }}>
+          <div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 800, margin: "0 0 2px", letterSpacing: "-0.01em" }}>Buenas, David</h1>
+            <div style={{ fontSize: 11, color: ds.inkMuted, textTransform: "capitalize" }}>
+              {hoyLabel}
+              {borradores > 0 ? ` · ${borradores} ${borradores === 1 ? "borrador pendiente" : "borradores pendientes"}` : ""}
+            </div>
+          </div>
+          <button
+            onClick={() => onAbrirModulo(heroAccionModulo)}
+            title={heroTitulo}
+            style={{ display: "flex", alignItems: "center", gap: 8, background: `linear-gradient(135deg, ${ds.accent}, #D89A1F)`, color: ds.accentInk, fontFamily: dsF.sans, fontWeight: 700, fontSize: 12.5, padding: "9px 16px", borderRadius: dsR.md, border: "none", cursor: "pointer", boxShadow: dsSh.accentGlow, whiteSpace: "nowrap" }}
+          >
+            {heroAccionLabel}
+          </button>
         </div>
 
-        <TarjetaEstadoHoyReal onAbrirModulo={onAbrirModulo} />
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 22 }}>
-          <DsStatTile label="Usuarios activos" value={activos.length} />
-          <DsStatTile label="Grupos" value={grupos.length} delta={{ direction: "neutral", label: `${independientes} independientes` }} />
-          <DsStatTile label="Sesiones / semana" value={ocurrenciasSemana} delta={{ direction: "neutral", label: `${ocurrenciasRealizadas} ya realizadas` }} />
-          {adherenciaActual != null ? (
-            <DsStatTile
-              label="Adherencia"
-              value={`${adherenciaActual}%`}
-              delta={deltaAdherencia != null ? { direction: deltaAdherencia >= 0 ? "up" : "down", label: `${deltaAdherencia > 0 ? "+" : ""}${deltaAdherencia} vs semana pasada` } : undefined}
-            />
-          ) : (
-            <DsStatTile label="Adherencia" value="—" delta={{ direction: "neutral", label: "sin datos aún esta semana" }} />
-          )}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 12, flexShrink: 0 }}>
+          <MiniStat icon={<User size={12} />} label="Usuarios activos" value={activos.length} />
+          <MiniStat icon={<ClipboardList size={12} />} label="Grupos" value={grupos.length} sub={`${independientes} indep.`} />
+          <MiniStat icon={<Calendar size={12} />} label="Sesiones / semana" value={ocurrenciasSemana} sub={`${ocurrenciasRealizadas} hechas`} />
+          <MiniStat
+            icon={<TrendingUp size={12} />}
+            label="Adherencia · esta semana"
+            value={adherenciaActual != null ? `${adherenciaActual}%` : "—"}
+            sub={asignacionesSemana.length ? `${cumplidasSemana} / ${asignacionesSemana.length} hechas` : "sin datos aún"}
+            accent
+          />
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1.6fr 1fr", gap: 16 }}>
-          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 18 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 4 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Quién necesita atención</div>
-              <div style={{ display: "flex", gap: 12, fontSize: 10.5, color: ds.inkMuted }}>
-                <span><span style={{ color: ds.success }}>●</span> Sube carga</span>
-                <span><span style={{ color: ds.danger }}>●</span> Baja carga</span>
-              </div>
+        <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={playersById} />
+
+        <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 16 }}>
+          <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Quién necesita atención</div>
+              <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
             </div>
-            <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 16 }}>
-              Variación de carga media vs. la semana pasada
-              {jugadorEnRiesgo ? ` — ${variaciones.filter((v) => v.pct < 0).length} jugadores a la baja, ${jugadorEnRiesgo.jugador.name} necesita seguimiento.` : "."}
-            </div>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10 }}>Variación de carga media vs. la semana pasada</div>
             {variaciones.length === 0 ? (
-              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "12px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
+              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {variaciones.map(({ jugador, pct }) => {
-                  const positivo = pct >= 0;
-                  const anchoBarra = Math.min(100, Math.abs(pct)) * 1.4;
-                  return (
-                    <div key={jugador.id} style={{ display: "grid", gridTemplateColumns: "110px 1fr 50px", alignItems: "center", gap: 10 }}>
-                      <div style={{ fontSize: 12.5, color: ds.ink, display: "flex", alignItems: "center", gap: 5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {jugador.name}
-                        {pct <= -10 && <span title="Necesita seguimiento" style={{ color: ds.warning }}>△</span>}
-                      </div>
-                      <div style={{ position: "relative", height: 6, background: ds.bgElevated, borderRadius: 3 }}>
-                        <div
-                          style={{
-                            position: "absolute",
-                            top: 0,
-                            height: "100%",
-                            borderRadius: 3,
-                            background: positivo ? ds.success : ds.danger,
-                            left: positivo ? "50%" : `${50 - anchoBarra / 2}%`,
-                            width: `${anchoBarra / 2}%`,
-                          }}
-                        />
-                      </div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: positivo ? ds.success : ds.danger, textAlign: "right" }}>
-                        {positivo ? "+" : ""}
-                        {pct.toFixed(0)}%
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+              <>
+                {variaciones.slice(0, 3).map((v) => (
+                  <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
+                ))}
+                {variaciones.length > 3 && (
+                  <details className="ds-details-plain ds-expand-toggle" style={{ marginTop: "auto", paddingTop: 6 }}>
+                    <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {variaciones.length - 3} más</summary>
+                    {variaciones.slice(3).map((v) => (
+                      <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
+                    ))}
+                  </details>
+                )}
+              </>
             )}
           </div>
 
-          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 18 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-              <div style={{ fontSize: 15, fontWeight: 700 }}>Usuarios</div>
-              <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11.5, cursor: "pointer" }}>Ver todos</button>
+          <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2 }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Pendientes de hoy</div>
+              <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver equipo →</button>
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {activos.slice(0, 6).map((p) => {
-                const registradoHoy = sesionHoy ? registroPorJugadorFecha.has(`${p.id}::${hoy}`) : null;
-                const nombreGrupo = (p.gruposIds || []).map((id) => gruposById.get(id)).filter(Boolean)[0];
-                return (
-                  <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <DsAvatar size={32} style={{ background: ds.chart2 }}>{(p.name || "?").slice(0, 2).toUpperCase()}</DsAvatar>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12.5, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</div>
-                      <div style={{ fontSize: 10.5, color: ds.inkMuted }}>
-                        {nombreGrupo || "Independiente"}
-                        {sesionHoy ? ` · ${registradoHoy ? "registrado" : "pendiente"}` : ""}
-                      </div>
-                    </div>
-                    {sesionHoy && <span style={{ width: 8, height: 8, borderRadius: dsR.full, background: registradoHoy ? ds.success : ds.warning, flexShrink: 0 }} />}
-                  </div>
-                );
-              })}
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10 }}>
+              {sesionHoy ? "Aún sin registrar la sesión de hoy" : "No hay sesión publicada para hoy"}
             </div>
+            {!sesionHoy ? (
+              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Publica la sesión de hoy para ver aquí quién falta por registrarla.</div>
+            ) : pendientesHoy.length === 0 ? (
+              <div style={{ color: ds.success, fontSize: 12.5, padding: "10px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
+            ) : (
+              <>
+                {pendientesHoy.slice(0, 3).map((p) => (
+                  <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />
+                ))}
+                {pendientesHoy.length > 3 && (
+                  <details className="ds-details-plain ds-expand-toggle" style={{ marginTop: "auto", paddingTop: 6 }}>
+                    <summary style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, color: ds.accent }}>Ver {pendientesHoy.length - 3} más</summary>
+                    {pendientesHoy.slice(3).map((p) => (
+                      <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />
+                    ))}
+                  </details>
+                )}
+              </>
+            )}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Tile compacto de estadística: icono + etiqueta + valor en línea (en vez
+// del DsStatTile alto, para que quepan 4 en una fila sin robarle altura al
+// resto del Dashboard). "accent" = el tile con más peso visual (Adherencia).
+function MiniStat({ icon, label, value, sub, accent }) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        background: accent ? `linear-gradient(160deg, ${ds.accent}1a, ${ds.surfaceRaised} 60%)` : ds.surfaceRaised,
+        border: `1px solid ${accent ? ds.accentBorderSubtle : ds.borderSoft}`,
+        borderRadius: dsR.lg,
+        padding: "10px 14px",
+      }}
+    >
+      <div style={{ width: 22, height: 22, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2, whiteSpace: "nowrap" }}>{label}</div>
+        <div style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", display: "flex", alignItems: "baseline", gap: 6 }}>
+          {value}
+          {sub && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, whiteSpace: "nowrap" }}>{sub}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SEM_COLOR_DASHBOARD = { red: ds.danger, amber: ds.warning, green: ds.success };
+
+// Fila de "Quién necesita atención": nadie va destacado por defecto — el
+// semáforo da la severidad de un vistazo y el detalle solo se despliega al
+// clicar esa fila en concreto (<details> nativo, sin JS aparte).
+function FilaAtencionReal({ variacion, semaforo, onOpenHistory }) {
+  const { jugador, pct } = variacion;
+  const positivo = pct >= 0;
+  const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
+  return (
+    <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
+      <summary style={{ display: "flex", alignItems: "center", gap: 9, padding: "8px 0" }}>
+        <span style={{ width: 6, height: 6, borderRadius: "50%", background: SEM_COLOR_DASHBOARD[semaforo], flexShrink: 0 }} />
+        <DsAvatar size={22} style={{ background: ds.chart2, fontSize: 9.5, flexShrink: 0 }}>{iniciales}</DsAvatar>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {onOpenHistory ? (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onOpenHistory(jugador);
+              }}
+              style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
+            >
+              {jugador.name}
+            </button>
+          ) : (
+            <div style={{ fontSize: 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
+          )}
+        </div>
+        <span style={{ fontFamily: dsF.mono, fontSize: 10.5, fontWeight: 700, color: positivo ? ds.success : ds.danger, flexShrink: 0, minWidth: 34, textAlign: "right" }}>
+          {positivo ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
+        </span>
+      </summary>
+      <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
+        Carga media {positivo ? "por encima" : "por debajo"} de la semana pasada ({positivo ? "+" : ""}
+        {pct.toFixed(0)}%).
+      </div>
+    </details>
+  );
+}
+
+// Fila de "Pendientes de hoy" — solo jugadores sin registro hoy; los que ya
+// registraron simplemente no aparecen en la lista.
+function FilaPendienteReal({ jugador, gruposById, onOpenHistory }) {
+  const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
+  const nombreGrupo = (jugador.gruposIds || []).map((id) => gruposById.get(id)).filter(Boolean)[0];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${ds.border}` }}>
+      <DsAvatar size={22} style={{ background: ds.chart3, fontSize: 9.5, flexShrink: 0 }}>{iniciales}</DsAvatar>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {onOpenHistory ? (
+          <button
+            onClick={() => onOpenHistory(jugador)}
+            style={{ display: "block", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
+          >
+            {jugador.name}
+          </button>
+        ) : (
+          <div style={{ fontSize: 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
+        )}
+        <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>{nombreGrupo || "Independiente"}</div>
+      </div>
+    </div>
+  );
+}
+
+// Control de fatiga del Dashboard: nada de medias de un dato individual
+// (eso era "información vacía"). En vez de eso, reutiliza el MISMO motor de
+// clasificación rojo/ámbar/verde/gris que ya usa Control de fatiga
+// (cmjBuildPlayers) y muestra la proporción del equipo en cada estado, más
+// quién en concreto está en rojo — mismo principio que "Quién necesita
+// atención".
+function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById }) {
+  const [saltos, setSaltos] = useState([]);
+  const [microciclos, setMicrociclos] = useState([]);
+  const [umbral, setUmbral] = useState(null);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null), supabase.from("cmj_microciclos").select("*"), api.config("cmj_umbral")]).then(([saltosRes, microRes, umbralGuardado]) => {
+      if (cancelled) return;
+      if (!saltosRes.error) setSaltos(saltosRes.data || []);
+      if (!microRes.error) setMicrociclos(microRes.data || []);
+      setUmbral(umbralGuardado || CMJ_UMBRAL_DEFECTO);
+      setLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!loaded || !umbral) {
+    return <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 14, marginBottom: 12, minHeight: 56, flexShrink: 0 }} />;
+  }
+
+  const filasParaMotor = saltos
+    .filter((s) => playersById.has(s.jugador_id))
+    .map((s) => ({
+      jugadorId: s.jugador_id,
+      nombre: playersById.get(s.jugador_id).name,
+      dateKey: s.fecha,
+      date: s.fecha_hora,
+      peso: s.peso,
+      hp0: s.hp0,
+      altura: s.altura,
+      fuerza: s.fuerza,
+      potencia: s.potencia,
+      velocidad: s.velocidad,
+      kineticsValid: s.kinetics_valid,
+      pesoValid: s.peso_valid,
+      hp0Valid: s.hp0_valid,
+    }));
+
+  const { players: builtPlayers } = cmjBuildPlayers(filasParaMotor, microciclos, umbral.ambarPct, umbral.rojoPct, umbral.individualizar, umbral.protocoloDesde);
+  const total = builtPlayers.length;
+
+  if (total === 0) {
+    return (
+      <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: "12px 16px", marginBottom: 12, flexShrink: 0, fontSize: 12, color: ds.inkMuted }}>
+        Aún no hay pruebas CMJ registradas para calcular el control de fatiga.
+      </div>
+    );
+  }
+
+  const enVerde = builtPlayers.filter((p) => p.combinedStatus === "green").length;
+  const enAmbar = builtPlayers.filter((p) => p.combinedStatus === "amber").length;
+  const enRojo = builtPlayers.filter((p) => p.combinedStatus === "red").length;
+  const jugadoresRojo = builtPlayers
+    .filter((p) => p.combinedStatus === "red")
+    .map((p) => playersById.get(p.jugadorId))
+    .filter(Boolean);
+  const pctVerde = Math.round((enVerde / total) * 100);
+
+  return (
+    <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: "10px 16px", marginBottom: 12, flexShrink: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 11, flexShrink: 0 }}>
+          <div style={{ width: 24, height: 24, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Activity size={13} /></div>
+          <div>
+            <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>En plena forma</div>
+            <div style={{ fontFamily: dsF.display, fontSize: 16, fontWeight: 800, color: ds.success }}>
+              {pctVerde}% <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, fontWeight: 600 }}>{enVerde} / {total}</span>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+          <div style={{ display: "flex", width: 140, height: 6, borderRadius: dsR.full, overflow: "hidden", background: ds.border }}>
+            <span style={{ width: `${(enVerde / total) * 100}%`, background: ds.success }} />
+            <span style={{ width: `${(enAmbar / total) * 100}%`, background: ds.warning }} />
+            <span style={{ width: `${(enRojo / total) * 100}%`, background: ds.danger }} />
+          </div>
+          <div style={{ display: "flex", gap: 10 }}>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
+              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.success, display: "inline-block" }} />{enVerde} verde
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
+              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.warning, display: "inline-block" }} />{enAmbar} ámbar
+            </span>
+            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
+              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.danger, display: "inline-block" }} />{enRojo} rojo
+            </span>
+          </div>
+        </div>
+
+        <div style={{ flex: 1 }} />
+        <button onClick={() => onAbrirModulo("fatiga")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>Control de fatiga →</button>
+      </div>
+
+      {jugadoresRojo.length > 0 && (
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "9px 11px", marginTop: 10 }}>
+          <AlertTriangle size={13} color={ds.accent} style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 11, color: ds.ink, lineHeight: 1.45, margin: 0 }}>
+            En rojo hoy:{" "}
+            {jugadoresRojo.map((j, i) => (
+              <React.Fragment key={j.id}>
+                {onOpenHistory ? (
+                  <button
+                    onClick={() => onOpenHistory(j)}
+                    style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.accent, fontWeight: 700, fontSize: 11, borderBottom: `1px solid ${ds.accentBorderSubtle}` }}
+                  >
+                    {j.name}
+                  </button>
+                ) : (
+                  <span style={{ color: ds.accent, fontWeight: 700 }}>{j.name}</span>
+                )}
+                {i < jugadoresRojo.length - 1 ? ", " : ""}
+              </React.Fragment>
+            ))}{" "}
+            — por debajo de su umbral individual, revisa antes de subir carga esta semana.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
@@ -3256,12 +3605,12 @@ function IconoGridSidebar() {
 // muestra el dashboard con barra lateral; por debajo de eso, el compacto de
 // siempre — el layout con barra lateral fija no está pensado para caber en
 // una pantalla estrecha.
-function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion }) {
+function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
   const ancho = useAnchoVentana();
   return ancho >= 1000 ? (
-    <DashboardEntrenadorSidebarReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+    <DashboardEntrenadorSidebarReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} onOpenHistory={onOpenHistory} />
   ) : (
-    <DashboardEntrenadorCompactoReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+    <DashboardEntrenadorCompactoReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} onOpenHistory={onOpenHistory} />
   );
 }
 
@@ -11475,7 +11824,7 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
     return <ControlFatigaModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
 
-  return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
+  return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} onOpenHistory={setHistorialJugador} />;
 }
 
 // Envoltorio: ProgramacionReal necesita la lista de jugadores para el editor de sesiones.
