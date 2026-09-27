@@ -3425,6 +3425,7 @@ function IconoModulo({ tipo }) {
 
 const MODULOS_DASHBOARD = [
   { id: "programacion", nombre: "Programación", descripcion: "Sesión de hoy y próximas programadas", icono: "calendario" },
+  { id: "calendario", nombre: "Calendario", descripcion: "Planifica sesiones futuras por equipo, grupo o jugador", icono: "calendario" },
   { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
   { id: "complementarias", nombre: "Dinámicas complementarias", descripcion: "Programas puntuales (ej. Miembro Superior) para días concretos", icono: "rayo" },
   { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
@@ -3591,6 +3592,37 @@ function sumarDiasFecha(fechaStr, dias) {
   const d = new Date(fechaStr + "T00:00:00");
   d.setDate(d.getDate() + dias);
   return fechaISO(d);
+}
+
+// Cuadrícula de 6 semanas (42 días, L-D) para pintar un mes de calendario —
+// compartida por el Calendario del entrenador, la mini-vista de la ficha de
+// jugador y el Calendario del propio jugador. Siempre arranca en lunes y
+// siempre son 42 días exactos (6 filas completas), para que la cuadrícula no
+// cambie de alto de un mes a otro. `mesRef` es cualquier fecha "YYYY-MM-DD"
+// dentro del mes que se quiere mostrar.
+function generarCuadriculaMes(mesRef) {
+  const primerDiaMes = mesRef.slice(0, 8) + "01";
+  const inicio = inicioSemanaCalendario(primerDiaMes);
+  const mesNumero = Number(mesRef.slice(5, 7));
+  const dias = [];
+  for (let i = 0; i < 42; i++) {
+    const f = sumarDiasFecha(inicio, i);
+    dias.push({ fecha: f, fuera: Number(f.slice(5, 7)) !== mesNumero, dayNum: Number(f.slice(8, 10)) });
+  }
+  return dias;
+}
+function inicioMes(fechaStr) {
+  return fechaStr.slice(0, 8) + "01";
+}
+function sumarMeses(mesRef, n) {
+  const d = new Date(mesRef + "T00:00:00");
+  d.setMonth(d.getMonth() + n, 1);
+  return fechaISO(d);
+}
+function labelMes(mesRef) {
+  const d = new Date(mesRef + "T00:00:00");
+  const s = d.toLocaleDateString("es-ES", { month: "long", year: "numeric" });
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
@@ -7319,7 +7351,7 @@ function useReferenciasPorEjercicio(sesionActualId) {
   }, [tareasHistoricas, sesionesHistoricas, tareasHistoricasLoaded, sesionesHistoricasLoaded, sesionActualId]);
 }
 
-function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }) {
+function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura }) {
   const [abierta, setAbierta] = useState(esHoy);
   const [confirmando, setConfirmando] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -7426,37 +7458,41 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar }
               </div>
             </div>
           ))}
-          <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} style={{ alignSelf: "flex-start" }}>
-            Editar esta sesión
-          </DsButton>
-          {onReutilizar && (
-            <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ alignSelf: "flex-start", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
-              Reutilizar como nueva
-            </DsButton>
-          )}
-          {confirmando ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, color: ds.danger }}>
-                {sesion.enviada ? "Esta sesión ya se envió — ¿eliminarla igualmente?" : "¿Eliminar esta sesión? No se puede deshacer."}
-              </span>
-              <button
-                onClick={async () => {
-                  setBorrando(true);
-                  await onEliminar(sesion.id);
-                }}
-                disabled={borrando}
-                style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.danger}`, background: `${ds.danger}22`, color: ds.danger, cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
-              >
-                {borrando ? "Eliminando..." : "Sí, eliminar"}
-              </button>
-              <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>
-                Cancelar
-              </button>
-            </div>
-          ) : (
-            <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ alignSelf: "flex-start" }}>
-              Eliminar sesión
-            </DsButton>
+          {!soloLectura && (
+            <>
+              <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} style={{ alignSelf: "flex-start" }}>
+                Editar esta sesión
+              </DsButton>
+              {onReutilizar && (
+                <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ alignSelf: "flex-start", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
+                  Reutilizar como nueva
+                </DsButton>
+              )}
+              {confirmando ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, color: ds.danger }}>
+                    {sesion.enviada ? "Esta sesión ya se envió — ¿eliminarla igualmente?" : "¿Eliminar esta sesión? No se puede deshacer."}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      setBorrando(true);
+                      await onEliminar(sesion.id);
+                    }}
+                    disabled={borrando}
+                    style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.danger}`, background: `${ds.danger}22`, color: ds.danger, cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
+                  >
+                    {borrando ? "Eliminando..." : "Sí, eliminar"}
+                  </button>
+                  <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ alignSelf: "flex-start" }}>
+                  Eliminar sesión
+                </DsButton>
+              )}
+            </>
           )}
         </div>
       )}
@@ -7677,6 +7713,427 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
 }
 
 
+
+// ---------- CALENDARIO (Fase 6) ----------
+// Módulo nuevo, independiente de Programación: mientras Programación sigue
+// siendo "sesión de hoy y próximas" en una lista plana, Calendario es la
+// vista de planificación — mes a mes, por equipo / grupo / jugador — pensada
+// para adelantarte y dejar el trabajo de las próximas semanas ya preparado.
+// No inventa ningún concepto de datos nuevo: usa exactamente el mismo
+// `jugadores_destino` (null = todo el equipo activo, o un array explícito de
+// ids) que ya usa el resto de la app — "grupo" y "jugador" aquí son solo
+// FORMAS DE MIRAR ese mismo dato, no una columna nueva.
+
+// Destinatarios efectivos de una sesión — mismo criterio que
+// useDatosDashboardEntrenador / bootstrapJugador: si no hay
+// jugadores_destino explícito, la sesión llega a todos los activos.
+function destinatariosEfectivosSesion(sesion, activos) {
+  return sesion.jugadores_destino && sesion.jugadores_destino.length ? sesion.jugadores_destino : activos.map((p) => p.id);
+}
+
+// Etiqueta "para quién es" una sesión en el Calendario. Si su destino
+// explícito coincide EXACTAMENTE con el roster activo de un grupo, se
+// etiqueta con el nombre de ese grupo; si no, se describe tal cual — nunca
+// se inventa una relación con un grupo que el dato no tiene.
+function etiquetaDestinoSesion(sesion, players, grupos) {
+  const destino = sesion.jugadores_destino;
+  if (!destino || !destino.length) return "Todo el equipo";
+  if (destino.length === 1) {
+    const j = players.find((p) => p.id === destino[0]);
+    return j ? `${j.name} — individual` : "1 jugador — individual";
+  }
+  const destinoSet = new Set(destino);
+  const grupoExacto = grupos.find((g) => {
+    const rosterActivo = players.filter((p) => p.estado === "activo" && (p.gruposIds || []).includes(g.id)).map((p) => p.id);
+    return rosterActivo.length === destino.length && rosterActivo.every((id) => destinoSet.has(id));
+  });
+  return grupoExacto ? `${grupoExacto.nombre} (${destino.length} jug.)` : `${destino.length} jugadores`;
+}
+
+// ¿Se ve esta sesión dentro del ámbito elegido en el Calendario?
+// scope = { tipo: "equipo" } | { tipo: "grupo", grupoId } | { tipo: "jugador", jugadorId }
+function sesionVisibleEnScope(sesion, scope, players, activos) {
+  if (scope.tipo === "equipo") return true;
+  const destino = destinatariosEfectivosSesion(sesion, activos);
+  if (scope.tipo === "jugador") return destino.includes(scope.jugadorId);
+  const rosterActivo = players.filter((p) => p.estado === "activo" && (p.gruposIds || []).includes(scope.grupoId)).map((p) => p.id);
+  if (!rosterActivo.length) return false;
+  return rosterActivo.every((id) => destino.includes(id));
+}
+
+// Estado del punto de cada día — mismo criterio "ok / pending / empty" que
+// ya usa "Tu semana" en el Dashboard del entrenador (useDatosDashboardEntrenador):
+// "ok" = ya pasó (o es hoy) y había algo ENVIADO; "pending" = hoy o futuro con
+// algo (enviado o borrador); si no, "empty".
+function estadoDiaCalendario(sesionesDia, fecha, hoy) {
+  const hasEnviada = sesionesDia.some((s) => s.enviada);
+  const hasAny = sesionesDia.length > 0;
+  if (fecha <= hoy && hasEnviada) return "ok";
+  if (fecha >= hoy && hasAny) return "pending";
+  return "empty";
+}
+
+function itemScopeCalendarioStyle(activo) {
+  return {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    background: activo ? ds.accentSubtle : "transparent",
+    border: "none",
+    borderRadius: dsR.sm,
+    padding: "7px 10px",
+    color: activo ? ds.accent : ds.ink,
+    fontSize: 12.5,
+    fontWeight: activo ? 700 : 500,
+    cursor: "pointer",
+  };
+}
+const navMesBtnCalendarioStyle = {
+  width: 30,
+  height: 30,
+  borderRadius: dsR.md,
+  border: `1px solid ${ds.border}`,
+  background: ds.surface,
+  color: ds.inkSecondary,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+};
+
+// Envoltorio: igual patrón que ProgramacionModuloReal — Calendario necesita
+// la lista de jugadores (para el editor de sesiones y para el selector de
+// ámbito) y también los grupos (que Programación no necesitaba).
+function CalendarioModuloReal({ onBack, onAbrirModulo, onCerrarSesion, scopeInicial }) {
+  const [players, , playersLoaded] = usePlayers();
+  const [grupos, , gruposLoaded] = useEntityList("grupos");
+  if (!playersLoaded || !gruposLoaded) return <LoadingBlock />;
+  return <CalendarioReal players={players} grupos={grupos} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} scopeInicial={scopeInicial} />;
+}
+
+function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeInicial }) {
+  // Mismo bootstrap que Programación (sesiones + tareas + ejercicios en una
+  // sola llamada, cacheada) — Calendario es otra forma de mirar exactamente
+  // los mismos datos, no una fuente nueva.
+  const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
+
+  const [editingSesion, setEditingSesion] = useState(null);
+  const [plantillaSesion, setPlantillaSesion] = useState(null);
+  const [fechasParaEditor, setFechasParaEditor] = useState(null);
+  const [destinatariosParaEditor, setDestinatariosParaEditor] = useState(undefined);
+  const [tipoEditor, setTipoEditor] = useState("sesion"); // "sesion" | "complementaria"
+  const [showEditor, setShowEditor] = useState(false);
+  const [errorBorrado, setErrorBorrado] = useState("");
+
+  const hoy = todayStr();
+  const [mesRef, setMesRef] = useState(inicioMes(hoy));
+  const [scopeId, setScopeId] = useState(scopeInicial || "equipo"); // "equipo" | "g:<id>" | "j:<id>"
+  const [diaSel, setDiaSel] = useState(hoy);
+  const [scopeDdAbierto, setScopeDdAbierto] = useState(false);
+  const [buscarScope, setBuscarScope] = useState("");
+
+  if (showEditor) {
+    const esComplementaria = tipoEditor === "complementaria" || (editingSesion || plantillaSesion)?.tipo === "complementaria";
+    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const cerrar = () => {
+      setShowEditor(false);
+      setEditingSesion(null);
+      setPlantillaSesion(null);
+      setFechasParaEditor(null);
+      setDestinatariosParaEditor(undefined);
+    };
+    return (
+      <EditorComponent
+        sesionExistente={editingSesion || undefined}
+        plantilla={plantillaSesion || undefined}
+        fechasSugeridas={fechasParaEditor || undefined}
+        destinatariosSugeridos={destinatariosParaEditor}
+        onBack={cerrar}
+        onGuardado={() => {
+          retry();
+          cerrar();
+        }}
+      />
+    );
+  }
+
+  if (!bootLoaded) return <LoadingBlock />;
+
+  const activos = players.filter((p) => p.estado === "activo");
+  const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+  const sesionIdsSet = new Set(sesiones.map((s) => s.id));
+  const tareasBySesion = new Map();
+  tareas
+    .filter((t) => sesionIdsSet.has(t.sesion_id))
+    .forEach((t) => {
+      if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
+      const e = ejerciciosById.get(t.ejercicio_id) || {};
+      tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
+    });
+  const conTareas = sesiones.map((s) => ({ ...s, tareas: tareasBySesion.get(s.id) || [] }));
+
+  const gruposOrdenados = grupos.slice().sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  const jugadoresOrdenados = activos.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  const scope =
+    scopeId === "equipo"
+      ? { tipo: "equipo", id: "equipo", label: "Equipo completo" }
+      : scopeId.startsWith("g:")
+      ? (() => {
+          const g = grupos.find((x) => x.id === scopeId.slice(2));
+          return g ? { tipo: "grupo", grupoId: g.id, id: scopeId, label: g.nombre } : { tipo: "equipo", id: "equipo", label: "Equipo completo" };
+        })()
+      : (() => {
+          const p = players.find((x) => x.id === scopeId.slice(2));
+          return p ? { tipo: "jugador", jugadorId: p.id, id: scopeId, label: p.name } : { tipo: "equipo", id: "equipo", label: "Equipo completo" };
+        })();
+
+  const sesionesEnFecha = (fecha) => conTareas.filter((s) => (s.fechas || []).includes(fecha) && sesionVisibleEnScope(s, scope, players, activos));
+
+  const dias = generarCuadriculaMes(mesRef);
+
+  const editar = (s) => {
+    setEditingSesion(s);
+    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
+    setShowEditor(true);
+  };
+  const reutilizar = (s) => {
+    setPlantillaSesion(s);
+    setEditingSesion(null);
+    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
+    setShowEditor(true);
+  };
+  // "Personalizar solo para X": misma mecánica que Reutilizar (sesión nueva,
+  // sin heredar id ni tocar la original) pero forzando el destino a un solo
+  // jugador y la fecha al día concreto que se estaba mirando — no a "hoy" ni
+  // a las fechas originales (que podían ser un lote de varios días).
+  const personalizarParaJugador = (s, jugadorId, fecha) => {
+    setPlantillaSesion({ ...s, jugadores_destino: [jugadorId] });
+    setEditingSesion(null);
+    setFechasParaEditor([fecha]);
+    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
+    setShowEditor(true);
+  };
+  const nuevaSesionEnFecha = (fecha, tipo) => {
+    setPlantillaSesion(null);
+    setEditingSesion(null);
+    setFechasParaEditor([fecha]);
+    setDestinatariosParaEditor(
+      scope.tipo === "jugador"
+        ? [scope.jugadorId]
+        : scope.tipo === "grupo"
+        ? activos.filter((p) => (p.gruposIds || []).includes(scope.grupoId)).map((p) => p.id)
+        : null
+    );
+    setTipoEditor(tipo);
+    setShowEditor(true);
+  };
+  const eliminarSesion = async (sesionId) => {
+    setErrorBorrado("");
+    try {
+      const tareasDeSesion = tareas.filter((t) => t.sesion_id === sesionId);
+      const circuitoIds = [...new Set(tareasDeSesion.filter((t) => t.circuito_id).map((t) => t.circuito_id))];
+      await Promise.all(tareasDeSesion.map((t) => api.delete("tareas", t.id)));
+      await Promise.all(circuitoIds.map((id) => api.delete("circuitos", id)));
+      await api.delete("sesiones", sesionId);
+      invalidateEntityCache("sesiones");
+      invalidateEntityCache("tareas");
+      invalidateEntityCache("circuitos");
+      invalidateBootstrapCache();
+      retry();
+    } catch (e) {
+      setErrorBorrado("No se pudo borrar la sesión. Comprueba tu conexión e inténtalo de nuevo.");
+    }
+  };
+
+  const sesionesDiaSel = sesionesEnFecha(diaSel);
+  const yaEsIndividualDeEsteJugador = (s) => scope.tipo === "jugador" && s.jugadores_destino && s.jugadores_destino.length === 1 && s.jugadores_destino[0] === scope.jugadorId;
+
+  return (
+    <PantallaEntrenadorAncha activo="calendario" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+      <div>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>CALENDARIO</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Planifica sesiones futuras</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>Por equipo, por grupo o por jugador individual</div>
+        </div>
+
+        {errorBorrado && (
+          <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
+            {errorBorrado}
+          </div>
+        )}
+
+        {/* Selector de ámbito: equipo / grupo / jugador */}
+        <div style={{ position: "relative", marginBottom: 16 }}>
+          <button
+            onClick={() => setScopeDdAbierto((v) => !v)}
+            style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13.5, fontWeight: 600 }}
+          >
+            <User size={14} color={ds.accent} />
+            {scope.label}
+            <span style={{ marginLeft: "auto", color: ds.inkMuted, fontSize: 11 }}>{scopeDdAbierto ? "▲" : "▼"}</span>
+          </button>
+          {scopeDdAbierto && (
+            <div style={{ position: "absolute", zIndex: 20, top: "calc(100% + 4px)", left: 0, right: 0, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: dsR.md, boxShadow: dsSh.elevation3, maxHeight: 340, overflowY: "auto", padding: 8 }}>
+              <DsInput autoFocus value={buscarScope} onChange={(e) => setBuscarScope(e.target.value)} placeholder="Buscar equipo, grupo o jugador..." style={{ marginBottom: 8 }} />
+              <button
+                onClick={() => {
+                  setScopeId("equipo");
+                  setScopeDdAbierto(false);
+                  setBuscarScope("");
+                }}
+                style={itemScopeCalendarioStyle(scopeId === "equipo")}
+              >
+                Equipo completo
+              </button>
+              {gruposOrdenados.filter((g) => !buscarScope.trim() || (g.nombre || "").toLowerCase().includes(buscarScope.trim().toLowerCase())).length > 0 && (
+                <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, letterSpacing: "0.06em", padding: "8px 10px 2px" }}>GRUPOS</div>
+              )}
+              {gruposOrdenados
+                .filter((g) => !buscarScope.trim() || (g.nombre || "").toLowerCase().includes(buscarScope.trim().toLowerCase()))
+                .map((g) => (
+                  <button
+                    key={g.id}
+                    onClick={() => {
+                      setScopeId(`g:${g.id}`);
+                      setScopeDdAbierto(false);
+                      setBuscarScope("");
+                    }}
+                    style={itemScopeCalendarioStyle(scopeId === `g:${g.id}`)}
+                  >
+                    {g.nombre}
+                  </button>
+                ))}
+              {jugadoresOrdenados.filter((p) => !buscarScope.trim() || p.name.toLowerCase().includes(buscarScope.trim().toLowerCase())).length > 0 && (
+                <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, letterSpacing: "0.06em", padding: "8px 10px 2px" }}>JUGADORES</div>
+              )}
+              {jugadoresOrdenados
+                .filter((p) => !buscarScope.trim() || p.name.toLowerCase().includes(buscarScope.trim().toLowerCase()))
+                .map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => {
+                      setScopeId(`j:${p.id}`);
+                      setScopeDdAbierto(false);
+                      setBuscarScope("");
+                    }}
+                    style={itemScopeCalendarioStyle(scopeId === `j:${p.id}`)}
+                  >
+                    {p.name}
+                    {(p.gruposIds || []).length === 0 ? " · independiente" : ""}
+                  </button>
+                ))}
+            </div>
+          )}
+        </div>
+
+        {/* Navegación de mes */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <button onClick={() => setMesRef((m) => sumarMeses(m, -1))} style={navMesBtnCalendarioStyle} aria-label="Mes anterior">
+            <ChevronLeft size={16} />
+          </button>
+          <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>{labelMes(mesRef)}</div>
+          <button onClick={() => setMesRef((m) => sumarMeses(m, 1))} style={navMesBtnCalendarioStyle} aria-label="Mes siguiente">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+        {mesRef !== inicioMes(hoy) && (
+          <button
+            onClick={() => {
+              setMesRef(inicioMes(hoy));
+              setDiaSel(hoy);
+            }}
+            style={{ display: "block", margin: "0 auto 12px", background: "transparent", border: "none", color: ds.accent, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+          >
+            Volver a hoy
+          </button>
+        )}
+
+        {/* Cuadrícula del mes */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
+          {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
+            <div key={d} style={{ textAlign: "center", fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, padding: "2px 0" }}>
+              {d}
+            </div>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 18 }}>
+          {dias.map((d) => {
+            const sesionesDia = sesionesEnFecha(d.fecha);
+            const estado = estadoDiaCalendario(sesionesDia, d.fecha, hoy);
+            const esHoy = d.fecha === hoy;
+            const esSel = d.fecha === diaSel;
+            const colorDot = estado === "ok" ? ds.success : estado === "pending" ? ds.accent : "transparent";
+            return (
+              <button
+                key={d.fecha}
+                onClick={() => setDiaSel(d.fecha)}
+                style={{
+                  aspectRatio: "1",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 3,
+                  borderRadius: dsR.md,
+                  border: esSel ? `1.5px solid ${ds.accent}` : esHoy ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
+                  background: esSel ? ds.accentSubtle : ds.surface,
+                  opacity: d.fuera ? 0.35 : 1,
+                  color: ds.ink,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: esHoy ? 800 : 500,
+                }}
+              >
+                <span>{d.dayNum}</span>
+                <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: colorDot }} />
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Panel del día seleccionado */}
+        <div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8, textTransform: "uppercase" }}>
+            {fmtDateLabel(diaSel)}
+            {diaSel === hoy ? " · hoy" : ""}
+          </div>
+          {sesionesDiaSel.length > 0 ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
+              {sesionesDiaSel.map((s) => (
+                <div key={s.id}>
+                  <TarjetaSesionReal sesion={s} esHoy={diaSel === hoy} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                  <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 4, marginLeft: 4 }}>Para: {etiquetaDestinoSesion(s, players, grupos)}</div>
+                  {scope.tipo === "jugador" && !yaEsIndividualDeEsteJugador(s) && (
+                    <button
+                      onClick={() => personalizarParaJugador(s, scope.jugadorId, diaSel)}
+                      style={{ marginTop: 6, marginLeft: 4, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: dsR.sm, padding: "5px 10px", color: ds.accent, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}
+                    >
+                      Personalizar solo para {scope.label} →
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: ds.inkMuted, fontSize: 13, padding: "14px 0", textAlign: "center", border: `1px dashed ${ds.border}`, borderRadius: dsR.md, marginBottom: 14 }}>
+              Sin sesión programada este día{scope.tipo !== "equipo" ? ` para ${scope.label}` : ""}.
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <DsButton size="sm" onClick={() => nuevaSesionEnFecha(diaSel, "sesion")}>
+              + Diseñar sesión
+            </DsButton>
+            <DsButton size="sm" variant="secondary" onClick={() => nuevaSesionEnFecha(diaSel, "complementaria")}>
+              + Dinámica complementaria
+            </DsButton>
+          </div>
+        </div>
+      </div>
+    </PantallaEntrenadorAncha>
+  );
+}
 
 // ---------- PANTALLA DEL JUGADOR (calcado de pantalla-jugador.jsx) ----------
 
@@ -8151,7 +8608,7 @@ function CircuitoJugadorReal({ tareas, rondas = 1, nombreGrupo = "", esGrupo = f
 // App.jsx, lo edita David directamente). El wrapper exterior no bloquea
 // toques fuera de la píldora (pointerEvents: "none", solo la píldora en sí
 // los recibe) para no interferir con el contenido de detrás.
-const PLAYER_TAB_ICONS = { dashboard: Home, progreso: TrendingUp, cmj: Activity };
+const PLAYER_TAB_ICONS = { dashboard: Home, calendario: Calendar, progreso: TrendingUp, cmj: Activity };
 
 function BarraInferiorJugadorReal({ tabs, active, onChange }) {
   return (
@@ -8212,6 +8669,167 @@ function BarraInferiorJugadorReal({ tabs, active, onChange }) {
         })}
       </div>
     </div>
+  );
+}
+
+// Calendario del jugador (Fase 6): SOLO marcador de estado por día, nunca
+// contenido (ejercicios, series, cargas) — esa es la regla que pediste:
+// aunque el entrenador programe con antelación, el jugador solo ve el
+// contenido completo el día exacto en que está programado (eso ya lo hace
+// el Dashboard/"Ver sesión"), y aquí, en su calendario, ni los días pasados
+// ni los futuros revelan qué había o qué hay — solo si hubo/hay sesión y,
+// para los pasados, si quedó completada.
+function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConRegistro, rachaSemanas, onVerSesionHoy, onExit, tabs, onChangeTab }) {
+  const [mesRef, setMesRef] = useState(inicioMes(hoy));
+  const [diaSel, setDiaSel] = useState(hoy);
+  const dias = generarCuadriculaMes(mesRef);
+
+  const estadoDia = (fecha) => {
+    const pautado = fechasAsignadasJugador(fecha, fecha).length > 0;
+    if (!pautado) return "sin-sesion";
+    if (fecha === hoy) return "hoy";
+    if (fecha > hoy) return "futuro";
+    return fechasConRegistro.has(fecha) ? "cumplido" : "pendiente";
+  };
+
+  // Estadísticas del mes visible: cuántos días de ESTE mes tenía sesión
+  // pautada, y en qué quedaron — mismo criterio de "cumplido" que el resto
+  // de la app (fechasConRegistro), no un cálculo nuevo.
+  const diasDelMes = dias.filter((d) => !d.fuera);
+  let completadas = 0,
+    noCompletadas = 0,
+    proximas = 0;
+  diasDelMes.forEach((d) => {
+    const e = estadoDia(d.fecha);
+    if (e === "cumplido") completadas++;
+    else if (e === "pendiente") noCompletadas++;
+    else if (e === "futuro" || e === "hoy") proximas++;
+  });
+
+  const colorEstado = { hoy: ds.accent, cumplido: ds.success, pendiente: ds.danger, futuro: ds.inkSecondary, "sin-sesion": null };
+  const estadoSel = estadoDia(diaSel);
+
+  return (
+    <>
+      <PantallaBase rol="jugador" maxWidth={480}>
+        <div>
+          <div style={{ marginBottom: 6, display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.09em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>{player.name}</div>
+              <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 700, margin: 0, letterSpacing: "-0.01em" }}>Calendario</h1>
+            </div>
+            <button onClick={onExit} aria-label="Cambiar de jugador" style={{ width: 40, height: 40, borderRadius: 11, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.inkSecondary, cursor: "pointer", flexShrink: 0 }}>
+              ⟳
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 16 }}>
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 18, fontWeight: 700, color: ds.success }}>{completadas}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, marginTop: 2, letterSpacing: "0.04em" }}>COMPLETADAS</div>
+            </div>
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 18, fontWeight: 700, color: noCompletadas > 0 ? ds.danger : ds.inkSecondary }}>{noCompletadas}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, marginTop: 2, letterSpacing: "0.04em" }}>NO COMPLETADAS</div>
+            </div>
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 8px", textAlign: "center" }}>
+              <div style={{ fontFamily: dsF.display, fontSize: 18, fontWeight: 700, color: ds.accent }}>{proximas}</div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, marginTop: 2, letterSpacing: "0.04em" }}>PRÓXIMAS</div>
+            </div>
+          </div>
+
+          {rachaSemanas > 0 && (
+            <div style={{ marginTop: 10, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "8px 12px", fontSize: 11.5, color: ds.accent, fontWeight: 600, textAlign: "center" }}>
+              🔥 Racha de {rachaSemanas} {rachaSemanas === 1 ? "semana" : "semanas"} cumpliendo tu plan
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 20, marginBottom: 8 }}>
+            <button onClick={() => setMesRef((m) => sumarMeses(m, -1))} style={navMesBtnCalendarioStyle} aria-label="Mes anterior">
+              <ChevronLeft size={16} />
+            </button>
+            <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>{labelMes(mesRef)}</div>
+            <button onClick={() => setMesRef((m) => sumarMeses(m, 1))} style={navMesBtnCalendarioStyle} aria-label="Mes siguiente">
+              <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
+            {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
+              <div key={d} style={{ textAlign: "center", fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, padding: "2px 0" }}>
+                {d}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 16 }}>
+            {dias.map((d) => {
+              const e = estadoDia(d.fecha);
+              const esSel = d.fecha === diaSel;
+              const color = colorEstado[e];
+              return (
+                <button
+                  key={d.fecha}
+                  onClick={() => setDiaSel(d.fecha)}
+                  style={{
+                    aspectRatio: "1",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 2,
+                    borderRadius: dsR.md,
+                    border: esSel ? `1.5px solid ${ds.accent}` : e === "hoy" ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
+                    background: esSel ? ds.accentSubtle : ds.surface,
+                    opacity: d.fuera ? 0.3 : 1,
+                    color: ds.ink,
+                    cursor: "pointer",
+                    fontSize: 11,
+                    fontWeight: e === "hoy" ? 800 : 500,
+                  }}
+                >
+                  <span>{d.dayNum}</span>
+                  <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: color || "transparent" }} />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Detalle del día seleccionado — SIEMPRE solo marcador, nunca el
+              contenido (ejercicios/series/cargas). El único sitio donde se ve
+              contenido de verdad es "Ver mi sesión de hoy", y solo el día en
+              que toca. */}
+          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+              <span style={{ fontSize: 13.5, fontWeight: 700, textTransform: "capitalize" }}>{fmtDateLabel(diaSel)}</span>
+              {estadoSel === "hoy" && <DsBadge tone="accent">HOY</DsBadge>}
+              {estadoSel === "cumplido" && <DsBadge tone="success">Completada</DsBadge>}
+              {estadoSel === "pendiente" && <DsBadge tone="danger">No completada</DsBadge>}
+              {estadoSel === "futuro" && <DsBadge>Programada</DsBadge>}
+            </div>
+            {estadoSel === "hoy" && (
+              <>
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Aquí es donde ves el detalle completo — ejercicios, series y vídeo — igual que en tu Dashboard.</div>
+                <DsButton onClick={onVerSesionHoy} style={{ width: "100%", marginTop: 10 }}>
+                  Ver mi sesión de hoy →
+                </DsButton>
+              </>
+            )}
+            {estadoSel === "cumplido" && (
+              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tuviste una sesión programada ese día y quedó completada. El detalle (ejercicios, series, cargas) ya no se muestra aquí.</div>
+            )}
+            {estadoSel === "pendiente" && (
+              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tenías sesión programada ese día y no quedó registrada como completada.</div>
+            )}
+            {estadoSel === "futuro" && (
+              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tienes una sesión programada para ese día. Todavía no puedes ver en qué consiste — se abre el mismo día.</div>
+            )}
+            {estadoSel === "sin-sesion" && <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>{diaSel > hoy ? "Todavía no tienes ninguna sesión programada para ese día." : "No tuviste ninguna sesión programada ese día."}</div>}
+          </div>
+          <div style={{ height: 100 }} />
+        </div>
+      </PantallaBase>
+      <BarraInferiorJugadorReal tabs={tabs} active="calendario" onChange={onChangeTab} />
+    </>
   );
 }
 
@@ -8983,6 +9601,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // DsTabSwitcher de arriba.
   const PLAYER_TABS = [
     { id: "dashboard", label: "Dashboard" },
+    { id: "calendario", label: "Calendario" },
     { id: "progreso", label: "Progreso" },
     { id: "cmj", label: "CMJ" },
   ];
@@ -9368,6 +9987,22 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       </PantallaBase>
       <BarraInferiorJugadorReal tabs={PLAYER_TABS} active="cmj" onChange={setVistaJugador} />
       </>
+    );
+  }
+
+  if (vistaJugador === "calendario") {
+    return (
+      <CalendarioJugadorReal
+        player={player}
+        hoy={date}
+        fechasAsignadasJugador={fechasAsignadasJugador}
+        fechasConRegistro={fechasConRegistro}
+        rachaSemanas={rachaSemanas}
+        onVerSesionHoy={() => setVistaJugador("sesion")}
+        onExit={onExit}
+        tabs={PLAYER_TABS}
+        onChangeTab={setVistaJugador}
+      />
     );
   }
 
@@ -12236,7 +12871,11 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
   );
 }
 
-function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
+// fechasSugeridas / destinatariosSugeridos: solo los usa el Calendario al
+// abrir este editor para una fecha y un ámbito (equipo/grupo/jugador) ya
+// elegidos allí — ningún otro punto de entrada (Diseñar sesión, Reutilizar)
+// los pasa nunca, así que su comportamiento de siempre no cambia en nada.
+function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
   // Reutilizar: misma configuración base que editar (destinatarios, objetivo,
   // activación, preventivo...), pero SIN heredar id ni fechas — es una sesión
@@ -12281,9 +12920,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   // editar una ya guardada arranca plegada — casi siempre solo se quiere
   // tocar el contenido de los bloques, no volver a repasar fechas/PARA/MD.
   const [detallesAbiertos, setDetallesAbiertos] = useState(!isEditing);
-  const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
+  const [fechas, setFechas] = useState(
+    sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
+  );
   const [nuevaFecha, setNuevaFecha] = useState("");
-  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
+  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? destinatariosSugeridos ?? null);
   // Ficha de jugador de la tarea de Resistencia (VAM/FCmáx → ritmo/pulso,
   // ver FichaJugadorResistencia): solo tiene sentido anclarla a un jugador
   // concreto cuando la sesión tiene exactamente un destinatario. Con "todo
@@ -13765,7 +14406,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
 // junto a lo que tenga programado ese día (o la muestra sola si no hay nada
 // más), sin ningún cambio en PantallaJugadorReal — ya agrupa por bloque_sesion
 // cualquier sesión que coincida con la fecha y el jugador.
-function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuardado }) {
+function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
   const isEditing = !!sesionExistente;
   const esReutilizacion = !!plantilla;
   const base = sesionExistente || plantilla;
@@ -13780,9 +14421,11 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const referenciasPorEjercicio = useReferenciasPorEjercicio(sesionExistente?.id || null);
 
   const [nombreBloque, setNombreBloque] = useState("");
-  const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
+  const [fechas, setFechas] = useState(
+    sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
+  );
   const [nuevaFecha, setNuevaFecha] = useState("");
-  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
+  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? destinatariosSugeridos ?? null);
   const [tareasBloque, setTareasBloque] = useState([]);
   const [circuitosBloque, setCircuitosBloque] = useState([]);
 
@@ -14255,6 +14898,9 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
   }
   if (coachModulo === "programacion") {
     return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
+  }
+  if (coachModulo === "calendario") {
+    return <CalendarioModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "fatiga") {
     return <ControlFatigaModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
@@ -15561,6 +16207,115 @@ function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion })
 // más las añadidas aquí (Progreso, Notas, Datos y accesos). Calendario se
 // deja como placeholder honesto, igual que el propio mockup: no hay
 // calendario_asignaciones todavía (llega con Fase 6 → Calendario).
+// Mini-calendario de solo lectura para la ficha de jugador (pestaña
+// "Calendario") — ahora con datos reales (llegó Fase 6 → Calendario, el
+// placeholder ya no aplica). A diferencia del Calendario del jugador, aquí
+// SÍ se ve el contenido completo de cada sesión: es la vista del
+// entrenador, que necesita visibilidad total para planificar, no la del
+// jugador (esa es la única que tiene la regla de "solo marcador").
+function CalendarioFichaJugadorReal({ jugador, onAbrirModulo }) {
+  const { loaded: bootLoaded, sesiones, tareas, ejercicios } = useBootstrapProgramacion();
+  const hoy = todayStr();
+  const [mesRef, setMesRef] = useState(inicioMes(hoy));
+  const [diaSel, setDiaSel] = useState(hoy);
+
+  if (!bootLoaded) return <LoadingBlock />;
+
+  const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+  const sesionIdsSet = new Set(sesiones.map((s) => s.id));
+  const tareasBySesion = new Map();
+  tareas
+    .filter((t) => sesionIdsSet.has(t.sesion_id))
+    .forEach((t) => {
+      if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
+      const e = ejerciciosById.get(t.ejercicio_id) || {};
+      tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
+    });
+  const conTareas = sesiones.map((s) => ({ ...s, tareas: tareasBySesion.get(s.id) || [] }));
+
+  const sesionesDeJugador = conTareas.filter((s) => !s.jugadores_destino || !s.jugadores_destino.length || s.jugadores_destino.includes(jugador.id));
+  const sesionesEnFecha = (fecha) => sesionesDeJugador.filter((s) => (s.fechas || []).includes(fecha));
+  const dias = generarCuadriculaMes(mesRef);
+  const sesionesDiaSel = sesionesEnFecha(diaSel);
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 8, flexWrap: "wrap" }}>
+        <h4 style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink, margin: 0 }}>Calendario de {jugador.name}</h4>
+        {onAbrirModulo && (
+          <button onClick={() => onAbrirModulo("calendario")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>
+            Abrir el Calendario completo →
+          </button>
+        )}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <button onClick={() => setMesRef((m) => sumarMeses(m, -1))} style={navMesBtnCalendarioStyle} aria-label="Mes anterior">
+          <ChevronLeft size={16} />
+        </button>
+        <div style={{ fontFamily: dsF.display, fontSize: 13.5, fontWeight: 700 }}>{labelMes(mesRef)}</div>
+        <button onClick={() => setMesRef((m) => sumarMeses(m, 1))} style={navMesBtnCalendarioStyle} aria-label="Mes siguiente">
+          <ChevronRight size={16} />
+        </button>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4, maxWidth: 360 }}>
+        {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
+          <div key={d} style={{ textAlign: "center", fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, padding: "2px 0" }}>
+            {d}
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 16, maxWidth: 360 }}>
+        {dias.map((d) => {
+          const sesionesDia = sesionesEnFecha(d.fecha);
+          const estado = estadoDiaCalendario(sesionesDia, d.fecha, hoy);
+          const esSel = d.fecha === diaSel;
+          const colorDot = estado === "ok" ? ds.success : estado === "pending" ? ds.accent : "transparent";
+          return (
+            <button
+              key={d.fecha}
+              onClick={() => setDiaSel(d.fecha)}
+              style={{
+                aspectRatio: "1",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 2,
+                borderRadius: dsR.sm,
+                border: esSel ? `1.5px solid ${ds.accent}` : d.fecha === hoy ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
+                background: esSel ? ds.accentSubtle : ds.surface,
+                opacity: d.fuera ? 0.3 : 1,
+                color: ds.ink,
+                cursor: "pointer",
+                fontSize: 10.5,
+                fontWeight: d.fecha === hoy ? 800 : 500,
+              }}
+            >
+              <span>{d.dayNum}</span>
+              <span style={{ width: 4, height: 4, borderRadius: dsR.full, background: colorDot }} />
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8, textTransform: "uppercase" }}>
+        {fmtDateLabel(diaSel)}
+        {diaSel === hoy ? " · hoy" : ""}
+      </div>
+      {sesionesDiaSel.length > 0 ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
+          {sesionesDiaSel.map((s) => (
+            <TarjetaSesionReal key={s.id} sesion={s} esHoy={diaSel === hoy} soloLectura />
+          ))}
+        </div>
+      ) : (
+        <div style={{ color: ds.inkMuted, fontSize: 13, padding: "14px 0", textAlign: "center", border: `1px dashed ${ds.border}`, borderRadius: dsR.md, maxWidth: 520 }}>
+          Sin sesión programada este día.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
@@ -15662,15 +16417,7 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
             {pestana === "resumen" ? (
               <ResumenFichaJugadorReal jugador={actual} onNavigateTab={setPestana} onGuardarObjetivo={guardarObjetivo} />
             ) : pestana === "calendario" ? (
-              <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: 22, maxWidth: 520, display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ width: 30, height: 30, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                  <Calendar size={15} />
-                </div>
-                <h4 style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: ds.ink, margin: 0 }}>Calendario de {actual.name}</h4>
-                <p style={{ fontSize: 12, color: ds.inkMuted, lineHeight: 1.55, margin: 0 }}>
-                  Aquí vivirá su calendario mensual de solo lectura, con los días que tiene trabajo preparado — llega con Fase 6 → Calendario. Hoy no hay <code>calendario_asignaciones</code> que mostrar, así que este hueco se queda reservado y vacío hasta entonces.
-                </p>
-              </div>
+              <CalendarioFichaJugadorReal jugador={actual} onAbrirModulo={onAbrirModulo} />
             ) : pestana === "historial" ? (
               !historialLoaded ? (
                 <LoadingBlock />
