@@ -120,6 +120,25 @@ function GlobalStyles() {
       .ds-select--error { border-color: ${ds.danger}; }
       .ds-select-wrap .ds-select__chevron { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); pointer-events: none; color: ${ds.inkSecondary}; }
 
+      /* Selects "sueltos" (los que usan campoSelectReal() en vez del
+         componente DsSelect) seguían con la flecha nativa del sistema
+         operativo — resto visible del estilo antiguo, antes de que el
+         propio design system trajera su chevron. Se normalizan aquí a
+         nivel global para no tener que tocar cada uno de los ~20 sitios
+         donde aparecen. */
+      .ds-reset select:not(.ds-select) {
+        appearance: none; -webkit-appearance: none; -moz-appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238CA0BC' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 10px center;
+        padding-right: 28px !important;
+      }
+      .ds-reset select:not(.ds-select)::-ms-expand { display: none; }
+      /* Igual con el <input type="date"> nativo: el icono de calendario y
+         los controles del picker venían con el tema claro del sistema por
+         defecto, chocando contra el fondo oscuro de la app. */
+      .ds-reset input[type="date"] { color-scheme: dark; }
+
       .ds-badge {
         display: inline-flex; align-items: center; font-family: ${dsF.mono}; font-size: 9px; letter-spacing: 0.02em;
         padding: 2px ${dsSp[3]}px; border-radius: ${dsR.sm}px; border: 1px solid ${ds.border};
