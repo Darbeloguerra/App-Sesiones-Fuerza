@@ -1264,6 +1264,9 @@ const CAPACIDADES_RESISTENCIA = {
 const NOMBRES_TIPO_TRABAJO_RESISTENCIA = { continuo: "Continuo", hiit: "HIIT", rsa: "RSA / Repeticiones" };
 const ETQ_INTENSIDAD_RESISTENCIA = { continuo: "INTENSIDAD % FCMÁX", hiit: "INTENSIDAD % VAM", rsa: "INTENSIDAD % VAM" };
 const MODALIDADES_RESISTENCIA = { carrera: "Carrera", bici: "Bici", eliptica: "Elíptica", piscina: "Piscina", otro: "Otro sin impacto" };
+// Igual que en Resistencia: elegir la modalidad ES elegir "qué ejercicio"
+// para Activación — ya no hace falta abrir el buscador de la Biblioteca.
+const MODALIDADES_ACTIVACION = { bici: "Bici estática", remo: "Remo", eliptica: "Elíptica", cinta: "Cinta de correr", otro: "Otro" };
 
 // El % que pide el campo de intensidad no significa nada por sí solo: VAM y
 // FCmáx no se estiman, se miden con un test de campo real (VAM-Eval,
@@ -12557,22 +12560,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl })]);
   };
 
-  const elegirEjercicioActivacion = async (ejercicioOClic) => {
-    let ejercicioId = ejercicioOClic.id;
-    let nombre = ejercicioOClic.nombre;
-    if (!ejercicioId) {
-      try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
-        ejercicioId = creado.id;
-        addEjercicioLocal(creado);
-      } catch (e) {
-        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
-        return;
-      }
+  // Igual que en Resistencia: la modalidad ES la elección de "qué
+  // ejercicio" para Activación — ya no se abre el buscador de la
+  // Biblioteca, se resuelve (o se crea la primera vez) el ejercicio con el
+  // nombre de la modalidad elegida.
+  const cambiarModalidadActivacion = async (modalidadKey) => {
+    const nombreModalidad = MODALIDADES_ACTIVACION[modalidadKey];
+    try {
+      const creado = await resolveEjercicio(ejercicios, { nombre: nombreModalidad, bloque: "", tags_descriptivos: [] });
+      addEjercicioLocal(creado);
+      setActivacionEjercicioId(creado.id);
+      setActivacionEjercicioNombre(creado.nombre);
+      setActivacionMateriales([]); // ejercicio nuevo -> el material anterior no tiene por qué aplicar
+    } catch (e) {
+      setError("No se pudo guardar la modalidad de activación. Comprueba tu conexión e inténtalo de nuevo.");
     }
-    setActivacionEjercicioId(ejercicioId);
-    setActivacionEjercicioNombre(nombre);
-    setActivacionMateriales([]); // ejercicio nuevo -> el material anterior no tiene por qué aplicar
   };
 
   // Movilidad en modo manual: una única tarea (a diferencia de Core/
@@ -13304,13 +13306,20 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     </div>
                     {activacionActiva && (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicio</span>
-                          <span style={{ fontSize: 13, color: activacionEjercicioNombre ? ds.ink : ds.inkMuted, fontWeight: activacionEjercicioNombre ? 600 : 400 }}>
-                            {activacionEjercicioNombre || "Sin elegir todavía (se usará Bici estática por defecto)"}
-                          </span>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>MODALIDAD</span>
+                          <select
+                            value={Object.entries(MODALIDADES_ACTIVACION).find(([, v]) => v === activacionEjercicioNombre)?.[0] || "bici"}
+                            onChange={(e) => cambiarModalidadActivacion(e.target.value)}
+                            style={{ width: 200, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+                          >
+                            {Object.entries(MODALIDADES_ACTIVACION).map(([k, v]) => (
+                              <option key={k} value={k}>
+                                {v}
+                              </option>
+                            ))}
+                          </select>
                         </div>
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={elegirEjercicioActivacion} onAsignarZona={asignarZonaYActualizar} />
                         {activacionEjercicioId && (
                           <div style={{ maxWidth: 220 }}>
                             <SelectorMaterialReal
@@ -13321,8 +13330,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                             />
                           </div>
                         )}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>TIEMPO</span>
                         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Duración</span>
                           <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
                           <button
                             onClick={() => setUnidadActivacion((u) => (u === "minutos" ? "segundos" : "minutos"))}
@@ -13338,6 +13348,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                           >
                             {unidadActivacion === "minutos" ? "min" : "seg"}
                           </button>
+                        </div>
                         </div>
                       </div>
                     )}
