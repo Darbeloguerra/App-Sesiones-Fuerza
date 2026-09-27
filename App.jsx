@@ -3888,7 +3888,7 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
   } = datos;
 
   return (
-    <div style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
+    <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
       <GlobalStyles />
       <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
 
@@ -11066,14 +11066,19 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
 // sin tareas manuales (selección automática por categoría, sin algoritmo
 // todavía). Core, Resistencia y Fuerza sí llevan tareas y circuitos reales.
 
+// "descripcion" es el subtítulo de la CABECERA DEL CONSTRUCTOR (panel
+// principal) para cada bloque — calcado literalmente del mockup
+// (mockup_diseno_sesion.html, campo "desc" de cada builder-head). No es lo
+// mismo que el resumen corto de la navegación lateral, que sale de
+// resumenBloque() y sí es dinámico (nº de tareas, automático/manual, etc).
 const BLOQUES_DISENO = [
-  { id: "activacion", numero: 1, nombre: "Activación", modo: "manual", descripcion: "Bici estática, opcional — se omite si no hay acceso" },
-  { id: "movilidad", numero: 2, nombre: "Movilidad", modo: "rotativo", descripcion: "Pool rotativo — la app elige el ejercicio del día" },
-  { id: "preventivo", numero: 3, nombre: "Preventivo", modo: "rotativo-categoria", descripcion: "Según categoría común a los jugadores destinatarios" },
-  { id: "core", numero: 4, nombre: "Core", modo: "manual", descripcion: "Diseño manual — sin registro de carga" },
-  { id: "resistencia", numero: 5, nombre: "Resistencia", modo: "manual", descripcion: "Intervalos, tiempo y recuperación" },
-  { id: "cmj", numero: 6, nombre: "CMJ", modo: "manual", descripcion: "Día de medición de salto — el jugador lo ve señalado en su sesión" },
-  { id: "fuerza", numero: 7, nombre: "Fuerza", modo: "manual", descripcion: "Diseño manual — con reps/series y RIR (incluye Específicas)" },
+  { id: "activacion", numero: 1, nombre: "Activación", modo: "manual", descripcion: "Bici estática, opcional — se omite si no hay acceso." },
+  { id: "movilidad", numero: 2, nombre: "Movilidad", modo: "rotativo", descripcion: "Elige cómo se resuelve este bloque cada sesión." },
+  { id: "preventivo", numero: 3, nombre: "Preventivo", modo: "rotativo-categoria", descripcion: "Elige cómo se resuelve este bloque cada sesión." },
+  { id: "core", numero: 4, nombre: "Core", modo: "manual", descripcion: "Tareas y circuitos de core, sin carga externa." },
+  { id: "resistencia", numero: 5, nombre: "Resistencia", modo: "manual", descripcion: "Elige la capacidad a trabajar y la app sugiere método y rango — tú confirmas los números." },
+  { id: "cmj", numero: 6, nombre: "CMJ", modo: "manual", descripcion: "Día de medición de salto — el jugador lo ve señalado en su sesión. No es una tarea configurable: siempre el mismo test." },
+  { id: "fuerza", numero: 7, nombre: "Fuerza", modo: "manual", descripcion: "Series, carga (RIR o %1RM) y circuitos. Incluye Específicas." },
 ];
 
 function IconoBloqueDiseno({ id }) {
@@ -13495,6 +13500,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       >
                         + Añadir circuito
                       </button>
+                    </div>
+                    {/* Nota de referencia (mockup: bloque "Sobre estos rangos"
+                        al pie del builder de Resistencia) — se muestra una
+                        sola vez para todo el bloque, no repetida por tarea. */}
+                    <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5, background: ds.surface, border: `1px solid ${ds.borderSoft}`, borderRadius: 8, padding: "10px 12px" }}>
+                      <b style={{ color: ds.ink }}>Sobre estos rangos:</b> son de referencia poblacional (Pallarés &amp; Morán-Navarro, 2012, actualizado con literatura posterior). Ancla siempre que puedas la intensidad al umbral o VAM real del jugador — la variabilidad individual frente al %FCmáx teórico es alta (Mann, Lamberts &amp; Lambert, 2013). <b style={{ color: ds.ink }}>Sin test de campo,</b> el jugador recibe un objetivo calculado con la VAM/FCmáx media de futbolistas profesionales (14.8 km/h / 194 ppm; Bruzzese et al., 2021, n=9) en vez de su dato real — es una aproximación de población, no una referencia perceptiva ni un sustituto de su propio test.
                     </div>
                   </div>
                 )}
