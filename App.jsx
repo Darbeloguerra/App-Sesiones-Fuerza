@@ -12068,6 +12068,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [categoriasPreventivas, categoriasLoaded] = useCategoriasPreventivas();
   const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
   const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
+  // Layout de 3 columnas (nav de pasos / constructor / vista previa en vivo,
+  // ver mockup_diseno_sesion.html) en escritorio/iPad ancho; por debajo del
+  // umbral se apilan verticalmente — mismo patrón que ya usa
+  // PantallaEntrenadorAncha para el resto de pantallas "anchas" de la app.
+  const ancho = useAnchoVentana();
+  const anchoDesktop = ancho >= 900;
   // Le dice a SelectorEjercicioReal cómo guardar la zona corporal de un
   // ejercicio antiguo que todavía no la tenía, y refresca la lista local
   // para que el cambio se vea sin recargar la pantalla.
@@ -12120,6 +12126,33 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     if (typeof v === "boolean") return v ? 1 : 0;
     return Number(v) || 0;
   });
+  // Movilidad y Preventivo admiten 3 modos (ver mockup, cambiarModo):
+  // automático (pool rotativo), manual (el entrenador elige el/los
+  // ejercicio(s) concretos ese día) o no incluir (bloque desactivado).
+  // El modo en sí es solo estado de UI del formulario — no se persiste
+  // como columna nueva, así que al abrir una sesión ya guardada no hay
+  // forma de distinguir si un ejercicio de Movilidad vino de rotación o
+  // (antes de este cambio, imposible) de una elección manual: se asume
+  // siempre "automatico", que es la verdad para todo lo guardado hasta
+  // ahora. Preventivo sí tenía ya un modo de facto vía preventivoCantidad
+  // (N>0 = automático, N=0 = no incluir), así que el valor inicial se
+  // deriva de ese mismo número en vez de asumir siempre automático.
+  const [modoMovilidad, setModoMovilidad] = useState("automatico");
+  const [tareaMovilidadManual, setTareaMovilidadManual] = useState(null);
+  const [modoPreventivo, setModoPreventivo] = useState(() => {
+    const cantidadInicial = (() => {
+      if (!base) return 1;
+      const v = base.preventivo_activo;
+      if (typeof v === "boolean") return v ? 1 : 0;
+      return Number(v) || 0;
+    })();
+    return cantidadInicial > 0 ? "automatico" : "no_incluir";
+  });
+  const [tareasPreventivoManual, setTareasPreventivoManual] = useState([]);
+
+  // Paso activo en el nav de la izquierda — el constructor (columna central)
+  // solo renderiza el contenido de este bloque, en vez de los 7 apilados.
+  const [bloqueActivo, setBloqueActivo] = useState(BLOQUES_DISENO[0].id);
 
   const [tareasCore, setTareasCore] = useState([]);
   const [circuitosCore, setCircuitosCore] = useState([]);
@@ -12373,6 +12406,25 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     setActivacionMateriales([]); // ejercicio nuevo -> el material anterior no tiene por qué aplicar
   };
 
+  // Movilidad en modo manual: una única tarea (a diferencia de Core/
+  // Preventivo manual, que son listas) — elegir un ejercicio nuevo
+  // reemplaza al anterior en vez de añadirse.
+  const elegirEjercicioMovilidadManual = async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    if (!ejercicioId) {
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
+        ejercicioId = creado.id;
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
+    }
+    setTareaMovilidadManual(nuevaTareaBase({ id: ejercicioId, nombre }));
+  };
+
   const guardar = async (comoBorrador = false) => {
     setError("");
     setOk(false);
@@ -12549,49 +12601,101 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         keepTareaIds.add(saved.id);
       }
 
-      // Movilidad: pool global, rotación automática — una fecha, un turno.
-      // Cada fecha de la sesión avanza el puntero por separado, así que
-      // fechas distintas de la misma sesión pueden tocar ejercicios distintos.
-      const poolMovilidad = ejercicios
-        .filter((e) => e.bloque === "Movilidad")
-        .slice()
-        .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
-      if (poolMovilidad.length) {
+      // Movilidad: 3 modos posibles (ver cambiarModo en el mockup).
+      // "no_incluir" no guarda nada. "manual" guarda la única tarea que
+      // eligió el entrenador, igual en todas las fechas de la sesión.
+      // "automatico" es el comportamiento original: pool global, rotación
+      // automática — una fecha, un turno. Cada fecha de la sesión avanza el
+      // puntero por separado, así que fechas distintas de la misma sesión
+      // pueden tocar ejercicios distintos.
+      if (modoMovilidad === "manual" && tareaMovilidadManual) {
         for (const fecha of fechas) {
-          const elegido = await elegirSiguienteRotacion("movilidad", poolMovilidad);
-          if (!elegido) continue;
           const saved = await api.save("tareas", {
             id: movilidadTareaIdsPorFecha[fecha] || undefined,
             sesion_id: savedSesion.id,
             bloque_sesion: "Movilidad",
-            ejercicio_id: elegido.id,
+            ejercicio_id: tareaMovilidadManual.ejercicioId,
             fecha,
-            modo: "",
-            series: "",
-            cantidad: "",
+            modo: tareaMovilidadManual.modo,
+            series: tareaMovilidadManual.series,
+            cantidad: tareaMovilidadManual.cantidad,
             rir: "",
             tipo_resistencia: "",
-            material: "",
-            nota: "",
+            material: JSON.stringify(tareaMovilidadManual.materiales || []),
+            lateralidad: tareaMovilidadManual.lateralidad || "bilateral",
+            nota: tareaMovilidadManual.nota || "",
             circuito_id: "",
             orden_en_circuito: "",
           });
           keepTareaIds.add(saved.id);
         }
+      } else if (modoMovilidad === "automatico") {
+        const poolMovilidad = ejercicios
+          .filter((e) => e.bloque === "Movilidad")
+          .slice()
+          .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
+        if (poolMovilidad.length) {
+          for (const fecha of fechas) {
+            const elegido = await elegirSiguienteRotacion("movilidad", poolMovilidad);
+            if (!elegido) continue;
+            const saved = await api.save("tareas", {
+              id: movilidadTareaIdsPorFecha[fecha] || undefined,
+              sesion_id: savedSesion.id,
+              bloque_sesion: "Movilidad",
+              ejercicio_id: elegido.id,
+              fecha,
+              modo: "",
+              series: "",
+              cantidad: "",
+              rir: "",
+              tipo_resistencia: "",
+              material: "",
+              nota: "",
+              circuito_id: "",
+              orden_en_circuito: "",
+            });
+            keepTareaIds.add(saved.id);
+          }
+        }
       }
+      // modoMovilidad === "no_incluir": no se guarda ninguna tarea de
+      // Movilidad — las que hubiera antes se borran más abajo, al no estar
+      // en keepTareaIds.
 
-      // Preventivo: versión simple — un ejercicio por fecha (no uno por
-      // jugador dentro de la misma fecha), según la categoría común a
-      // todos los jugadores destinatarios. Igual que Movilidad, cada fecha
-      // avanza el puntero por separado. Si no hay una única categoría
-      // común, se omite sin avisar con error — es una omisión esperada.
-      // Preventivo: versión simple — de 0 a N ejercicios por fecha (elegidos
-      // por el entrenador, no fijo a 1), según la categoría común a todos
-      // los jugadores destinatarios. Igual que Movilidad, cada fecha avanza
-      // el puntero por separado (aquí, N posiciones en vez de 1). Si no hay
-      // una única categoría común, se omite sin avisar con error — es una
-      // omisión esperada.
-      if (preventivoCantidad > 0) {
+      // Preventivo: mismos 3 modos. "no_incluir" no guarda nada. "manual"
+      // guarda las tareas concretas elegidas por el entrenador (una por
+      // elemento de tareasPreventivoManual, por fecha). "automatico" es el
+      // comportamiento original: de 0 a N ejercicios por fecha, según la
+      // categoría común a todos los jugadores destinatarios — cada fecha
+      // avanza el puntero de rotación por separado. Si no hay una única
+      // categoría común, se omite sin avisar con error — es una omisión
+      // esperada.
+      if (modoPreventivo === "manual" && tareasPreventivoManual.length) {
+        for (const fecha of fechas) {
+          const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
+          for (let i = 0; i < tareasPreventivoManual.length; i++) {
+            const t = tareasPreventivoManual[i];
+            const saved = await api.save("tareas", {
+              id: idsExistentes[i] || undefined,
+              sesion_id: savedSesion.id,
+              bloque_sesion: "Preventivo",
+              ejercicio_id: t.ejercicioId,
+              fecha,
+              modo: t.modo,
+              series: t.series,
+              cantidad: t.cantidad,
+              rir: "",
+              tipo_resistencia: "",
+              material: JSON.stringify(t.materiales || []),
+              lateralidad: t.lateralidad || "bilateral",
+              nota: t.nota || "",
+              circuito_id: "",
+              orden_en_circuito: "",
+            });
+            keepTareaIds.add(saved.id);
+          }
+        }
+      } else if (modoPreventivo === "automatico" && preventivoCantidad > 0) {
         const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
         if (catId) {
           const poolPreventivo = ejercicios
@@ -12652,11 +12756,207 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
     }
   };
 
+  // Resumen de una línea por paso del nav (columna izquierda) — siempre
+  // derivado de las variables de estado reales de cada bloque, nunca
+  // inventado. Ver mockup_diseno_sesion.html L296-333 para el patrón
+  // ("Bici · 8 min", "Automática", "2 tareas"...).
+  const resumenBloque = (id) => {
+    if (id === "activacion") {
+      if (!activacionActiva) return "Sin activación";
+      const unidad = unidadActivacion === "minutos" ? "min" : "seg";
+      return `${activacionEjercicioNombre || "Bici estática"} · ${duracionActivacion || "—"} ${unidad}`;
+    }
+    if (id === "movilidad") {
+      if (modoMovilidad === "no_incluir") return "No incluido";
+      if (modoMovilidad === "manual") return tareaMovilidadManual ? tareaMovilidadManual.nombre : "Manual · sin elegir";
+      return "Automática";
+    }
+    if (id === "preventivo") {
+      if (modoPreventivo === "no_incluir") return "No incluido";
+      if (modoPreventivo === "manual") return `${tareasPreventivoManual.length} tarea(s)`;
+      return preventivoCantidad > 0 ? `Automático · ${preventivoCantidad}` : "Automático · 0";
+    }
+    if (id === "core") {
+      const nTareas = tareasCore.length + circuitosCore.reduce((a, c) => a + (c.tareas?.length || 0), 0);
+      if (!nTareas) return "Sin tareas";
+      return `${nTareas} tarea(s)${circuitosCore.length ? ` · ${circuitosCore.length} circuito(s)` : ""}`;
+    }
+    if (id === "resistencia") {
+      const nTareas = tareasResistencia.length + circuitosResistencia.reduce((a, c) => a + (c.tareas?.length || 0), 0);
+      if (!nTareas) return "Sin tareas";
+      return `${nTareas} tarea(s)${circuitosResistencia.length ? ` · ${circuitosResistencia.length} circuito(s)` : ""}`;
+    }
+    if (id === "cmj") return cmjActiva ? "Con medición" : "Sin medición hoy";
+    if (id === "fuerza") {
+      const nTareas = tareasFuerza.length + circuitosFuerza.reduce((a, c) => a + (c.tareas?.length || 0), 0);
+      if (!nTareas) return "Sin tareas";
+      return `${nTareas} tarea(s)${circuitosFuerza.length ? ` · ${circuitosFuerza.length} circuito(s)` : ""}`;
+    }
+    return "";
+  };
+
+  // ---- Vista previa en vivo (columna derecha): traduce las tareas/
+  // circuitos del bloque activo al mismo formato que ve el jugador,
+  // reutilizando TareaVisualReal y formatearDetalleTareaCoach (ya usados en
+  // el resumen de sesión de Programación, ver ~L7340-7373) — nunca se
+  // reimplementa esa traducción aquí. Solo hace falta adaptar el objeto
+  // "tarea" del borrador (camelCase, en memoria, aún sin guardar) al shape
+  // que esas funciones esperan (snake_case, el mismo que devuelve el
+  // backend), igual que ya hace tareaADraft() a la inversa.
+  const serializarResistenciaPreview = (t) =>
+    JSON.stringify({
+      tipo: t.tipoResistenciaCardio || "",
+      capacidad: t.capacidad || "",
+      modalidad: t.modalidad || "carrera",
+      estructuraManual: !!t.estructuraManual,
+      bloques: t.bloques || "",
+      series: t.series || "",
+      intervalos: t.intervalos || "",
+      tiempo: t.tiempo || "",
+      tiempoUnidad: t.tiempoUnidad || "",
+      intensidad: t.intensidad || "",
+      distancia: t.distancia || "",
+      duracion: t.duracion || "",
+      rpe: t.rpe || "",
+      recuperacion: t.recuperacion || "",
+      recuperacionUnidad: t.recuperacionUnidad || "",
+    });
+
+  const tareaDraftAVisual = (t, bloqueNombre) => {
+    const ej = ejercicios.find((e) => e.id === t.ejercicioId) || {};
+    const esResistencia = bloqueNombre === "Resistencia";
+    const tareaFake = {
+      bloque_sesion: bloqueNombre,
+      modo: esResistencia ? "" : t.modo,
+      series: esResistencia ? "" : t.series,
+      cantidad: esResistencia ? "" : t.cantidad,
+      rir: esResistencia ? "" : t.rir,
+      modo_carga: esResistencia ? "" : t.modoCarga || "rir",
+      pct1rm: esResistencia ? "" : t.pct1rm || "",
+      resistencia_data: esResistencia ? serializarResistenciaPreview(t) : "",
+      sin_lateralidad: ej.sin_lateralidad || "",
+      lateralidad: t.lateralidad || "bilateral",
+    };
+    return {
+      nombre: t.nombre || ej.nombre || "(ejercicio eliminado)",
+      detalle: formatearDetalleTareaCoach(tareaFake),
+      gif: ej.gif_url || "",
+      nota: t.nota || "",
+      materiales: t.materiales || [],
+    };
+  };
+
+  const previewTarea = (t, bloqueNombre, prefijo) => {
+    const v = tareaDraftAVisual(t, bloqueNombre);
+    return <TareaVisualReal key={t.key} tarea={prefijo ? { ...v, nombre: `${prefijo}${v.nombre}` } : v} />;
+  };
+
+  const previewCircuitoStyle = { border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: `${ds.surface}40`, width: "100%", boxSizing: "border-box" };
+  const previewCircuitoBadge = { fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px", alignSelf: "flex-start" };
+
+  const PreviewVacio = ({ texto }) => (
+    <div style={{ fontSize: 10.5, color: ds.inkMuted, textAlign: "center", padding: "20px 6px", lineHeight: 1.5 }}>{texto}</div>
+  );
+
+  const previewContenido = () => {
+    if (bloqueActivo === "activacion") {
+      if (!activacionActiva) return <PreviewVacio texto="Activación desactivada — no aparecerá en la sesión del jugador." />;
+      const ej = ejercicios.find((e) => e.id === activacionEjercicioId);
+      return (
+        <TareaVisualReal
+          tarea={{
+            nombre: activacionEjercicioNombre || "Bici estática",
+            detalle: `${duracionActivacion || "—"} ${unidadActivacion === "minutos" ? "min" : "seg"}`,
+            gif: ej?.gif_url || "",
+            nota: "",
+            materiales: activacionMateriales,
+          }}
+        />
+      );
+    }
+    if (bloqueActivo === "movilidad") {
+      if (modoMovilidad === "no_incluir") return <PreviewVacio texto="Bloque desactivado — no se incluirá en esta sesión." />;
+      if (modoMovilidad === "automatico") return <PreviewVacio texto="La app elegirá el ejercicio del pool rotativo al guardar — no hay uno fijo que previsualizar todavía." />;
+      if (!tareaMovilidadManual) return <PreviewVacio texto="Elige un ejercicio para ver cómo lo verá el jugador." />;
+      return previewTarea(tareaMovilidadManual, "Movilidad");
+    }
+    if (bloqueActivo === "preventivo") {
+      if (modoPreventivo === "no_incluir") return <PreviewVacio texto="Bloque desactivado — no se incluirá en esta sesión." />;
+      if (modoPreventivo === "automatico") {
+        return <PreviewVacio texto={preventivoCantidad > 0 ? "La app elegirá los ejercicios de la categoría preventiva al guardar." : "Cantidad en 0 — no se aplicará hoy."} />;
+      }
+      if (!tareasPreventivoManual.length) return <PreviewVacio texto="Añade ejercicios para ver cómo los verá el jugador." />;
+      return <>{tareasPreventivoManual.map((t) => previewTarea(t, "Preventivo"))}</>;
+    }
+    if (bloqueActivo === "core") {
+      if (!tareasCore.length && !circuitosCore.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
+      return (
+        <>
+          {tareasCore.map((t) => previewTarea(t, "Core"))}
+          {circuitosCore.map((c) => (
+            <div key={c.key} style={previewCircuitoStyle}>
+              <span style={previewCircuitoBadge}>CIRCUITO</span>
+              {c.tareas.map((t, i) => previewTarea(t, "Core", `${i + 1}. `))}
+            </div>
+          ))}
+        </>
+      );
+    }
+    if (bloqueActivo === "resistencia") {
+      if (!tareasResistencia.length && !circuitosResistencia.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
+      return (
+        <>
+          {tareasResistencia.map((t) => previewTarea(t, "Resistencia"))}
+          {circuitosResistencia.map((c) => (
+            <div key={c.key} style={previewCircuitoStyle}>
+              <span style={previewCircuitoBadge}>CIRCUITO</span>
+              {c.tareas.map((t, i) => previewTarea(t, "Resistencia", `${i + 1}. `))}
+            </div>
+          ))}
+        </>
+      );
+    }
+    if (bloqueActivo === "cmj") {
+      return (
+        <div
+          style={{
+            fontSize: 11.5,
+            color: cmjActiva ? ds.accent : ds.inkMuted,
+            textAlign: "center",
+            padding: "24px 8px",
+            lineHeight: 1.5,
+            border: `1px dashed ${cmjActiva ? ds.accentBorderSubtle : ds.border}`,
+            borderRadius: dsR.md,
+          }}
+        >
+          {cmjActiva ? "Hoy toca medición CMJ — el jugador verá un aviso en su sesión." : "Sin medición CMJ esta sesión."}
+        </div>
+      );
+    }
+    if (bloqueActivo === "fuerza") {
+      if (!tareasFuerza.length && !circuitosFuerza.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
+      return (
+        <>
+          {tareasFuerza.map((t) => previewTarea(t, "Fuerza"))}
+          {circuitosFuerza.map((c) => (
+            <div key={c.key} style={previewCircuitoStyle}>
+              <span style={previewCircuitoBadge}>CIRCUITO</span>
+              {c.tareas.map((t, i) => previewTarea(t, "Fuerza", `${i + 1}. `))}
+            </div>
+          ))}
+        </>
+      );
+    }
+    return null;
+  };
+
   const loaded = playersLoaded && categoriasLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
   if (!loaded) return <LoadingBlock />;
 
+  const bloqueInfo = BLOQUES_DISENO.find((x) => x.id === bloqueActivo) || BLOQUES_DISENO[0];
+
   return (
-    <PantallaBase rol="entrenador" maxWidth={640}>
+    <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640}>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
@@ -12745,22 +13045,73 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           </div>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, pointerEvents: readOnly ? "none" : undefined }}>
-          {BLOQUES_DISENO.map((b) => (
-            <div key={b.id} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
+        <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start", pointerEvents: readOnly ? "none" : undefined }}>
+          {/* Nav de pasos — en escritorio, columna estrecha fija a la izquierda;
+              en móvil, fila horizontal con scroll encima del constructor
+              (mismo patrón responsive que PantallaEntrenadorAncha: una sola
+              condición de layout, sin duplicar el componente). */}
+          <nav
+            style={{
+              display: "flex",
+              flexDirection: anchoDesktop ? "column" : "row",
+              gap: 3,
+              overflowX: anchoDesktop ? "visible" : "auto",
+              flexShrink: 0,
+              width: anchoDesktop ? 210 : "100%",
+              boxSizing: "border-box",
+              background: ds.surface,
+              border: `1px solid ${ds.border}`,
+              borderRadius: 12,
+              padding: 8,
+            }}
+          >
+            {BLOQUES_DISENO.map((b) => {
+              const activo = bloqueActivo === b.id;
+              return (
+                <div
+                  key={b.id}
+                  onClick={() => setBloqueActivo(b.id)}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "8px 8px",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    border: `1px solid ${activo ? ds.accentBorderSubtle : "transparent"}`,
+                    background: activo ? ds.accentSubtle : "transparent",
+                    flexShrink: 0,
+                    minWidth: anchoDesktop ? undefined : 150,
+                  }}
+                >
+                  <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: activo ? ds.accent : ds.inkMuted, width: 14, flexShrink: 0 }}>{String(b.numero).padStart(2, "0")}</span>
+                  <span style={{ width: 20, height: 20, borderRadius: 6, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: activo ? ds.accent : ds.inkSecondary, flexShrink: 0 }}>
+                    <IconoBloqueDiseno id={b.id} />
+                  </span>
+                  <span style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: ds.ink, display: "block" }}>{b.nombre}</span>
+                    <span style={{ fontSize: 9.5, color: activo ? ds.accent : ds.inkMuted, display: "block", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{resumenBloque(b.id)}</span>
+                  </span>
+                </div>
+              );
+            })}
+          </nav>
+
+          {/* Constructor — solo el contenido del bloque activo. */}
+          <div style={{ flex: 1, minWidth: 0, width: anchoDesktop ? undefined : "100%", boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
                 <div style={{ width: 26, height: 26, borderRadius: 7, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
-                  <IconoBloqueDiseno id={b.id} />
+                  <IconoBloqueDiseno id={bloqueInfo.id} />
                 </div>
-                <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, width: 14 }}>{String(b.numero).padStart(2, "0")}</div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, width: 14 }}>{String(bloqueInfo.numero).padStart(2, "0")}</div>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>{b.nombre}</div>
-                  <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{b.descripcion}</div>
+                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>{bloqueInfo.nombre}</div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{bloqueInfo.descripcion}</div>
                 </div>
-                <EtiquetaModoDiseno modo={b.modo} />
+                <EtiquetaModoDiseno modo={bloqueInfo.modo} />
               </div>
               <div style={{ padding: 14 }}>
-                {b.id === "activacion" && (
+                {bloqueActivo === "activacion" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div onClick={() => setActivacionActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                       <span style={{ width: 34, height: 20, borderRadius: 10, background: activacionActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
@@ -12809,69 +13160,123 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     )}
                   </div>
                 )}
-                {b.id === "movilidad" && (() => {
-                  const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
-                  return (
-                    <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                      {poolMov.length
-                        ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
-                        : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
-                    </div>
-                  );
-                })()}
-                {b.id === "preventivo" && (
+                {bloqueActivo === "movilidad" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicios ese día</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <button
-                          type="button"
-                          onClick={() => setPreventivoCantidad((v) => Math.max(0, v - 1))}
-                          style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-                        >
-                          −
-                        </button>
-                        <span style={{ width: 24, textAlign: "center", fontFamily: dsF.mono, fontSize: 14, color: preventivoCantidad > 0 ? ds.accent : ds.inkMuted }}>
-                          {preventivoCantidad}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setPreventivoCantidad((v) => v + 1)}
-                          style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-                        >
-                          +
-                        </button>
-                      </div>
-                      <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
-                    </div>
-                    {preventivoCantidad > 0 &&
+                    <select value={modoMovilidad} onChange={(e) => setModoMovilidad(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+                      <option value="automatico">Automático (pool rotativo)</option>
+                      <option value="manual">Manual (elegir ejercicio)</option>
+                      <option value="no_incluir">No incluir</option>
+                    </select>
+                    {modoMovilidad === "automatico" &&
                       (() => {
-                        const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
-                        const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
-                        if (!cat) {
-                          return (
-                            <div style={{ fontSize: 11.5, color: ds.warning }}>
-                              No hay una única categoría preventiva común a todos los jugadores destinatarios — este bloque se omitirá al guardar. Dirige la sesión a jugadores que compartan una sola categoría para que se aplique.
-                            </div>
-                          );
-                        }
-                        const poolPrev = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId);
+                        const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
                         return (
-                          <>
-                            <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                              Categoría detectada para este roster: <span style={{ color: ds.accent, fontWeight: 500 }}>{cat.nombre}</span>
-                            </div>
-                            <div style={{ fontSize: 11.5, color: poolPrev.length ? ds.inkMuted : ds.warning }}>
-                              {poolPrev.length
-                                ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
-                                : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
-                            </div>
-                          </>
+                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                            {poolMov.length
+                              ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
+                              : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
+                          </div>
                         );
                       })()}
+                    {modoMovilidad === "manual" &&
+                      (tareaMovilidadManual ? (
+                        <FilaTareaReal
+                          tarea={tareaMovilidadManual}
+                          mostrarCarga={false}
+                          materialesDisponibles={materialesDisponibles}
+                          onAgregarMaterial={agregarMaterial}
+                          onCambiar={(nuevo) => setTareaMovilidadManual(nuevo)}
+                          onEliminar={() => setTareaMovilidadManual(null)}
+                        />
+                      ) : (
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
+                      ))}
+                    {modoMovilidad === "no_incluir" && (
+                      <div style={{ fontSize: 12.5, color: ds.inkMuted, textAlign: "center" }}>Bloque desactivado — no se incluirá en esta sesión.</div>
+                    )}
                   </div>
                 )}
-                {b.id === "core" && (
+                {bloqueActivo === "preventivo" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <select value={modoPreventivo} onChange={(e) => setModoPreventivo(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+                      <option value="automatico">Automático (pool por categoría)</option>
+                      <option value="manual">Manual (elegir ejercicios)</option>
+                      <option value="no_incluir">No incluir</option>
+                    </select>
+                    {modoPreventivo === "automatico" && (
+                      <>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicios ese día</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => setPreventivoCantidad((v) => Math.max(0, v - 1))}
+                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                            >
+                              −
+                            </button>
+                            <span style={{ width: 24, textAlign: "center", fontFamily: dsF.mono, fontSize: 14, color: preventivoCantidad > 0 ? ds.accent : ds.inkMuted }}>
+                              {preventivoCantidad}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setPreventivoCantidad((v) => v + 1)}
+                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
+                        </div>
+                        {preventivoCantidad > 0 &&
+                          (() => {
+                            const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
+                            const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
+                            if (!cat) {
+                              return (
+                                <div style={{ fontSize: 11.5, color: ds.warning }}>
+                                  No hay una única categoría preventiva común a todos los jugadores destinatarios — este bloque se omitirá al guardar. Dirige la sesión a jugadores que compartan una sola categoría para que se aplique.
+                                </div>
+                              );
+                            }
+                            const poolPrev = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId);
+                            return (
+                              <>
+                                <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                                  Categoría detectada para este roster: <span style={{ color: ds.accent, fontWeight: 500 }}>{cat.nombre}</span>
+                                </div>
+                                <div style={{ fontSize: 11.5, color: poolPrev.length ? ds.inkMuted : ds.warning }}>
+                                  {poolPrev.length
+                                    ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
+                                    : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
+                                </div>
+                              </>
+                            );
+                          })()}
+                      </>
+                    )}
+                    {modoPreventivo === "manual" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {tareasPreventivoManual.map((t) => (
+                          <FilaTareaReal
+                            key={t.key}
+                            tarea={t}
+                            mostrarCarga={false}
+                            materialesDisponibles={materialesDisponibles}
+                            onAgregarMaterial={agregarMaterial}
+                            onCambiar={(nuevo) => setTareasPreventivoManual((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
+                            onEliminar={() => setTareasPreventivoManual((prev) => prev.filter((x) => x.key !== t.key))}
+                          />
+                        ))}
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
+                      </div>
+                    )}
+                    {modoPreventivo === "no_incluir" && (
+                      <div style={{ fontSize: 12.5, color: ds.inkMuted, textAlign: "center" }}>Bloque desactivado — no se incluirá en esta sesión.</div>
+                    )}
+                  </div>
+                )}
+                {bloqueActivo === "core" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasCore.map((t) => (
                       <FilaTareaReal
@@ -12913,7 +13318,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     </div>
                   </div>
                 )}
-                {b.id === "resistencia" && (
+                {bloqueActivo === "resistencia" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasResistencia.map((t) => (
                       <CampoResistenciaTareaReal
@@ -12972,7 +13377,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     </div>
                   </div>
                 )}
-                {b.id === "cmj" && (
+                {bloqueActivo === "cmj" && (
                   <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
                       <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
@@ -12980,7 +13385,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                     <span style={{ fontSize: 13, color: cmjActiva ? ds.ink : ds.inkMuted }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
                   </div>
                 )}
-                {b.id === "fuerza" && (
+                {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
@@ -13046,8 +13451,37 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                   </div>
                 )}
               </div>
+          </div>
+
+          {/* Vista previa en vivo — mini "teléfono" con exactamente lo que
+              vería el jugador del bloque activo, reutilizando TareaVisualReal
+              (ver previewContenido más arriba). Nunca datos de relleno: si el
+              bloque no tiene nada cargado todavía, se dice así. */}
+          <aside
+            style={{
+              width: anchoDesktop ? 230 : "100%",
+              flexShrink: 0,
+              boxSizing: "border-box",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              background: ds.bgElevated,
+              border: `1px solid ${ds.border}`,
+              borderRadius: 12,
+              padding: 14,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.06em", color: ds.inkMuted, textTransform: "uppercase", marginBottom: 10, alignSelf: "flex-start" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: ds.success, boxShadow: `0 0 0 3px ${ds.successBorderSubtle}` }} />
+              Vista jugador · en vivo
             </div>
-          ))}
+            <div style={{ width: "100%", maxWidth: 230, background: ds.canvas, border: "5px solid #030812", borderRadius: 26, boxShadow: dsSh.elevation2, overflow: "hidden", boxSizing: "border-box" }}>
+              <div style={{ padding: "13px 11px", minHeight: 320, display: "flex", flexDirection: "column", gap: 8 }}>{previewContenido()}</div>
+            </div>
+            <div style={{ fontSize: 9.5, color: ds.inkMuted, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
+              Se actualiza al momento mientras diseñas — sin guardar ni cambiar de pantalla.
+            </div>
+          </aside>
         </div>
 
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
