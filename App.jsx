@@ -11255,25 +11255,31 @@ function NotaTareaReal({ nota, onCambiar }) {
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio }) {
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo }) {
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
   const etiquetaModo = { reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" };
   const tipoResistencia = tarea.tipoResistencia || "Peso libre";
+  const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
 
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
-          <div style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={() => tieneVideoJugable && onAmpliarVideo?.(tarea.gif)}
+            title={tieneVideoJugable ? "Ver vídeo" : undefined}
+            style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", border: "none", padding: 0, cursor: tieneVideoJugable ? "pointer" : "default" }}
+          >
             {miniaturaTarea(tarea.gif) && (
               <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 32, height: 32, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
-            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+            {tieneVideoJugable && (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
                 <Play size={11} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
               </div>
             )}
-          </div>
+          </button>
         )}
         {orden != null && (
           <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -11553,7 +11559,7 @@ function FichaJugadorResistencia({ tipo, modalidad, intensidad, distancia, jugad
 // mockup_diseno_sesion.html (campoResistencia, renderCamposHtml,
 // cambiarCapacidadResistencia, cambiarEstructuraManual, cambiarModalidad,
 // actualizarIndicadores) a props/estado de React reales.
-function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar, jugadorReferencia, ejercicios, onEjercicioCreado }) {
+function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar, jugadorReferencia, ejercicios, onEjercicioCreado, onAmpliarVideo }) {
   const [forzandoEstructura, setForzandoEstructura] = useState(false);
   const tipo = tarea.tipoResistenciaCardio || "";
   const modalidad = tarea.modalidad || "carrera";
@@ -11612,20 +11618,27 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
 
   const ind = (key) => evaluarIndicadorResistencia(key, tarea[key], capacidadObj);
 
+  const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
+
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
-          <div style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <button
+            type="button"
+            onClick={() => tieneVideoJugable && onAmpliarVideo?.(tarea.gif)}
+            title={tieneVideoJugable ? "Ver vídeo" : undefined}
+            style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", border: "none", padding: 0, cursor: tieneVideoJugable ? "pointer" : "default" }}
+          >
             {miniaturaTarea(tarea.gif) && (
               <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 32, height: 32, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
-            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+            {tieneVideoJugable && (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
                 <Play size={11} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
               </div>
             )}
-          </div>
+          </button>
         )}
         {orden != null && (
           <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -11940,7 +11953,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onCambiarCircuito, onEliminarCircuito, referenciasPorEjercicio, jugadorReferencia }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onCambiarCircuito, onEliminarCircuito, referenciasPorEjercicio, jugadorReferencia, onAmpliarVideo }) {
   const tareas = circuito.tareas;
   const rondas = circuito.rondas || 1;
   // 'circuito' (con rondas, se repite en orden — el comportamiento de
@@ -12067,7 +12080,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
           bloque === "Resistencia" ? (
-            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} ejercicios={ejercicios} onEjercicioCreado={onEjercicioCreado} />
+            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} ejercicios={ejercicios} onEjercicioCreado={onEjercicioCreado} onAmpliarVideo={onAmpliarVideo} />
           ) : (
             <FilaTareaReal
               key={t.key}
@@ -12081,6 +12094,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
               onSubir={i > 0 ? () => mover(i, -1) : null}
               onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null}
               referenciasPorEjercicio={referenciasPorEjercicio}
+              onAmpliarVideo={onAmpliarVideo}
             />
           )
         )}
@@ -12250,6 +12264,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   // Para "REF. ANTERIOR" en cada fila de tarea de Fuerza — ver
   // useReferenciasPorEjercicio.
   const referenciasPorEjercicio = useReferenciasPorEjercicio(sesionExistente?.id || null);
+  // Lightbox de vídeo para las miniaturas de tarea clicables (mismo patrón
+  // que PantallaJugadorReal / gifAmpliado).
+  const [videoAmpliado, setVideoAmpliado] = useState(null);
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
@@ -12439,6 +12456,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           tareaId: t.id,
           nombre: e.nombre || "(ejercicio eliminado)",
           ejercicioId: t.ejercicio_id,
+          gif: e.gif_url || "",
           modo: t.modo || "reps",
           series: t.series ?? "",
           cantidad: t.cantidad ?? "",
@@ -13133,6 +13151,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const bloqueInfo = BLOQUES_DISENO.find((x) => x.id === bloqueActivo) || BLOQUES_DISENO[0];
 
   return (
+    <>
     <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640}>
       <div>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -13381,6 +13400,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                           onAgregarMaterial={agregarMaterial}
                           onCambiar={(nuevo) => setTareaMovilidadManual(nuevo)}
                           onEliminar={() => setTareaMovilidadManual(null)}
+                          onAmpliarVideo={setVideoAmpliado}
                         />
                       ) : (
                         <SelectorEjercicioReal ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
@@ -13460,6 +13480,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                             onAgregarMaterial={agregarMaterial}
                             onCambiar={(nuevo) => setTareasPreventivoManual((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                             onEliminar={() => setTareasPreventivoManual((prev) => prev.filter((x) => x.key !== t.key))}
+                            onAmpliarVideo={setVideoAmpliado}
                           />
                         ))}
                         <SelectorEjercicioReal ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
@@ -13481,6 +13502,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onAgregarMaterial={agregarMaterial}
                         onCambiar={(nuevo) => setTareasCore((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                         onEliminar={() => setTareasCore((prev) => prev.filter((x) => x.key !== t.key))}
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     {circuitosCore.map((c) => (
@@ -13499,6 +13521,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onCambiarRondas={(r) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onCambiarCircuito={(patch) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosCore((prev) => prev.filter((x) => x.key !== c.key))}
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
@@ -13523,6 +13546,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         jugadorReferencia={jugadorReferenciaResistencia}
                         ejercicios={ejercicios}
                         onEjercicioCreado={addEjercicioLocal}
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     {circuitosResistencia.map((c) => (
@@ -13541,6 +13565,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onCambiarCircuito={(patch) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
                         jugadorReferencia={jugadorReferenciaResistencia}
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
@@ -13615,6 +13640,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                                 })
                             : null
                         }
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     {circuitosFuerza.map((c) => (
@@ -13634,6 +13660,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onCambiarCircuito={(patch) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
+                        onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
@@ -13709,6 +13736,23 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         </div>
       </div>
     </PantallaBase>
+    {videoAmpliado && (
+      <div
+        onClick={() => setVideoAmpliado(null)}
+        style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 40, padding: 24 }}
+      >
+        <div style={{ width: "100%", maxWidth: 480 }} onClick={(e) => e.stopPropagation()}>
+          <VideoEmbed url={videoAmpliado} />
+        </div>
+        <button
+          onClick={() => setVideoAmpliado(null)}
+          style={{ position: "absolute", top: 20, right: 20, background: ds.surface, border: `1px solid ${ds.border}`, color: ds.ink, width: 34, height: 34, borderRadius: dsR.full, fontSize: 16, cursor: "pointer" }}
+        >
+          ×
+        </button>
+      </div>
+    )}
+    </>
   );
 }
 
@@ -13799,6 +13843,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           tareaId: t.id,
           nombre: e.nombre || "(ejercicio eliminado)",
           ejercicioId: t.ejercicio_id,
+          gif: e.gif_url || "",
           modo: t.modo || "reps",
           series: t.series ?? "",
           cantidad: t.cantidad ?? "",
