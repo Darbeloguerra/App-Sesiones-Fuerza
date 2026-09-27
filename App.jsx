@@ -955,6 +955,21 @@ function usePlayers() {
         // Control de fatiga (Parte 5), pero es un dato del jugador en
         // general, no exclusivo del CMJ.
         posicion: r.posicion || null,
+        // VAM (velocidad aeróbica máxima) y FCmáx (frecuencia cardíaca
+        // máxima) de un test de campo real del jugador (VAM-Eval, 30-15
+        // IFT, Course Navette/Léger...) — añadidos para traducir la
+        // intensidad de las tareas de Resistencia (% FCmáx / % VAM) a algo
+        // ejecutable (un pulso o un ritmo). Igual que posicion arriba: son
+        // datos opcionales del jugador, no exclusivos de un módulo — nulos
+        // hasta que se registre un test (ver sql/add_vam_fcmax_jugador.sql
+        // y objetivoJugadorResistencia). Sin ellos, CampoResistenciaTareaReal
+        // y TareaCardReal usan la estimación poblacional en su lugar.
+        vamKmh: r.vam_kmh != null && r.vam_kmh !== "" ? Number(r.vam_kmh) : null,
+        vamProtocolo: r.vam_protocolo || null,
+        vamFecha: r.vam_fecha || null,
+        fcMaxPpm: r.fc_max_ppm != null && r.fc_max_ppm !== "" ? Number(r.fc_max_ppm) : null,
+        fcMaxProtocolo: r.fc_max_protocolo || null,
+        fcMaxFecha: r.fc_max_fecha || null,
       })),
     [rows]
   );
@@ -1075,7 +1090,7 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
   } catch {
     materiales = [];
   }
-  let resistencia = { tipo: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg" };
+  let resistencia = { tipo: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg" };
   if (t.resistencia_data) {
     try {
       resistencia = { ...resistencia, ...JSON.parse(t.resistencia_data) };
@@ -1102,12 +1117,17 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     lateralidad: t.lateralidad || "bilateral",
     nota: t.nota || "",
     tipoResistenciaCardio: resistencia.tipo,
+    capacidad: resistencia.capacidad,
+    modalidad: resistencia.modalidad,
+    estructuraManual: resistencia.estructuraManual,
     bloques: resistencia.bloques,
     intervalos: resistencia.intervalos,
     tiempo: resistencia.tiempo,
     tiempoUnidad: resistencia.tiempoUnidad,
     intensidad: resistencia.intensidad,
     distancia: resistencia.distancia,
+    duracion: resistencia.duracion,
+    rpe: resistencia.rpe,
     recuperacion: resistencia.recuperacion,
     recuperacionUnidad: resistencia.recuperacionUnidad,
     circuito_id: nuevo ? "" : t.circuito_id || "",
@@ -1173,6 +1193,155 @@ function formatearObjetivoResistencia(r) {
       .join(" · ");
   }
   return "";
+}
+
+// ---------- Resistencia: capacidad objetivo, pauta recomendada, semáforo y
+// traducción del % a algo ejecutable para el jugador (ritmo o pulso) ----------
+// Traslado fiel de la lógica ya diseñada y aprobada en
+// mockup_diseno_sesion.html (CAPACIDADES_RESISTENCIA, MODALIDADES,
+// ESTIMACION_POBLACIONAL, renderCamposHtml, fichaAplica,
+// avisoTransferencia, objetivoJugadorSimple) a hooks/props de React reales.
+//
+// Guía de referencia por capacidad — síntesis de Pallarés & Morán-Navarro
+// (2012, zonas R0-R6) actualizada con literatura posterior: distribución
+// polarizada del volumen (Seiler, 2010; Rosenblat et al., 2018), aviso de
+// "zona gris" en el umbral anaeróbico (Van Schuylenbergh et al., 2020), y
+// diseño de HIIT por tiempo efectivo >90% VO2máx en vez de solo el %
+// (Buchheit & Laursen, 2013). No sustituye el test individual del
+// jugador — es el punto de partida que luego el entrenador ajusta.
+// rangoNum: rango numérico REAL publicado por la tabla para la métrica que
+// el campo de intensidad de cada estructura captura (FCmáx en Continuo,
+// VAM en HIIT/RSA) — es lo único contra lo que el semáforo compara. R0 se
+// queda sin rangoNum a propósito: su rango está publicado en %FCreserva,
+// una escala distinta a la que pide el campo (%FCmáx), y no se convierte
+// una por otra sin una fórmula validada por jugador (Karvonen), así que no
+// se le fuerza un semáforo.
+// rpe (solo R3-R6): equivalente en esfuerzo percibido (Borg CR10) para
+// cuando la tarea es en bici/elíptica/piscina — ahí ni FCmáx (reacciona
+// demasiado lento para esfuerzos cortos) ni VAM (es una métrica de
+// carrera) tienen sentido sin potenciómetro. Anclas verbales de Borg CR10
+// vía Foster et al. (2001, sesión-RPE).
+const CAPACIDADES_RESISTENCIA = {
+  r0: { nombre: "Recuperación activa / Regenerativo", tipo: "continuo", rango: "< 65% FCreserva · < 65% VAM", lactato: "—", metodo: "Continuo Uniforme Extensivo", nota: "Para disipar fatiga entre estímulos o sesiones de descarga — no busca adaptación.", sugerido: { tiempo: 20, intensidad: 60, recuperacionUnidad: "min" } },
+  r1: { nombre: "Umbral aeróbico", tipo: "continuo", rango: "65-75% VO2máx · 70-80% FCmáx · 65-75% VAM", lactato: "1-2 mmol/L", metodo: "Continuo Uniforme o Continuo Variable 1", nota: "Debería concentrar la mayoría del volumen semanal de resistencia (~75-80% del tiempo total, modelo polarizado).", rangoNum: { min: 70, max: 80 }, sugerido: { tiempo: 35, intensidad: 70, recuperacionUnidad: "min" } },
+  r2: { nombre: 'Umbral anaeróbico ("zona gris")', tipo: "continuo", rango: "75-85% VO2máx · 80-90% FCmáx · 75-85% VAM", lactato: "2-4 mmol/L", metodo: "Continuo Variable 1/2 · Interválico Extensivo Largo", nota: "Ni construye base aeróbica ni estimula VO2máx con eficacia — úsala con un objetivo concreto (ritmo de competición), no como relleno.", alerta: true, rangoNum: { min: 80, max: 90 }, sugerido: { tiempo: 20, intensidad: 80, recuperacionUnidad: "min" } },
+  r3: { nombre: "Consumo Máximo de Oxígeno (VO2máx)", tipo: "hiit", rango: "90-100% VO2máx · 95-100% FCmáx · 90-100% VAM", lactato: "4-8 mmol/L", metodo: "Interválico Extensivo/Medio · Interválico Intensivo Corto", nota: "El objetivo real es acumular tiempo sostenido por encima del 90% del VO2máx, no solo tocar el porcentaje.", rangoNum: { min: 90, max: 100 }, rpe: { min: 8, max: 9 }, sugerido: { bloques: 1, intervalos: 6, tiempo: 180, intensidad: 95, recuperacion: 120 } },
+  r4: { nombre: "Capacidad anaeróbica láctica", tipo: "rsa", rango: "105-120% VAM", lactato: "8-14 mmol/L", metodo: "Interválico Intensivo Corto · Repeticiones Largas", nota: "Recuperaciones amplias entre series (8-12 min) para tamponar el lactato sin perder calidad en el siguiente esfuerzo.", rangoNum: { min: 105, max: 120 }, rpe: { min: 8, max: 9 }, sugerido: { bloques: 1, series: 4, distancia: 300, intensidad: 112, recuperacion: 600 } },
+  r5: { nombre: "Potencia anaeróbica láctica", tipo: "rsa", rango: "120-140% VAM", lactato: "Máximo", metodo: "Repeticiones Medias/Cortas", nota: "Depleciones importantes de fosfocreatina y glucógeno — dosifica el número de repeticiones, no solo la intensidad.", rangoNum: { min: 120, max: 140 }, rpe: { min: 9, max: 10 }, sugerido: { bloques: 1, series: 6, distancia: 150, intensidad: 130, recuperacion: 600 } },
+  r6: { nombre: "Potencia anaeróbica aláctica", tipo: "rsa", rango: "> 160% velocidad máxima", lactato: "—", metodo: "Interválico Intensivo Muy Corto · Repeticiones Cortas", nota: "Esfuerzos máximos de 2-8 s — la vía láctica apenas participa; prioriza recuperación casi completa entre repeticiones (> 8 min).", rangoNum: { min: 160, max: null }, rpe: { min: 9, max: 10 }, sugerido: { bloques: 4, series: 6, distancia: 30, intensidad: 170, recuperacion: 480 } },
+};
+const NOMBRES_TIPO_TRABAJO_RESISTENCIA = { continuo: "Continuo", hiit: "HIIT", rsa: "RSA / Repeticiones" };
+const ETQ_INTENSIDAD_RESISTENCIA = { continuo: "INTENSIDAD % FCMÁX", hiit: "INTENSIDAD % VAM", rsa: "INTENSIDAD % VAM" };
+const MODALIDADES_RESISTENCIA = { carrera: "Carrera", bici: "Bici", eliptica: "Elíptica", piscina: "Piscina", otro: "Otro sin impacto" };
+
+// El % que pide el campo de intensidad no significa nada por sí solo: VAM y
+// FCmáx no se estiman, se miden con un test de campo real (VAM-Eval,
+// 30-15 IFT, Course Navette/Léger...). Sin test individual, el jugador no
+// se queda sin número: se usa una estimación POBLACIONAL real y publicada,
+// no una fórmula genérica inventada ni una frase cualitativa (el Talk
+// Test/RPE se descartó por decisión expresa — un jugador sin formación en
+// entrenamiento no sabe traducir "frases cortas" a lo que tiene que hacer
+// en la pista).
+// Fuente: Bruzzese et al., "Assessment of professional Argentine football
+// players using the UNCa test", Arch Med Deporte 2021;38(5):327-331 —
+// futbolistas profesionales, n=9, edad 26.8±5.1 años. VAM media 14.8±1.3
+// km/h; FC ~95% de la máxima esperada al final del test, 193.6±7.9 ppm.
+// Muestra pequeña (n=9): es la mejor aproximación disponible sin test
+// individual, no un sustituto de uno.
+const ESTIMACION_POBLACIONAL_RESISTENCIA = {
+  fcMax: { valor: 194, fuente: "media en futbolistas profesionales (Bruzzese et al., 2021, n=9)" },
+  vam: { valor: 14.8, fuente: "media en futbolistas profesionales (Bruzzese et al., 2021, n=9)" },
+};
+
+// Aviso de transferencia entre modalidades: FCmáx medida corriendo y en
+// bici son parecidas EN PROMEDIO (~2 ppm de diferencia en un estudio con
+// 5.311 atletas), pero el error de transferencia INDIVIDUAL es de hasta
+// ~12 ppm (triatletas testados en ambos deportes, r=0,32) — así que se
+// avisa, no se oculta, cuando el test es de carrera y la tarea no lo es.
+function avisoTransferenciaResistencia(modalidad) {
+  return modalidad === "carrera"
+    ? ""
+    : " FCmáx medida corriendo: en esta modalidad el error de transferencia individual puede llegar a ~12 ppm — un test específico en esta modalidad sería más preciso.";
+}
+
+// Ficha de jugador solo tiene sentido cuando el campo de intensidad es
+// VAM/FCmáx (algo que traducir a km/h o ppm). Con RPE (bici/elíptica en
+// R3-R6) el propio campo ya es la instrucción para el jugador — no hay
+// nada que traducir, así que la ficha se oculta ahí.
+function fichaResistenciaAplica(tipo, modalidad) {
+  return !(tipo !== "continuo" && modalidad !== "carrera");
+}
+
+// Referencia real del jugador (jugador.fcMaxPpm / jugador.vamKmh, ver
+// usePlayers) si existe, o estimación poblacional si no. jugador puede ser
+// null (sesión para todo el equipo o para varios jugadores a la vez): en
+// ese caso se usa siempre la estimación poblacional, porque no hay un
+// único jugador al que anclar el número.
+function referenciaResistenciaJugador(metric, jugador) {
+  const campo = metric === "fcMax" ? jugador?.fcMaxPpm : jugador?.vamKmh;
+  if (jugador && campo != null && campo !== "") {
+    const protocolo = metric === "fcMax" ? jugador.fcMaxProtocolo : jugador.vamProtocolo;
+    const fecha = metric === "fcMax" ? jugador.fcMaxFecha : jugador.vamFecha;
+    return { valor: Number(campo), real: true, protocolo: protocolo || "", fecha: fecha || "" };
+  }
+  return { valor: ESTIMACION_POBLACIONAL_RESISTENCIA[metric].valor, real: false, fuente: ESTIMACION_POBLACIONAL_RESISTENCIA[metric].fuente };
+}
+
+// Lo que el jugador necesita no es el % ni el nombre de la capacidad — es
+// algo que pueda ejecutar sin pensar: un ritmo (tiempo sobre la distancia)
+// o un pulso objetivo, calculado con el dato real del jugador si lo
+// tiene, o con la estimación poblacional (ver arriba) si no — nunca una
+// frase para leer entre líneas. Réplica de objetivoJugadorSimple.
+function objetivoJugadorResistencia(tipo, intensidadVal, distancia, jugador) {
+  const metric = tipo === "continuo" ? "fcMax" : "vam";
+  const ref = referenciaResistenciaJugador(metric, jugador);
+  const v = Number(intensidadVal);
+  if (intensidadVal === "" || intensidadVal == null || isNaN(v)) return "";
+  const prefijo = ref.real ? "" : "≈";
+  if (metric === "fcMax") return prefijo + Math.round((ref.valor * v) / 100) + " ppm";
+  const speedKmh = (ref.valor * v) / 100;
+  if (distancia) {
+    const speedMs = (speedKmh * 1000) / 3600;
+    const segundos = Number(distancia) / speedMs;
+    const mm = Math.floor(segundos / 60);
+    const ss = Math.round(segundos % 60);
+    return "ritmo: " + prefijo + mm + ":" + String(ss).padStart(2, "0");
+  }
+  return "ritmo: " + prefijo + speedKmh.toFixed(1) + " km/h";
+}
+
+// Semáforo (solo intensidad/RPE, contra el rango real publicado) o
+// diferencia neutra (el resto de campos numéricos, contra el valor
+// sugerido) para un campo de una tarea de Resistencia. Sin rango/sugerido
+// publicado (p. ej. R0, o un campo sin referencia) no se evalúa — el
+// campo se queda sin indicador, nunca con uno inventado.
+function evaluarIndicadorResistencia(key, valor, capacidadObj) {
+  if (valor === "" || valor == null || isNaN(Number(valor))) return null;
+  const v = Number(valor);
+  if (key === "intensidad") {
+    if (!capacidadObj?.rangoNum) return null;
+    const { min, max } = capacidadObj.rangoNum;
+    const margen = 5;
+    const rangoTxt = min + (max != null ? "-" + max : "+") + "%";
+    if (v >= min && (max == null || v <= max)) return { texto: "En rango", color: ds.success, titulo: `Dentro del rango recomendado (${rangoTxt})` };
+    if (v >= min - margen && (max == null || v <= max + margen)) return { texto: "Cerca", color: ds.warning, titulo: `Justo fuera del rango recomendado (${rangoTxt})` };
+    return { texto: "Fuera", color: ds.danger, titulo: `Claramente fuera del rango recomendado (${rangoTxt})` };
+  }
+  if (key === "rpe") {
+    if (!capacidadObj?.rpe) return null;
+    const { min, max } = capacidadObj.rpe;
+    const margen = 1;
+    const rangoTxt = `${min}-${max}`;
+    if (v >= min && v <= max) return { texto: "En rango", color: ds.success, titulo: `Dentro del RPE recomendado (${rangoTxt})` };
+    if (v >= min - margen && v <= max + margen) return { texto: "Cerca", color: ds.warning, titulo: `Justo fuera del RPE recomendado (${rangoTxt})` };
+    return { texto: "Fuera", color: ds.danger, titulo: `Claramente fuera del RPE recomendado (${rangoTxt})` };
+  }
+  const sugerido = capacidadObj?.sugerido?.[key];
+  if (sugerido == null) return null;
+  const diff = v - Number(sugerido);
+  const texto = diff === 0 ? "= ref." : diff > 0 ? `+${diff}` : String(diff);
+  const titulo = diff === 0 ? `Igual que la referencia sugerida (${sugerido})` : diff > 0 ? `${diff} por encima de la referencia sugerida (${sugerido})` : `${Math.abs(diff)} por debajo de la referencia sugerida (${sugerido})`;
+  return { texto, color: ds.inkMuted, titulo };
 }
 
 // Reproductor incrustado. Tres casos:
@@ -2238,8 +2407,8 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
         width: 190,
         background: ds.bgElevated,
         border: `1px solid ${ds.border}`,
-        borderRadius: 10,
-        boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+        borderRadius: dsR.lg,
+        boxShadow: dsSh.elevation3,
         padding: 6,
       }}
     >
@@ -2252,7 +2421,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
               onAccion(a.id);
               onCerrar();
             }}
-            style={{ padding: "8px 10px", borderRadius: 6, fontSize: 12.5, color, cursor: "pointer" }}
+            style={{ padding: "8px 10px", borderRadius: dsR.sm, fontSize: 12.5, color, cursor: "pointer", transition: "background-color 120ms ease-out" }}
             onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
           >
@@ -2265,7 +2434,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
   );
 }
 
-function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCategorias, onCambiarGrupos }) {
+function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAccion, onCambiarCategorias, onCambiarGrupos }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [selectorGruposAbierto, setSelectorGruposAbierto] = useState(false);
@@ -2365,6 +2534,12 @@ function FilaJugadorReal({ jugador, categorias, grupos, onAccion, onCambiarCateg
             />
           )}
         </div>
+      </div>
+      <div
+        title="Adherencia esta semana"
+        style={{ fontFamily: dsF.mono, fontSize: 13, fontWeight: 700, color: adherencia == null ? ds.inkMuted : adherencia >= 80 ? ds.success : adherencia >= 50 ? ds.inkSecondary : ds.danger, width: 40, textAlign: "right", flexShrink: 0 }}
+      >
+        {adherencia != null ? `${adherencia}%` : "—"}
       </div>
       <button
         onClick={() => setPinVisible((v) => !v)}
@@ -2573,13 +2748,47 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, saveGrupos, gruposLoaded] = useEntityList("grupos");
   const [coachPin, , coachPinLoaded] = useConfigValue("coach_pin");
+  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
   const [panelGrupoAbierto, setPanelGrupoAbierto] = useState(false);
   const [errorAccion, setErrorAccion] = useState("");
 
-  if (!playersLoaded || !categoriasLoaded || !coachPinLoaded || !gruposLoaded) return <LoadingBlock />;
+  if (!playersLoaded || !categoriasLoaded || !coachPinLoaded || !gruposLoaded || !progLoaded || !equipoLoaded) return <LoadingBlock />;
+
+  // Adherencia de esta semana de calendario, por jugador — para el "adh"
+  // de cada fila (mockup de Fase 6 → Equipos y usuarios). Mismo criterio
+  // exacto que adherenciaActual en useDatosDashboardEntrenador y en
+  // ResumenFichaJugadorReal (cumplidas / asignadas, límite superior hoy),
+  // calculado UNA vez aquí para todo el roster en vez de una consulta por
+  // fila — reutiliza useBootstrapProgramacion/useEquipoHistory, que ya
+  // traen todo el equipo de una sola vez.
+  const hoyRoster = todayStr();
+  const lunesRoster = inicioSemanaCalendario(hoyRoster);
+  const domingoRoster = sumarDiasFecha(lunesRoster, 6);
+  const registroPorJugadorFechaRoster = new Set(equipoHistory.filter((it) => it.done).map((it) => `${it.jugadorId}::${it.date}`));
+  const asignadasPorJugador = new Map();
+  const cumplidasPorJugador = new Map();
+  sesiones
+    .filter((s) => s.enviada)
+    .forEach((s) => {
+      const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : players.filter((p) => p.estado === "activo").map((p) => p.id);
+      (s.fechas || []).forEach((f) => {
+        if (f < lunesRoster || f > domingoRoster || f > hoyRoster) return;
+        destino.forEach((jugadorId) => {
+          asignadasPorJugador.set(jugadorId, (asignadasPorJugador.get(jugadorId) || 0) + 1);
+          if (registroPorJugadorFechaRoster.has(`${jugadorId}::${f}`)) {
+            cumplidasPorJugador.set(jugadorId, (cumplidasPorJugador.get(jugadorId) || 0) + 1);
+          }
+        });
+      });
+    });
+  const adherenciaPorJugador = new Map();
+  asignadasPorJugador.forEach((total, jugadorId) => {
+    adherenciaPorJugador.set(jugadorId, Math.round(((cumplidasPorJugador.get(jugadorId) || 0) / total) * 100));
+  });
 
   // El código de entrenador nunca puede coincidir con el PIN de un jugador
   // (si coinciden, quien entra con ese número accede como entrenador a todo
@@ -2708,7 +2917,16 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {errorAccion && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px" }}>{errorAccion}</div>}
           {visibles.map((j) => (
-            <FilaJugadorReal key={j.id} jugador={j} categorias={categorias} grupos={grupos} onAccion={manejarAccion} onCambiarCategorias={cambiarCategorias} onCambiarGrupos={cambiarGrupos} />
+            <FilaJugadorReal
+              key={j.id}
+              jugador={j}
+              categorias={categorias}
+              grupos={grupos}
+              adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
+              onAccion={manejarAccion}
+              onCambiarCategorias={cambiarCategorias}
+              onCambiarGrupos={cambiarGrupos}
+            />
           ))}
           {visibles.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
         </div>
@@ -2885,7 +3103,7 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
           <>
             <TiraStatsCompactaReal datos={datos} />
 
-            <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} compact />
+            <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} borradores={datos.borradores} compact />
 
             <div style={{ marginBottom: 12 }}>
               <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
@@ -3221,7 +3439,7 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
           />
         </div>
 
-        <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} />
+        <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} borradores={borradores} />
 
         <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={playersById} />
 
@@ -3239,11 +3457,10 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
             {variaciones.length === 0 ? (
               <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
             ) : (
-              <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-                {variaciones.map((v) => (
-                  <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />
-                ))}
-              </div>
+              <ListaExpandibleDashboardReal
+                items={variaciones}
+                renderItem={(v) => <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />}
+              />
             )}
           </div>
 
@@ -3260,11 +3477,10 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
             ) : pendientesHoy.length === 0 ? (
               <div style={{ color: ds.success, fontSize: 12.5, padding: "10px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
             ) : (
-              <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}>
-                {pendientesHoy.map((p) => (
-                  <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />
-                ))}
-              </div>
+              <ListaExpandibleDashboardReal
+                items={pendientesHoy}
+                renderItem={(p) => <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />}
+              />
             )}
           </div>
         </div>
@@ -3329,12 +3545,16 @@ function TiraStatsCompactaReal({ datos }) {
 }
 
 // Reserva el espacio de "Tu semana" (calendario del entrenador) ya en el
-// layout, tal y como pide el mockup — pero SIN datos, porque
-// calendario_asignaciones todavía no existe: mostrar días/avisos aquí sería
-// inventarlos. En cuanto se implemente Calendario (Fase 6), este placeholder
-// se sustituye por el panel real con los mismos huecos que ya tiene
-// reservados.
-function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact }) {
+// layout, tal y como pide el mockup — pero SIN la tira de días con estado
+// diario (L-D), porque calendario_asignaciones todavía no existe: inventar
+// esos puntos por día sería fabricar datos. En cuanto se implemente
+// Calendario (Fase 6), este placeholder se sustituye por el panel real con
+// los mismos huecos que ya tiene reservados.
+// Lo que SÍ es un dato real ya disponible aquí es "borradores" (sesiones
+// creadas pero aún sin publicar) — el mismo aviso "N sesiones sin diseñar"
+// del mockup, mostrado como el mismo chip con número grande.
+function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact, borradores }) {
+  const hayBorradores = typeof borradores === "number" && borradores > 0;
   return (
     <div
       style={{
@@ -3355,15 +3575,21 @@ function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact }) {
       <div style={{ flex: 1, minWidth: 0, fontSize: compact ? 10.5 : 11.5, color: ds.inkMuted, whiteSpace: compact ? "nowrap" : "normal", overflow: compact ? "hidden" : "visible", textOverflow: compact ? "ellipsis" : "clip" }}>
         {compact ? (
           <span>
-            <span style={{ color: ds.inkSecondary, fontWeight: 600 }}>Tu semana</span> · llega con Fase 6
+            <span style={{ color: ds.inkSecondary, fontWeight: 600 }}>Tu semana</span> · calendario diario llega con Fase 6
           </span>
         ) : (
           <>
             <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tu semana</div>
-            <div>El calendario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
+            <div>El calendario diario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
           </>
         )}
       </div>
+      {hayBorradores && (
+        <div style={{ display: "flex", alignItems: "baseline", gap: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
+          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800, color: ds.warning }}>{borradores}</span>
+          <span style={{ fontSize: compact ? 10 : 11, fontWeight: 600, color: ds.warning }}>{borradores === 1 ? "sesión sin publicar" : "sesiones sin publicar"}</span>
+        </div>
+      )}
       <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: compact ? 10.5 : 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
         {compact ? "Ver →" : "Ver programación →"}
       </button>
@@ -3424,6 +3650,29 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
         {pct.toFixed(0)}%).
       </div>
     </details>
+  );
+}
+
+// Lista de un panel del Dashboard (escritorio/iPad) con el mismo patrón que
+// el mockup: se ven directamente los primeros `limite` elementos y, si hay
+// más, un "Ver N más" nativo (<details>, sin JS aparte) los despliega — en
+// vez de meter todo en una caja con scroll interno desde el principio.
+// overflowY:auto se deja como red de seguridad si aun así no cupiera.
+function ListaExpandibleDashboardReal({ items, renderItem, limite = 5 }) {
+  const visibles = items.slice(0, limite);
+  const resto = items.slice(limite);
+  return (
+    <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
+      <div>{visibles.map(renderItem)}</div>
+      {resto.length > 0 && (
+        <details className="ds-details-plain" style={{ marginTop: "auto", paddingTop: 6, flexShrink: 0 }}>
+          <summary style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: ds.accent, listStyle: "none" }}>
+            Ver {resto.length} más
+          </summary>
+          <div>{resto.map(renderItem)}</div>
+        </details>
+      )}
+    </div>
   );
 }
 
@@ -3521,6 +3770,15 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
     .filter(Boolean);
   const pctVerde = Math.round((enVerde / total) * 100);
 
+  // "Testados hoy" y "Última prueba" — igual que el resto del panel, salen
+  // del mismo array de saltos ya cargado (no hace falta ninguna consulta
+  // nueva): cuántos jugadores distintos tienen un salto fechado hoy, y cuándo
+  // fue el salto más reciente de todos, con el mismo formato relativo
+  // ("hace N días") que ya usa el dashboard del jugador.
+  const hoyFatiga = todayStr();
+  const testadosHoy = new Set(filasParaMotor.filter((f) => f.dateKey === hoyFatiga).map((f) => f.jugadorId)).size;
+  const fechaUltimaPrueba = filasParaMotor.reduce((max, f) => (!max || f.dateKey > max ? f.dateKey : max), null);
+
   return (
     <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: "10px 16px", marginBottom: 12, flexShrink: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
@@ -3550,6 +3808,22 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
             <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
               <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.danger, display: "inline-block" }} />{enRojo} rojo
             </span>
+          </div>
+        </div>
+
+        <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0 }} />
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Testados hoy</div>
+          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: ds.ink, whiteSpace: "nowrap" }}>
+            {testadosHoy} <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, fontWeight: 600 }}>/ {total}</span>
+          </div>
+        </div>
+
+        <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0 }} />
+        <div style={{ flexShrink: 0 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Última prueba</div>
+          <div style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 800, color: ds.ink, whiteSpace: "nowrap", textTransform: "capitalize" }}>
+            {fechaUltimaPrueba ? fmtHaceDias(fechaUltimaPrueba) : "—"}
           </div>
         </div>
 
@@ -3786,29 +4060,47 @@ function GraficaProgresoCargaReal({ puntos, unidad = "kg", mostrarListaCompleta 
           </linearGradient>
         </defs>
         <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        {/* Línea de referencia a su propia mejor marca del periodo — no es un
+            umbral clínico inventado, es simplemente su máximo real, para leer
+            cada punto contra sí mismo (mismo principio que ya usamos en CMJ:
+            comparar contra la referencia individual, no contra un valor fijo). */}
+        <line x1={padX} y1={coordY(maxV)} x2={width - padX} y2={coordY(maxV)} stroke={ds.inkMuted} strokeWidth={1} strokeOpacity={0.4} strokeDasharray="4 4" />
+        <text x={width - padX} y={coordY(maxV) - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">mejor marca · {maxV}{unidad}</text>
         <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
         {indiceActivo != null && (
           <line x1={coordX(indiceActivo)} y1={padTop - 10} x2={coordX(indiceActivo)} y2={height - padBottom} stroke={ds.accent} strokeWidth={1} strokeOpacity={0.35} strokeDasharray="3 3" />
         )}
-        {puntos.map((p, i) => (
-          <g key={i} onClick={() => setSeleccionado(i)} style={{ cursor: "pointer" }}>
-            {/* Círculo invisible más grande solo para que el dedo tenga margen de sobra al tocar — el visible sigue fino */}
-            <circle cx={coordX(i)} cy={coordY(p.valor)} r={14} fill="transparent" />
-            <circle
-              cx={coordX(i)}
-              cy={coordY(p.valor)}
-              r={i === indiceActivo ? 5.5 : i === 0 || i === puntos.length - 1 ? 4 : 3}
-              fill={i === indiceActivo ? ds.accent : ds.canvas}
-              stroke={ds.accent}
-              strokeWidth={2.25}
-            />
-          </g>
-        ))}
+        {puntos.map((p, i) => {
+          const esRecord = p.valor === maxV;
+          return (
+            <g key={i} onClick={() => setSeleccionado(i)} style={{ cursor: "pointer" }}>
+              {/* Círculo invisible más grande solo para que el dedo tenga margen de sobra al tocar — el visible sigue fino */}
+              <circle cx={coordX(i)} cy={coordY(p.valor)} r={14} fill="transparent" />
+              {esRecord && (
+                <circle cx={coordX(i)} cy={coordY(p.valor)} r={i === indiceActivo ? 9 : 7.5} fill="none" stroke={ds.success} strokeWidth={2} />
+              )}
+              <circle
+                cx={coordX(i)}
+                cy={coordY(p.valor)}
+                r={i === indiceActivo ? 5.5 : i === 0 || i === puntos.length - 1 ? 4 : 3}
+                fill={i === indiceActivo ? ds.accent : ds.canvas}
+                stroke={ds.accent}
+                strokeWidth={2.25}
+              />
+            </g>
+          );
+        })}
         <text x={coordX(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.valor}{unidad}</text>
         <text x={coordX(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.valor}{unidad}</text>
         <text x={coordX(0)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{fmtDateShort(primero.date)}</text>
         <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
       </svg>
+      {puntos.some((p) => p.valor === maxV) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: ds.inkMuted, marginTop: 4 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", border: `2px solid ${ds.success}`, flexShrink: 0 }} />
+          récord personal en este periodo
+        </div>
+      )}
       {mostrarListaCompleta ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
           {[...puntos].reverse().map((p, iRev) => {
@@ -5172,15 +5464,32 @@ function GraficoProgresionCarga({ puntos }) {
           </linearGradient>
         </defs>
         <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        {/* Misma referencia que en la gráfica del jugador: su propia mejor
+            marca del periodo, no un umbral inventado — para leer cada test
+            contra el propio jugador. */}
+        <line x1={padX} y1={y(max)} x2={ancho - padX} y2={y(max)} stroke={ds.inkMuted} strokeWidth={1} strokeOpacity={0.4} strokeDasharray="4 4" />
+        <text x={ancho - padX} y={y(max) - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">mejor marca · {max}kg</text>
         <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
-        {puntos.map((p, i) => (
-          <circle key={i} cx={x(i)} cy={y(p.carga)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
-        ))}
+        {puntos.map((p, i) => {
+          const esRecord = p.carga === max;
+          return (
+            <g key={i}>
+              {esRecord && <circle cx={x(i)} cy={y(p.carga)} r={i === 0 || i === puntos.length - 1 ? 7 : 6} fill="none" stroke={ds.success} strokeWidth={2} />}
+              <circle cx={x(i)} cy={y(p.carga)} r={i === 0 || i === puntos.length - 1 ? 4 : 3} fill={ds.canvas} stroke={ds.accent} strokeWidth={2.25} />
+            </g>
+          );
+        })}
         <text x={x(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.carga}kg</text>
         <text x={x(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.carga}kg</text>
         <text x={x(0)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{primero.fecha}</text>
         <text x={x(puntos.length - 1)} y={alto - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{ultimo.fecha}</text>
       </svg>
+      {puntos.some((p) => p.carga === max) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: ds.inkMuted, marginTop: 4 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", border: `2px solid ${ds.success}`, flexShrink: 0 }} />
+          récord personal en este periodo
+        </div>
+      )}
       <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
         {puntos
           .slice()
@@ -6915,7 +7224,20 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
             <>
               <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink, letterSpacing: "-0.01em" }}>{tarea.nombre}</div>
               <div style={{ fontFamily: dsF.mono, fontSize: 11.5, color: hecho ? ds.success : ds.inkSecondary, marginTop: 3, fontWeight: hecho ? 700 : 400 }}>
-                {hecho ? resumenRegistroReal(tarea, registro) : tarea.objetivoResistencia}
+                {hecho ? (
+                  resumenRegistroReal(tarea, registro)
+                ) : (
+                  <>
+                    {tarea.objetivoResistencia}
+                    {/* Lo que el jugador ejecuta, "masticado" a partir del %:
+                        un ritmo o un pulso (o nada, si el campo ya es RPE) —
+                        mismo patrón visual "· <b>...</b>" que ya usa RIR en
+                        el resto de tareas (ver más abajo). */}
+                    {tarea.objetivoJugadorResistencia && (
+                      <span style={{ color: ds.accent, fontWeight: 700 }}> · {tarea.objetivoJugadorResistencia}</span>
+                    )}
+                  </>
+                )}
               </div>
             </>
           ) : tarea.esCmj ? (
@@ -7918,6 +8240,17 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       esCorporal,
       esResistencia,
       objetivoResistencia: esResistencia ? formatearObjetivoResistencia(resistencia) : null,
+      // Traduce el % de intensidad (FCmáx en Continuo, VAM en HIIT/RSA) a
+      // algo que el jugador ejecuta sin pensar: un pulso o un ritmo, con su
+      // propio test de campo (player.fcMaxPpm / player.vamKmh) si lo tiene,
+      // o la estimación poblacional si no (ver objetivoJugadorResistencia).
+      // null cuando no aplica: sin capacidad de Resistencia, o campo de
+      // intensidad en RPE (bici/elíptica/piscina en HIIT/RSA) — ahí el
+      // propio RPE ya es la instrucción, no hay nada que traducir.
+      objetivoJugadorResistencia:
+        esResistencia && resistencia && fichaResistenciaAplica(resistencia.tipo, resistencia.modalidad || "carrera")
+          ? objetivoJugadorResistencia(resistencia.tipo, resistencia.intensidad, resistencia.distancia, player) || null
+          : null,
       unilateral: t.lateralidad === "unilateral",
       esCmj: t.bloque_sesion === "CMJ",
       // Core: solo se marca como hecha, sin registrar carga ni reps — no
@@ -8901,61 +9234,171 @@ function campoSelectReal(extra = {}) {
 
 const btnIconoReal = { background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.inkMuted, width: 26, height: 26, cursor: "pointer", fontSize: 12.5 };
 
-function TarjetaEjercicioReal({ ejercicio, categorias, esVariante, onEditar, onEliminar, onCrearVariante }) {
-  const nombreCategoria = categorias.find((c) => c.id === ejercicio.categoria_preventiva_id)?.nombre;
+// Un color/ícono decorativo por bloque, para que la miniatura de cada
+// tarjeta dé una pista visual del tipo de trabajo antes de leer el texto —
+// inspirado en la rejilla del mockup (gradiente + icono central), pero
+// atado al campo real "bloque" en vez de a un color fijo por ejercicio.
+const BLOQUE_COLOR_REAL = {
+  Fuerza: ds.chart2,
+  Específicas: ds.chart3,
+  Core: ds.warning,
+  Movilidad: ds.success,
+  Preventivo: ds.accent,
+  Resistencia: ds.chart1,
+};
+const BLOQUE_ICONO_REAL = {
+  Fuerza: Dumbbell,
+  Específicas: Target,
+  Core: Zap,
+  Movilidad: RefreshCw,
+  Preventivo: Activity,
+  Resistencia: TrendingUp,
+};
+
+function TagBibliotecaReal({ color = ds.inkSecondary, solido, children }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", marginLeft: esVariante ? 20 : 0, background: esVariante ? ds.canvas : ds.surface, border: `1px solid ${esVariante ? `${ds.border}88` : ds.border}`, borderRadius: dsR.lg }}>
-      {ejercicio.gif_url ? (
-        <div style={{ position: "relative", width: 40, height: 40, borderRadius: dsR.md, flexShrink: 0, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          {miniaturaTarea(ejercicio.gif_url) && (
-            <img src={miniaturaTarea(ejercicio.gif_url)} alt="" style={{ width: 40, height: 40, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
-          )}
-          {(extractYouTubeId(ejercicio.gif_url) || esVideoDirecto(ejercicio.gif_url)) && (
-            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(ejercicio.gif_url) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
-              <Play size={13} color={miniaturaTarea(ejercicio.gif_url) ? "#fff" : ds.accent} fill={miniaturaTarea(ejercicio.gif_url) ? "#fff" : ds.accent} />
-            </div>
-          )}
-        </div>
+    <span
+      style={{
+        fontFamily: dsF.mono,
+        fontSize: 9,
+        fontWeight: 700,
+        letterSpacing: "0.02em",
+        textTransform: "uppercase",
+        borderRadius: dsR.full,
+        padding: "2px 7px",
+        whiteSpace: "nowrap",
+        color: solido ? color : color,
+        background: solido ? `${color}22` : "transparent",
+        border: solido ? "none" : `1px solid ${ds.border}`,
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+function MiniaturaEjercicioReal({ ejercicio, color, Icono, variantesCount }) {
+  const url = ejercicio.gif_url;
+  const miniatura = url ? miniaturaTarea(url) : null;
+  const tieneVideo = !!url && (extractYouTubeId(url) || esVideoDirecto(url));
+  return (
+    <div
+      style={{
+        position: "relative",
+        aspectRatio: "4 / 3",
+        overflow: "hidden",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: `linear-gradient(135deg, ${color}, ${ds.surfaceRaised})`,
+      }}
+    >
+      {miniatura ? (
+        <img src={miniatura} alt="" style={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
       ) : (
-        <div style={{ width: 40, height: 40, borderRadius: dsR.md, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
-          —
+        <Icono size={30} color="#fff" style={{ opacity: 0.5 }} />
+      )}
+      {tieneVideo && (
+        <div
+          style={{
+            position: "absolute",
+            left: 10,
+            bottom: 10,
+            width: 22,
+            height: 22,
+            borderRadius: dsR.full,
+            background: "rgba(10,18,32,0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <Play size={10} color="#fff" fill="#fff" />
         </div>
       )}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {esVariante && <span style={{ color: ds.inkMuted, fontSize: 12 }}>↳</span>}
-          <div style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink }}>{ejercicio.nombre}</div>
+      {variantesCount > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            left: 10,
+            top: 10,
+            fontFamily: dsF.mono,
+            fontSize: 9,
+            fontWeight: 700,
+            padding: "3px 7px",
+            borderRadius: dsR.full,
+            background: "rgba(10,18,32,0.6)",
+            color: "#fff",
+          }}
+        >
+          {variantesCount} variante{variantesCount > 1 ? "s" : ""}
         </div>
-        <div style={{ display: "flex", gap: 5, marginTop: 4, flexWrap: "wrap", alignItems: "center" }}>
-          {esVariante && (
-            <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 5px" }}>VARIANTE</span>
-          )}
-          {nombreCategoria && (
-            <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 5px" }}>{nombreCategoria}</span>
-          )}
-          {(ejercicio.tags_descriptivos || []).map((t) => (
-            <span key={t} style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 5px" }}>
-              {t}
-            </span>
-          ))}
-        </div>
-      </div>
-      {!esVariante && onCrearVariante && (
-        <button onClick={onCrearVariante} style={btnIconoReal} title="Crear variante de este ejercicio">
-          +V
-        </button>
       )}
-      <button onClick={onEditar} style={btnIconoReal} title="Editar ejercicio">
-        <Pencil size={13} />
-      </button>
-      <button onClick={onEliminar} style={btnIconoReal} title="Eliminar ejercicio">
-        ×
-      </button>
     </div>
   );
 }
 
-function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, ejercicioEditar, matrizPreset, error }) {
+// Tarjeta de familia: la matriz arriba con su miniatura y etiquetas (como
+// en el mockup), y si tiene variantes, sus nombres justo debajo dentro de
+// la misma tarjeta — así la rejilla visual del mockup convive con el
+// agrupamiento matriz+variantes que ya funcionaba en la lista real.
+function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, onCrearVariante }) {
+  const color = BLOQUE_COLOR_REAL[matriz.bloque] || ds.chart2;
+  const Icono = BLOQUE_ICONO_REAL[matriz.bloque] || Dumbbell;
+  const nombreCategoria = categorias.find((c) => c.id === matriz.categoria_preventiva_id)?.nombre;
+  const botonReset = { display: "block", width: "100%", background: "transparent", border: "none", margin: 0, padding: 0, font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer" };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, overflow: "hidden", boxShadow: dsSh.elevation1 }}>
+      <button onClick={() => onEditar(matriz)} style={botonReset} title="Editar ejercicio">
+        <MiniaturaEjercicioReal ejercicio={matriz} color={color} Icono={Icono} variantesCount={variantes.length} />
+        <div style={{ padding: "10px 12px 9px" }}>
+          <div style={{ fontFamily: dsF.sans, fontSize: 13, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>{matriz.nombre}</div>
+          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+            <TagBibliotecaReal color={color} solido>
+              {matriz.bloque}
+            </TagBibliotecaReal>
+            {(matriz.tags_descriptivos || []).map((t) => (
+              <TagBibliotecaReal key={t}>{t}</TagBibliotecaReal>
+            ))}
+            {nombreCategoria && (
+              <TagBibliotecaReal color={ds.accent} solido>
+                {nombreCategoria}
+              </TagBibliotecaReal>
+            )}
+          </div>
+        </div>
+      </button>
+      {variantes.length > 0 && (
+        <div style={{ borderTop: `1px solid ${ds.border}`, padding: "4px 6px" }}>
+          {variantes.map((v) => (
+            <button key={v.id} onClick={() => onEditar(v)} style={{ ...botonReset, display: "flex", alignItems: "center", gap: 6, padding: "6px 6px", borderRadius: dsR.sm, fontSize: 11.5, color: ds.inkSecondary }} title="Editar variante">
+              <span style={{ color: ds.inkMuted, flexShrink: 0 }}>↳</span>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.nombre}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {onCrearVariante && (
+        <button
+          onClick={onCrearVariante}
+          style={{
+            ...botonReset,
+            textAlign: "center",
+            padding: "7px 8px",
+            fontSize: 11,
+            fontWeight: 700,
+            color: ds.accent,
+            borderTop: `1px solid ${ds.border}`,
+          }}
+        >
+          + Añadir variante
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, ejercicioEditar, matrizPreset, error, onEliminar, errorEliminando }) {
   // matrizPreset: cuando se abre desde el botón "+V" de un ejercicio ya
   // existente, trae el bloque/categoría/etiquetas de partida ya rellenos —
   // el nombre y el vídeo siguen siendo del todo propios de la variante.
@@ -8975,6 +9418,8 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
     })
   );
   const [guardando, setGuardando] = useState(false);
+  const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
+  const [borrando, setBorrando] = useState(false);
 
   const esPreventivo = bloque === "Preventivo";
   // Selección única: con "Global" cubriendo el caso de superior+inferior a
@@ -9138,6 +9583,35 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
             <Plus size={13} /> Añadir variante
           </button>
         </div>
+        {onEliminar && (
+          <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
+            {errorEliminando && <div style={{ color: ds.danger, fontSize: 12 }}>{errorEliminando}</div>}
+            {confirmandoBorrado ? (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, color: ds.inkSecondary }}>¿Eliminar este ejercicio? No se puede deshacer.</span>
+                <DsButton
+                  variant="danger"
+                  size="sm"
+                  disabled={borrando}
+                  onClick={async () => {
+                    setBorrando(true);
+                    await onEliminar();
+                    setBorrando(false);
+                  }}
+                >
+                  {borrando ? "Eliminando..." : "Sí, eliminar"}
+                </DsButton>
+                <DsButton variant="secondary" size="sm" onClick={() => setConfirmandoBorrado(false)}>
+                  Cancelar
+                </DsButton>
+              </div>
+            ) : (
+              <DsButton variant="danger" size="sm" onClick={() => setConfirmandoBorrado(true)} style={{ alignSelf: "flex-start" }}>
+                Eliminar ejercicio
+              </DsButton>
+            )}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
           {error && <div style={{ color: ds.danger, fontSize: 12, flex: 1, alignSelf: "center" }}>{error}</div>}
           <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
@@ -9230,8 +9704,10 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [bloqueFiltro, setBloqueFiltro] = useState("Todos");
+  const [zonaFiltro, setZonaFiltro] = useState("Todas");
   const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
   const [busqueda, setBusqueda] = useState("");
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [ejercicioEditando, setEjercicioEditando] = useState(null);
   const [matrizParaVariante, setMatrizParaVariante] = useState(null);
@@ -9241,10 +9717,18 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
 
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
+  const hayFiltrosActivos = bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || categoriaFiltro !== "Todas";
+
   const visibles = ejercicios
     .filter((e) => (bloqueFiltro === "Todos" ? true : e.bloque === bloqueFiltro))
+    .filter((e) => (zonaFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(zonaFiltro)))
     .filter((e) => (categoriaFiltro === "Todas" ? true : e.categoria_preventiva_id === categoriaFiltro))
     .filter((e) => (e.nombre || "").toLowerCase().includes(busqueda.toLowerCase()));
+
+  const abrirEdicion = (ej) => {
+    setEjercicioEditando(ej);
+    setPanelAbierto(true);
+  };
 
   const guardarEjercicio = async (datos) => {
     setErrorGuardado("");
@@ -9271,10 +9755,11 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
       // directamente en la hoja de cálculo sin id. Quitarlo aquí solo lo
       // ocultaría un instante: en la próxima carga volvería a aparecer.
       setErrorBorrado('Este ejercicio no tiene un identificador válido en la hoja de cálculo, así que no se puede borrar desde aquí — bórralo directamente en la pestaña "ejercicios" de la Sheet.');
-      return;
+      return false;
     }
     const ok = await saveEjercicios(ejercicios.filter((e) => e.id !== id));
     if (!ok) setErrorBorrado("No se pudo borrar. Comprueba tu conexión e inténtalo de nuevo.");
+    return ok;
   };
 
   const reordenarCategoria = async (listaOrdenada) => {
@@ -9324,123 +9809,147 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             +
           </button>
         </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-          {[
-            { id: "lista", label: "Lista y filtros" },
-            { id: "rotacion", label: "Orden de rotación" },
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setVista(v.id)}
-              style={{
-                fontSize: 12.5,
-                padding: "7px 12px",
-                borderRadius: dsR.md,
-                border: `1px solid ${vista === v.id ? ds.accent : ds.border}`,
-                background: vista === v.id ? ds.accentSubtle : "transparent",
-                color: vista === v.id ? ds.accent : ds.inkSecondary,
-                cursor: "pointer",
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 16, width: 220 }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VISTA</span>
+          <select value={vista} onChange={(e) => setVista(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+            <option value="lista">Lista y filtros</option>
+            <option value="rotacion">Orden de rotación</option>
+          </select>
+        </label>
         {vista === "lista" ? (
           <>
-            <DsInput
-              value={busqueda}
-              onChange={(e) => setBusqueda(e.target.value)}
-              placeholder="Buscar ejercicio..."
-              style={{ marginBottom: 10 }}
-            />
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-              <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>FILTRAR POR BLOQUE</span>
-              <select value={bloqueFiltro} onChange={(e) => setBloqueFiltro(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
-                <option value="Todos">Todos</option>
-                {BLOQUES_BIBLIOTECA.map((b) => (
-                  <option key={b} value={b}>
-                    {b}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-              <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>FILTRAR POR CATEGORÍA PREVENTIVA</span>
-              <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
-                <option value="Todas">Todas</option>
-                {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
-                  <optgroup key={tipo} label={tipo}>
-                    {categorias
-                      .filter((c) => c.tipo_tejido === tipo)
-                      .map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {c.nombre}
-                        </option>
-                      ))}
-                  </optgroup>
-                ))}
-              </select>
-            </label>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px" }}>{errorBorrado}</div>}
-              {(() => {
-                // Agrupa matriz + variantes para que la lista deje de ser 60
-                // ejercicios sueltos y pase a ser familias de movimiento: la
-                // matriz arriba, sus variantes plegadas justo debajo. Una
-                // familia se muestra si la matriz o cualquiera de sus
-                // variantes pasa los filtros/búsqueda actuales.
-                const idsVisibles = new Set(visibles.map((e) => e.id));
-                const idsExistentes = new Set(ejercicios.map((e) => e.id));
-                const variantesPorMatriz = {};
-                ejercicios.forEach((e) => {
-                  if (e.ejercicio_base_id && idsExistentes.has(e.ejercicio_base_id)) {
-                    (variantesPorMatriz[e.ejercicio_base_id] = variantesPorMatriz[e.ejercicio_base_id] || []).push(e);
-                  }
-                });
-                const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
-                const familias = matrices
-                  .map((m) => ({ matriz: m, variantes: variantesPorMatriz[m.id] || [] }))
-                  .filter((f) => idsVisibles.has(f.matriz.id) || f.variantes.some((v) => idsVisibles.has(v.id)));
-
-                if (familias.length === 0) {
-                  return <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, position: "relative" }}>
+              <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar ejercicio..." style={{ flex: 1 }} />
+              <button
+                onClick={() => setFiltrosAbiertos((v) => !v)}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                  fontFamily: dsF.sans,
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  padding: "0 14px",
+                  borderRadius: dsR.md,
+                  border: `1px solid ${filtrosAbiertos || hayFiltrosActivos ? ds.accent : ds.border}`,
+                  background: filtrosAbiertos || hayFiltrosActivos ? ds.accentSubtle : "transparent",
+                  color: filtrosAbiertos || hayFiltrosActivos ? ds.accent : ds.inkSecondary,
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                Filtros{hayFiltrosActivos ? " •" : ""}
+              </button>
+              {filtrosAbiertos && (
+                <>
+                  <div onClick={() => setFiltrosAbiertos(false)} style={{ position: "fixed", inset: 0, zIndex: 9 }} />
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      right: 0,
+                      zIndex: 10,
+                      width: 260,
+                      maxHeight: "min(70vh, 520px)",
+                      overflowY: "auto",
+                      background: ds.surfaceRaised,
+                      border: `1px solid ${ds.borderSoft}`,
+                      borderRadius: dsR.lg,
+                      boxShadow: dsSh.elevation3,
+                      padding: 14,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 12,
+                    }}
+                  >
+                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Bloque</span>
+                      <select value={bloqueFiltro} onChange={(e) => setBloqueFiltro(e.target.value)} style={campoSelectReal()}>
+                        <option value="Todos">Todos</option>
+                        {BLOQUES_BIBLIOTECA.map((b) => (
+                          <option key={b} value={b}>
+                            {b}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Zona corporal</span>
+                      <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} style={campoSelectReal()}>
+                        <option value="Todas">Todas</option>
+                        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Categoría preventiva <span style={{ color: ds.inkMuted, textTransform: "none", letterSpacing: 0 }}>(solo Preventivo)</span>
+                      </span>
+                      <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} style={campoSelectReal()}>
+                        <option value="Todas">Todas</option>
+                        {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
+                          <optgroup key={tipo} label={tipo}>
+                            {categorias
+                              .filter((c) => c.tipo_tejido === tipo)
+                              .map((c) => (
+                                <option key={c.id} value={c.id}>
+                                  {c.nombre}
+                                </option>
+                              ))}
+                          </optgroup>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                </>
+              )}
+            </div>
+            {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 12 }}>{errorBorrado}</div>}
+            {(() => {
+              // Agrupa matriz + variantes para que la rejilla deje de ser
+              // ejercicios sueltos y pase a ser familias de movimiento: la
+              // matriz arriba con su miniatura, sus variantes plegadas justo
+              // debajo dentro de la misma tarjeta. Una familia se muestra si
+              // la matriz o cualquiera de sus variantes pasa los
+              // filtros/búsqueda actuales.
+              const idsVisibles = new Set(visibles.map((e) => e.id));
+              const idsExistentes = new Set(ejercicios.map((e) => e.id));
+              const variantesPorMatriz = {};
+              ejercicios.forEach((e) => {
+                if (e.ejercicio_base_id && idsExistentes.has(e.ejercicio_base_id)) {
+                  (variantesPorMatriz[e.ejercicio_base_id] = variantesPorMatriz[e.ejercicio_base_id] || []).push(e);
                 }
-                return familias.map(({ matriz, variantes }) => (
-                  <React.Fragment key={matriz.id}>
-                    <TarjetaEjercicioReal
-                      ejercicio={matriz}
+              });
+              const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
+              const familias = matrices
+                .map((m) => ({ matriz: m, variantes: (variantesPorMatriz[m.id] || []).filter((v) => idsVisibles.has(v.id)) }))
+                .filter((f) => idsVisibles.has(f.matriz.id) || (variantesPorMatriz[f.matriz.id] || []).some((v) => idsVisibles.has(v.id)));
+
+              if (familias.length === 0) {
+                return <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
+              }
+              return (
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+                  {familias.map(({ matriz, variantes }) => (
+                    <TarjetaFamiliaEjercicioReal
+                      key={matriz.id}
+                      matriz={matriz}
+                      variantes={variantes}
                       categorias={categorias}
-                      onEditar={() => {
-                        setEjercicioEditando(matriz);
-                        setPanelAbierto(true);
-                      }}
-                      onEliminar={() => eliminarEjercicio(matriz.id)}
+                      onEditar={abrirEdicion}
                       onCrearVariante={() => {
                         setMatrizParaVariante(matriz);
                         setEjercicioEditando(null);
                         setPanelAbierto(true);
                       }}
                     />
-                    {variantes
-                      .filter((v) => idsVisibles.has(v.id))
-                      .map((v) => (
-                        <TarjetaEjercicioReal
-                          key={v.id}
-                          ejercicio={v}
-                          categorias={categorias}
-                          esVariante
-                          onEditar={() => {
-                            setEjercicioEditando(v);
-                            setPanelAbierto(true);
-                          }}
-                          onEliminar={() => eliminarEjercicio(v.id)}
-                        />
-                      ))}
-                  </React.Fragment>
-                ));
-              })()}
-            </div>
+                  ))}
+                </div>
+              );
+            })()}
           </>
         ) : (
           <VistaOrdenRotacionReal ejercicios={ejercicios} categorias={categorias} onReordenar={reordenarCategoria} />
@@ -9454,10 +9963,23 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
           matrizPreset={matrizParaVariante}
           onGuardar={guardarEjercicio}
           error={errorGuardado}
+          errorEliminando={errorBorrado}
+          onEliminar={
+            ejercicioEditando
+              ? async () => {
+                  const ok = await eliminarEjercicio(ejercicioEditando.id);
+                  if (ok) {
+                    setPanelAbierto(false);
+                    setEjercicioEditando(null);
+                  }
+                }
+              : undefined
+          }
           onCerrar={() => {
             setPanelAbierto(false);
             setEjercicioEditando(null);
             setMatrizParaVariante(null);
+            setErrorBorrado("");
           }}
         />
       )}
@@ -9821,31 +10343,173 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   );
 }
 
-const TIPOS_RESISTENCIA_CARDIO = [
-  { id: "continuo", label: "Continuo" },
-  { id: "hiit", label: "HIIT" },
-  { id: "rsa", label: "RSA" },
-];
+// Línea de indicador bajo un campo numérico de Resistencia — SIEMPRE
+// reserva su alto (minHeight), esté vacía o no, para que un campo con
+// semáforo/diferencia y otro sin ninguno de los dos midan lo mismo fila
+// tras fila (réplica del criterio de `.ind{min-height:11px}` del mockup,
+// con los tokens de color ya existentes en ds, no un sistema nuevo).
+function IndicadorResistencia({ resultado }) {
+  return (
+    <span
+      style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 700, letterSpacing: "0.02em", minHeight: 11, display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", color: resultado ? resultado.color : "transparent" }}
+      title={resultado?.titulo || undefined}
+    >
+      {resultado ? resultado.texto : " "}
+    </span>
+  );
+}
 
-// Un número + un selector de MIN/SEG al lado — se repite para tiempo y para
-// recuperación en los tres tipos de trabajo de Resistencia.
-function CampoTiempoConUnidadDiseno({ etiqueta, valor, unidad, onCambiarValor, onCambiarUnidad, w }) {
+// Un número + su indicador reservado debajo — la unidad de campo básica de
+// Resistencia (equivalente a campoNum() en el mockup).
+function CampoNumResistencia({ etiqueta, valor, onCambiar, resultado, w }) {
+  return (
+    <CampoEtiquetadoDiseno etiqueta={etiqueta} w={w}>
+      <input value={valor ?? ""} onChange={(e) => onCambiar(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
+      <IndicadorResistencia resultado={resultado} />
+    </CampoEtiquetadoDiseno>
+  );
+}
+
+// Un número + un selector de MIN/SEG al lado + indicador reservado debajo —
+// se repite para tiempo y para recuperación en los tres tipos de trabajo de
+// Resistencia.
+function CampoTiempoConUnidadDiseno({ etiqueta, valor, unidad, onCambiarValor, onCambiarUnidad, resultado, w }) {
   return (
     <CampoEtiquetadoDiseno etiqueta={etiqueta} w={w}>
       <div style={{ display: "flex", gap: 4 }}>
-        <input value={valor} onChange={(e) => onCambiarValor(e.target.value)} placeholder="—" style={{ ...campoStyleDiseno("100%"), flex: 1, minWidth: 0 }} />
+        <input value={valor ?? ""} onChange={(e) => onCambiarValor(e.target.value)} placeholder="—" style={{ ...campoStyleDiseno("100%"), flex: 1, minWidth: 0 }} />
         <select value={unidad || "seg"} onChange={(e) => onCambiarUnidad(e.target.value)} style={{ background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.inkSecondary, fontSize: 10.5, padding: "0 3px" }}>
           <option value="min">min</option>
           <option value="seg">seg</option>
         </select>
       </div>
+      <IndicadorResistencia resultado={resultado} />
     </CampoEtiquetadoDiseno>
   );
 }
 
-function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar }) {
+// Ficha de jugador: traduce el % del campo de intensidad a algo ejecutable
+// (un pulso o un ritmo), con el test real del jugador si existe o la
+// estimación poblacional si no. Oculta cuando !fichaResistenciaAplica
+// (RPE en HIIT/RSA sin impacto: el propio campo ya es la instrucción, no
+// hay nada que traducir). jugadorReferencia es null cuando la sesión no
+// tiene un único jugador destinatario claro (todo el equipo o varios
+// jugadores a la vez) — en ese caso se usa siempre la estimación
+// poblacional, porque no hay un jugador único al que anclar el número.
+function FichaJugadorResistencia({ tipo, modalidad, intensidad, distancia, jugadorReferencia }) {
+  if (!fichaResistenciaAplica(tipo, modalidad)) return null;
+  const metric = tipo === "continuo" ? "fcMax" : "vam";
+  const ref = referenciaResistenciaJugador(metric, jugadorReferencia);
+  const etiqueta = metric === "fcMax" ? "FCmáx" : "VAM";
+  const unidad = metric === "fcMax" ? "ppm" : "km/h";
+  const v = Number(intensidad);
+  const sinValor = intensidad === "" || intensidad == null || isNaN(v);
+  const aviso = metric === "fcMax" ? avisoTransferenciaResistencia(modalidad) : "";
+  const objetivo = !sinValor ? objetivoJugadorResistencia(tipo, intensidad, distancia, jugadorReferencia) : "";
+  const sinTest = !ref.real;
+  return (
+    <div
+      style={{
+        marginTop: 2,
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        flexWrap: "wrap",
+        fontSize: 11,
+        padding: "8px 10px",
+        borderRadius: 8,
+        background: sinTest ? `${ds.warning}22` : ds.surface,
+        border: sinTest ? `1px solid ${ds.warning}` : `1px dashed ${ds.borderSoft}`,
+      }}
+    >
+      <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.03em", color: sinTest ? ds.warning : ds.inkMuted, textTransform: "uppercase", flexShrink: 0 }}>
+        {sinTest ? "Sin test de campo" : jugadorReferencia.name}
+      </span>
+      <span style={{ color: ds.inkSecondary, flex: "1 1 200px" }}>
+        {sinTest ? (
+          <>
+            {jugadorReferencia ? `${jugadorReferencia.name} no tiene ${etiqueta} registrada` : "Sesión sin un único jugador destinatario"} — se usa la {ESTIMACION_POBLACIONAL_RESISTENCIA[metric].fuente}: ≈{ref.valor} {unidad}
+            {objetivo && (
+              <>
+                {" "}
+                → hoy a {v}%: <b style={{ color: ds.ink }}>{objetivo}</b>
+              </>
+            )}
+            . Pide un VAM-Eval, 30-15 IFT o Course Navette para un objetivo real, no aproximado.{aviso}
+          </>
+        ) : (
+          <>
+            {etiqueta} {ref.valor} {unidad}
+            {ref.protocolo ? ` (${ref.protocolo}${ref.fecha ? `, ${ref.fecha}` : ""})` : ""}
+            {objetivo && (
+              <>
+                {" "}
+                → hoy a {v}%: <b style={{ color: ds.ink }}>{objetivo}</b>
+              </>
+            )}
+            {aviso}
+          </>
+        )}
+      </span>
+    </div>
+  );
+}
+
+// Tarea de Resistencia. Antes: un select libre de "tipo de trabajo"
+// (Continuo/HIIT/RSA) sin ninguna guía. Ahora: se elige una CAPACIDAD
+// OBJETIVO (R0-R6) con su pauta recomendada editable/aplicable — la
+// estructura (Continuo/HIIT/RSA) la deriva la capacidad elegida, salvo que
+// el entrenador la fuerce manualmente a propósito (caso excepcional). La
+// MODALIDAD decide qué métrica sirve de referencia: FCmáx/VAM en Carrera,
+// esfuerzo percibido (RPE) en Bici/Elíptica/Piscina/Otro para HIIT y RSA
+// (Continuo sigue siendo FCmáx en cualquier modalidad — el pulso es válido
+// pedalear o nadando, la VAM no). Traslado fiel de
+// mockup_diseno_sesion.html (campoResistencia, renderCamposHtml,
+// cambiarCapacidadResistencia, cambiarEstructuraManual, cambiarModalidad,
+// actualizarIndicadores) a props/estado de React reales.
+function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar, jugadorReferencia }) {
+  const [forzandoEstructura, setForzandoEstructura] = useState(false);
   const tipo = tarea.tipoResistenciaCardio || "";
+  const modalidad = tarea.modalidad || "carrera";
+  const sinImpacto = modalidad !== "carrera";
+  const capacidad = tarea.capacidad || "";
+  const capacidadObj = capacidad ? CAPACIDADES_RESISTENCIA[capacidad] : null;
   const set = (campo) => (valor) => onCambiar({ ...tarea, [campo]: valor });
+  const camposVacios = { bloques: "", series: "", intervalos: "", tiempo: "", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "" };
+
+  const cambiarCapacidad = (capId) => {
+    const c = CAPACIDADES_RESISTENCIA[capId];
+    setForzandoEstructura(false);
+    onCambiar({ ...tarea, ...camposVacios, capacidad: capId, tipoResistenciaCardio: c.tipo, estructuraManual: false });
+  };
+  const cambiarModalidadTarea = (nuevaModalidad) => {
+    onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad });
+  };
+  const cambiarEstructuraManual = (nuevoTipo) => {
+    setForzandoEstructura(false);
+    onCambiar({ ...tarea, ...camposVacios, tipoResistenciaCardio: nuevoTipo, estructuraManual: nuevoTipo !== capacidadObj?.tipo });
+  };
+  const aplicarPautaSugerida = () => {
+    if (!capacidadObj) return;
+    const s = capacidadObj.sugerido || {};
+    onCambiar({
+      ...tarea,
+      ...camposVacios,
+      tipoResistenciaCardio: capacidadObj.tipo,
+      estructuraManual: false,
+      bloques: s.bloques ?? "",
+      series: s.series ?? "",
+      intervalos: s.intervalos ?? "",
+      tiempo: s.tiempo ?? "",
+      tiempoUnidad: s.tiempoUnidad || tarea.tiempoUnidad || "seg",
+      intensidad: s.intensidad ?? "",
+      distancia: s.distancia ?? "",
+      recuperacion: s.recuperacion ?? "",
+      recuperacionUnidad: s.recuperacionUnidad || tarea.recuperacionUnidad || "seg",
+    });
+  };
+
+  const ind = (key) => evaluarIndicadorResistencia(key, tarea[key], capacidadObj);
 
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
@@ -9871,69 +10535,147 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 6 }}>
-        {TIPOS_RESISTENCIA_CARDIO.map((op) => (
-          <button
-            key={op.id}
-            onClick={() => onCambiar({ ...tarea, tipoResistenciaCardio: op.id })}
-            style={{
-              flex: 1,
-              fontSize: 12.5,
-              fontWeight: 600,
-              padding: "8px 0",
-              borderRadius: 7,
-              border: `1px solid ${tipo === op.id ? ds.accent : ds.border}`,
-              background: tipo === op.id ? ds.accentSubtle : "transparent",
-              color: tipo === op.id ? ds.accent : ds.inkSecondary,
-              cursor: "pointer",
-            }}
-          >
-            {op.label}
-          </button>
-        ))}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>MODALIDAD</span>
+        <select
+          value={modalidad}
+          onChange={(e) => cambiarModalidadTarea(e.target.value)}
+          style={{ width: 180, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+        >
+          {Object.entries(MODALIDADES_RESISTENCIA).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v}
+            </option>
+          ))}
+        </select>
       </div>
 
-      {!tipo && <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Elige el tipo de trabajo para configurar los campos.</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>CAPACIDAD OBJETIVO</span>
+        <select
+          value={capacidad}
+          onChange={(e) => cambiarCapacidad(e.target.value)}
+          style={{ width: 280, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+        >
+          <option value="" disabled>
+            Elige la capacidad a trabajar…
+          </option>
+          {Object.entries(CAPACIDADES_RESISTENCIA).map(([k, v]) => (
+            <option key={k} value={k}>
+              {v.nombre}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      {tipo === "continuo" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <CampoEtiquetadoDiseno etiqueta="SERIES" w={60}>
-            <input value={tarea.series} onChange={(e) => set("series")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} w={100} />
-          <CampoEtiquetadoDiseno etiqueta="INTENSIDAD (% FCMÁX)" w={148}>
-            <input value={tarea.intensidad} onChange={(e) => set("intensidad")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
-        </div>
-      )}
+      {!capacidadObj && <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Elige la capacidad objetivo para ver la pauta recomendada y configurar los campos.</div>}
 
-      {tipo === "hiit" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <CampoEtiquetadoDiseno etiqueta="BLOQUES" w={60}>
-            <input value={tarea.bloques} onChange={(e) => set("bloques")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoEtiquetadoDiseno etiqueta="INTERVALOS" w={72}>
-            <input value={tarea.intervalos} onChange={(e) => set("intervalos")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} w={100} />
-          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
-        </div>
-      )}
+      {capacidadObj && (
+        <>
+          <div style={{ background: ds.surface, border: `1px solid ${ds.borderSoft}`, borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 5 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <span
+                style={{
+                  fontFamily: dsF.mono,
+                  fontSize: 9,
+                  letterSpacing: "0.04em",
+                  color: capacidadObj.alerta ? ds.warning : ds.accent,
+                  background: capacidadObj.alerta ? `${ds.warning}22` : ds.accentSubtle,
+                  border: `1px solid ${capacidadObj.alerta ? ds.warning : ds.accentBorderSubtle}`,
+                  borderRadius: 5,
+                  padding: "3px 7px",
+                }}
+              >
+                {capacidadObj.alerta ? "⚠ Zona gris — usar con criterio" : "Pauta recomendada"}
+              </span>
+              <button
+                type="button"
+                onClick={aplicarPautaSugerida}
+                style={{ fontFamily: dsF.sans, fontSize: 10.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 9px", cursor: "pointer" }}
+              >
+                Aplicar pauta sugerida
+              </button>
+            </div>
+            <div style={{ fontFamily: dsF.sans, fontSize: 12, fontWeight: 600, color: ds.ink }}>{capacidadObj.metodo}</div>
+            <div style={{ fontFamily: dsF.sans, fontSize: 12, fontWeight: 600, color: ds.ink }}>
+              {capacidadObj.rango}
+              {capacidadObj.lactato !== "—" ? ` · Lactato ${capacidadObj.lactato}` : ""}
+            </div>
+            <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>{capacidadObj.nota}</div>
+          </div>
 
-      {tipo === "rsa" && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <CampoEtiquetadoDiseno etiqueta="BLOQUES" w={60}>
-            <input value={tarea.bloques} onChange={(e) => set("bloques")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoEtiquetadoDiseno etiqueta="SERIES" w={60}>
-            <input value={tarea.series} onChange={(e) => set("series")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoEtiquetadoDiseno etiqueta="DISTANCIA (M)" w={104}>
-            <input value={tarea.distancia} onChange={(e) => set("distancia")(e.target.value)} placeholder="—" style={campoStyleDiseno("100%")} />
-          </CampoEtiquetadoDiseno>
-          <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} w={100} />
-        </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>ESTRUCTURA</span>
+            {forzandoEstructura ? (
+              <select
+                value={tipo}
+                onChange={(e) => cambiarEstructuraManual(e.target.value)}
+                style={{ width: 150, fontFamily: dsF.sans, fontSize: 11, fontWeight: 600, padding: "5px 8px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+              >
+                {["continuo", "hiit", "rsa"].map((t) => (
+                  <option key={t} value={t}>
+                    {NOMBRES_TIPO_TRABAJO_RESISTENCIA[t]}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span style={{ fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, color: ds.ink, background: ds.surface, border: `1px solid ${ds.borderSoft}`, borderRadius: 6, padding: "3px 9px" }}>
+                {NOMBRES_TIPO_TRABAJO_RESISTENCIA[tipo]}
+                {tarea.estructuraManual ? " · forzado manualmente" : ""}
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={() => setForzandoEstructura((v) => !v)}
+              style={{ marginLeft: "auto", fontFamily: dsF.sans, fontSize: 10, color: ds.inkMuted, background: "transparent", border: "none", textDecoration: "underline dotted", textUnderlineOffset: 2, cursor: "pointer", padding: 0 }}
+            >
+              {forzandoEstructura ? "cancelar" : "Forzar estructura manual"}
+            </button>
+          </div>
+
+          {tipo === "continuo" && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <CampoNumResistencia etiqueta="SERIES" valor={tarea.series} onCambiar={set("series")} resultado={ind("series")} w={60} />
+              <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} resultado={ind("tiempo")} w={100} />
+              <CampoNumResistencia etiqueta={ETQ_INTENSIDAD_RESISTENCIA.continuo} valor={tarea.intensidad} onCambiar={set("intensidad")} resultado={ind("intensidad")} w={148} />
+              <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} resultado={ind("recuperacion")} w={100} />
+            </div>
+          )}
+
+          {tipo === "hiit" && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <CampoNumResistencia etiqueta="BLOQUES" valor={tarea.bloques} onCambiar={set("bloques")} resultado={ind("bloques")} w={60} />
+              <CampoNumResistencia etiqueta="INTERVALOS" valor={tarea.intervalos} onCambiar={set("intervalos")} resultado={ind("intervalos")} w={72} />
+              <CampoTiempoConUnidadDiseno etiqueta="TIEMPO" valor={tarea.tiempo} unidad={tarea.tiempoUnidad} onCambiarValor={set("tiempo")} onCambiarUnidad={set("tiempoUnidad")} resultado={ind("tiempo")} w={100} />
+              {sinImpacto ? (
+                <CampoNumResistencia etiqueta="ESFUERZO (RPE 0-10)" valor={tarea.rpe} onCambiar={set("rpe")} resultado={ind("rpe")} w={148} />
+              ) : (
+                <CampoNumResistencia etiqueta={ETQ_INTENSIDAD_RESISTENCIA.hiit} valor={tarea.intensidad} onCambiar={set("intensidad")} resultado={ind("intensidad")} w={148} />
+              )}
+              <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} resultado={ind("recuperacion")} w={100} />
+            </div>
+          )}
+
+          {tipo === "rsa" && (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <CampoNumResistencia etiqueta="BLOQUES" valor={tarea.bloques} onCambiar={set("bloques")} resultado={ind("bloques")} w={60} />
+              <CampoNumResistencia etiqueta="SERIES" valor={tarea.series} onCambiar={set("series")} resultado={ind("series")} w={60} />
+              {sinImpacto ? (
+                <CampoNumResistencia etiqueta="DURACIÓN (SEG)" valor={tarea.duracion} onCambiar={set("duracion")} resultado={ind("duracion")} w={104} />
+              ) : (
+                <CampoNumResistencia etiqueta="DISTANCIA (M)" valor={tarea.distancia} onCambiar={set("distancia")} resultado={ind("distancia")} w={104} />
+              )}
+              {sinImpacto ? (
+                <CampoNumResistencia etiqueta="ESFUERZO (RPE 0-10)" valor={tarea.rpe} onCambiar={set("rpe")} resultado={ind("rpe")} w={148} />
+              ) : (
+                <CampoNumResistencia etiqueta={ETQ_INTENSIDAD_RESISTENCIA.rsa} valor={tarea.intensidad} onCambiar={set("intensidad")} resultado={ind("intensidad")} w={148} />
+              )}
+              <CampoTiempoConUnidadDiseno etiqueta="RECUPERACIÓN" valor={tarea.recuperacion} unidad={tarea.recuperacionUnidad} onCambiarValor={set("recuperacion")} onCambiarUnidad={set("recuperacionUnidad")} resultado={ind("recuperacion")} w={100} />
+            </div>
+          )}
+
+          <FichaJugadorResistencia tipo={tipo} modalidad={modalidad} intensidad={tarea.intensidad} distancia={tarea.distancia} jugadorReferencia={jugadorReferencia} />
+        </>
       )}
 
       <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
@@ -10085,7 +10827,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   );
 }
 
-function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onCambiarCircuito, onEliminarCircuito, referenciasPorEjercicio }) {
+function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjercicioCreado, onAsignarZona, onError, materialesDisponibles, onAgregarMaterial, onCambiarTareas, onCambiarRondas, onCambiarCircuito, onEliminarCircuito, referenciasPorEjercicio, jugadorReferencia }) {
   const tareas = circuito.tareas;
   const rondas = circuito.rondas || 1;
   // 'circuito' (con rondas, se repite en orden — el comportamiento de
@@ -10127,7 +10869,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     }
     const base =
       bloque === "Resistencia"
-        ? { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
+        ? { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
         : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", modoCarga: "rir", pct1rm: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
     onCambiarTareas([...tareas, base]);
   };
@@ -10194,7 +10936,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
           bloque === "Resistencia" ? (
-            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} />
+            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} />
           ) : (
             <FilaTareaReal
               key={t.key}
@@ -10281,15 +11023,32 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
     onCambiar(seleccionados.includes(id) ? seleccionados.filter((x) => x !== id) : [...seleccionados, id]);
   };
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 8 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 8 }}>
       {players.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted, padding: "8px 4px" }}>No hay jugadores para elegir.</div>}
       {players.map((p) => {
         const activo = seleccionados.includes(p.id);
+        const suspendido = p.estado === "suspendido";
         return (
           <div
             key={p.id}
             onClick={() => alternar(p.id)}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 8px", borderRadius: dsR.sm, cursor: "pointer", background: activo ? ds.accentSubtle : "transparent" }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: "9px 10px",
+              borderRadius: dsR.sm,
+              cursor: "pointer",
+              background: activo ? ds.accentSubtle : "transparent",
+              transition: "background-color 120ms ease-out",
+              opacity: suspendido ? 0.65 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (!activo) e.currentTarget.style.background = ds.surfaceRaised;
+            }}
+            onMouseLeave={(e) => {
+              if (!activo) e.currentTarget.style.background = "transparent";
+            }}
           >
             <span
               style={{
@@ -10308,7 +11067,8 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
             >
               {activo ? "✓" : ""}
             </span>
-            <span style={{ fontSize: 13.5, color: ds.ink }}>{p.name}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+            {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
           </div>
         );
       })}
@@ -10350,6 +11110,13 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
+  // Ficha de jugador de la tarea de Resistencia (VAM/FCmáx → ritmo/pulso,
+  // ver FichaJugadorResistencia): solo tiene sentido anclarla a un jugador
+  // concreto cuando la sesión tiene exactamente un destinatario. Con "todo
+  // el equipo" o varios jugadores a la vez no hay un único test al que
+  // referirse, así que se deja en null y el componente usa la estimación
+  // poblacional en su lugar (nunca el test de uno aplicado a todos).
+  const jugadorReferenciaResistencia = targetPlayerIds && targetPlayerIds.length === 1 ? players.find((p) => p.id === targetPlayerIds[0]) || null : null;
   const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
   const [activacionEjercicioId, setActivacionEjercicioId] = useState("");
   const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("");
@@ -10472,7 +11239,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
         // "intervalos/trabajo/descanso" en las columnas genéricas de series/
         // cantidad/rir — se leen igual si no hay resistencia_data, para no
         // perder lo ya diseñado.
-        let resistencia = { tipo: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg" };
+        let resistencia = { tipo: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg" };
         if (t.resistencia_data) {
           try {
             resistencia = { ...resistencia, ...JSON.parse(t.resistencia_data) };
@@ -10499,12 +11266,17 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
           tipoResistenciaCardio: resistencia.tipo,
+          capacidad: resistencia.capacidad,
+          modalidad: resistencia.modalidad,
+          estructuraManual: resistencia.estructuraManual,
           bloques: resistencia.bloques,
           intervalos: resistencia.intervalos,
           tiempo: resistencia.tiempo,
           tiempoUnidad: resistencia.tiempoUnidad,
           intensidad: resistencia.intensidad,
           distancia: resistencia.distancia,
+          duracion: resistencia.duracion,
+          rpe: resistencia.rpe,
           recuperacion: resistencia.recuperacion,
           recuperacionUnidad: resistencia.recuperacionUnidad,
           circuito_id: t.circuito_id || "",
@@ -10661,6 +11433,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
       const serializarResistencia = (t) =>
         JSON.stringify({
           tipo: t.tipoResistenciaCardio || "",
+          capacidad: t.capacidad || "",
+          modalidad: t.modalidad || "carrera",
+          estructuraManual: !!t.estructuraManual,
           bloques: t.bloques || "",
           series: t.series || "",
           intervalos: t.intervalos || "",
@@ -10668,6 +11443,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           tiempoUnidad: t.tiempoUnidad || "",
           intensidad: t.intensidad || "",
           distancia: t.distancia || "",
+          duracion: t.duracion || "",
+          rpe: t.rpe || "",
           recuperacion: t.recuperacion || "",
           recuperacionUnidad: t.recuperacionUnidad || "",
         });
@@ -11163,6 +11940,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         tarea={t}
                         onCambiar={(nuevo) => setTareasResistencia((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                         onEliminar={() => setTareasResistencia((prev) => prev.filter((x) => x.key !== t.key))}
+                        jugadorReferencia={jugadorReferenciaResistencia}
                       />
                     ))}
                     {circuitosResistencia.map((c) => (
@@ -11180,6 +11958,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onCambiarRondas={(r) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
                         onCambiarCircuito={(patch) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
                         onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
+                        jugadorReferencia={jugadorReferenciaResistencia}
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
@@ -11200,7 +11979,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                               return;
                             }
                           }
-                          setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
+                          setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                         }}
                       />
                       <button
@@ -11897,16 +12676,28 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos }) {
   );
 }
 
-// Pestaña "Resumen" de la ficha: adherencia de esta semana y variación de
-// la carga media semanal de ESTE jugador. Mismo criterio de ventana y de
-// "cumplido" que "Quién necesita atención" en DashboardEntrenadorSidebarReal
-// (calcularAdherencia, cargaMedia) — aquí reescrito para un único jugador en
-// vez de para todo el equipo, no es una métrica nueva.
+// Pestaña "Resumen" de la ficha — reorganizada según el mockup de Fase 6
+// (Equipos y usuarios): una tira de 4 indicadores arriba (mismo patrón
+// MiniStat que ya usa el Dashboard del entrenador), la carga media como
+// segunda fila de detalle, y una lista de "Últimos registros" real (mismas
+// sesiones/fechas que ve Historial). Todo con datos que ya existían en la
+// app — no se inventa "próxima sesión" ni "objetivo actual" porque, igual
+// que en el propio mockup, ese dato todavía no tiene un campo real detrás
+// (llegará con Calendario, Fase 6).
+// Racha: reutiliza EXACTAMENTE el mismo criterio de "semana cumplida"
+// (≥80% de adherencia) que Constancia en MiProgresoJugadorReal — no es una
+// métrica nueva, solo se muestra aquí también, para el entrenador.
+// Adherencia vs. equipo: mismo cálculo (misma ventana, mismo criterio de
+// "cumplida") que adherenciaActual en useDatosDashboardEntrenador, aquí
+// reescrito para comparar a ESTE jugador contra la media de todo el equipo
+// activo — reutiliza useEquipoHistory, no trae registros nuevos.
 function ResumenFichaJugadorReal({ jugador }) {
+  const [players, , playersLoaded] = usePlayers();
   const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
   const { loaded: historyLoaded, items } = usePlayerHistory(jugador.id);
+  const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
 
-  if (!progLoaded || !historyLoaded) return <LoadingBlock />;
+  if (!playersLoaded || !progLoaded || !historyLoaded || !equipoLoaded) return <LoadingBlock />;
 
   const hoy = todayStr();
   const lunes = inicioSemanaCalendario(hoy);
@@ -11914,20 +12705,24 @@ function ResumenFichaJugadorReal({ jugador }) {
   const lunesAnterior = sumarDiasFecha(lunes, -7);
   const domingoAnterior = sumarDiasFecha(lunes, -1);
 
-  const fechasConRegistro = new Set(items.map((it) => it.date));
-  const fechasAsignadas = (desde, hasta) => {
-    const fechas = [];
-    sesiones
-      .filter((s) => s.enviada)
-      .forEach((s) => {
-        const incluyeAJugador = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino.includes(jugador.id) : jugador.estado === "activo";
-        if (!incluyeAJugador) return;
-        (s.fechas || []).forEach((f) => {
-          if (f >= desde && f <= hasta) fechas.push(f);
-        });
+  const fechasConRegistro = new Set(items.filter((it) => it.done).map((it) => it.date));
+  // [{fecha, sesion}] — cada fecha ya llegada (<= hoy) en la que este
+  // jugador tenía una sesión enviada asignada, con la sesión completa (para
+  // poder mostrar su nombre en "Últimos registros"). Misma regla de
+  // "incluye a este jugador" que fechasAsignadas de abajo.
+  const asignacionesJugador = [];
+  sesiones
+    .filter((s) => s.enviada)
+    .forEach((s) => {
+      const incluyeAJugador = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino.includes(jugador.id) : jugador.estado === "activo";
+      if (!incluyeAJugador) return;
+      (s.fechas || []).forEach((f) => {
+        if (f <= hoy) asignacionesJugador.push({ fecha: f, sesion: s });
       });
-    return fechas;
-  };
+    });
+  asignacionesJugador.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+
+  const fechasAsignadas = (desde, hasta) => asignacionesJugador.filter((a) => a.fecha >= desde && a.fecha <= hasta).map((a) => a.fecha);
   const calcularAdherencia = (fechas) => {
     if (!fechas.length) return null;
     const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
@@ -11948,25 +12743,116 @@ function ResumenFichaJugadorReal({ jugador }) {
   const cargaAnterior = cargaMedia(lunesAnterior, domingoAnterior);
   const variacionPct = cargaActual != null && cargaAnterior != null && cargaAnterior !== 0 ? ((cargaActual - cargaAnterior) / cargaAnterior) * 100 : null;
 
+  // Racha (semanas cumpliendo el plan) — últimas 8 semanas de calendario,
+  // igual límite superior "hoy" en la semana en curso que adherenciaActual.
+  const N_SEMANAS_HISTORIAL = 8;
+  const historialSemanas = [];
+  for (let i = N_SEMANAS_HISTORIAL - 1; i >= 0; i--) {
+    const inicio = sumarDiasFecha(lunes, -7 * i);
+    const finCalendario = sumarDiasFecha(inicio, 6);
+    const fin = i === 0 ? hoy : finCalendario;
+    historialSemanas.push(calcularAdherencia(fechasAsignadas(inicio, fin)));
+  }
+  let rachaSemanas = 0;
+  for (let i = historialSemanas.length - 1; i >= 0; i--) {
+    if (historialSemanas[i] != null && historialSemanas[i] >= 80) rachaSemanas++;
+    else break;
+  }
+
+  // Última sesión realmente registrada (no solo asignada).
+  const ultimaAsignacionHecha = asignacionesJugador.find((a) => fechasConRegistro.has(a.fecha));
+
+  // Adherencia del equipo activo esta semana — mismo criterio que
+  // useDatosDashboardEntrenador.adherenciaActual, para poder comparar a
+  // este jugador contra su equipo.
+  const activos = players.filter((p) => p.estado === "activo");
+  const registroPorJugadorFecha = new Set(equipoHistory.filter((it) => it.done).map((it) => `${it.jugadorId}::${it.date}`));
+  let ocurrenciasEquipo = 0;
+  let cumplidasEquipo = 0;
+  sesiones
+    .filter((s) => s.enviada)
+    .forEach((s) => {
+      const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : activos.map((p) => p.id);
+      (s.fechas || []).forEach((f) => {
+        if (f < lunes || f > domingo || f > hoy) return;
+        destino.forEach((jugadorId) => {
+          ocurrenciasEquipo++;
+          if (registroPorJugadorFecha.has(`${jugadorId}::${f}`)) cumplidasEquipo++;
+        });
+      });
+    });
+  const adherenciaEquipo = ocurrenciasEquipo ? Math.round((cumplidasEquipo / ocurrenciasEquipo) * 100) : null;
+  const deltaVsEquipo = adherenciaActual != null && adherenciaEquipo != null ? adherenciaActual - adherenciaEquipo : null;
+
+  const ultimosRegistros = asignacionesJugador.slice(0, 4);
+
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10 }}>
-      {adherenciaActual != null ? (
-        <DsStatTile
-          label="Adherencia esta semana"
-          value={`${adherenciaActual}%`}
-          delta={deltaAdherencia != null ? { direction: deltaAdherencia >= 0 ? "up" : "down", label: `${deltaAdherencia > 0 ? "+" : ""}${deltaAdherencia} vs semana pasada` } : undefined}
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+        <MiniStat
+          icon={<TrendingUp size={12} />}
+          label="Adherencia · esta semana"
+          value={adherenciaActual != null ? `${adherenciaActual}%` : "—"}
+          sub={deltaAdherencia != null ? `${deltaAdherencia > 0 ? "+" : ""}${deltaAdherencia} vs sem. pasada` : "sin datos aún"}
+          accent
         />
-      ) : (
-        <DsStatTile label="Adherencia esta semana" value="—" delta={{ direction: "neutral", label: "sin sesiones asignadas aún" }} />
-      )}
-      {variacionPct != null ? (
-        <DsStatTile
-          label="Carga media vs. semana pasada"
-          value={`${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%`}
-          delta={{ direction: variacionPct <= -10 ? "down" : "neutral", label: variacionPct <= -10 ? "caída relevante" : "dentro de lo normal" }}
+        <MiniStat
+          icon={<Zap size={12} />}
+          label="Racha actual"
+          value={`${rachaSemanas} sem.`}
+          sub="cumpliendo el plan"
         />
+        <MiniStat
+          icon={<CalendarClock size={12} />}
+          label="Última sesión"
+          value={ultimaAsignacionHecha ? fmtHaceDias(ultimaAsignacionHecha.fecha).replace(/^./, (c) => c.toUpperCase()) : "—"}
+          sub={ultimaAsignacionHecha ? fmtDateShort(ultimaAsignacionHecha.fecha) : "sin registros aún"}
+        />
+        <MiniStat
+          icon={<Activity size={12} />}
+          label="Adherencia vs. equipo"
+          value={deltaVsEquipo != null ? `${deltaVsEquipo > 0 ? "+" : ""}${deltaVsEquipo} pts` : "—"}
+          sub={adherenciaEquipo != null ? `equipo: ${adherenciaEquipo}%` : "sin datos de equipo"}
+        />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 18 }}>
+        {variacionPct != null ? (
+          <DsStatTile
+            label="Carga media vs. semana pasada"
+            value={`${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%`}
+            delta={{ direction: variacionPct <= -10 ? "down" : "neutral", label: variacionPct <= -10 ? "caída relevante" : "dentro de lo normal" }}
+          />
+        ) : (
+          <DsStatTile label="Carga media vs. semana pasada" value="—" delta={{ direction: "neutral", label: "sin datos suficientes" }} />
+        )}
+      </div>
+
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 10 }}>Últimos registros</div>
+      {ultimosRegistros.length === 0 ? (
+        <div style={{ color: ds.inkMuted, fontSize: 12.5 }}>Todavía no hay sesiones asignadas a {jugador.name}.</div>
       ) : (
-        <DsStatTile label="Carga media vs. semana pasada" value="—" delta={{ direction: "neutral", label: "sin datos suficientes" }} />
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          {ultimosRegistros.map((a, i) => (
+            <div
+              key={`${a.sesion.id}::${a.fecha}`}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "10px 2px",
+                borderBottom: i < ultimosRegistros.length - 1 ? `1px solid ${ds.border}` : "none",
+                fontSize: 12.5,
+              }}
+            >
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, width: 82, flexShrink: 0 }}>{fmtDateShort(a.fecha)}</span>
+              <span style={{ flex: 1, minWidth: 0, color: ds.ink, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {a.sesion.nombre || a.sesion.objetivo || "Sesión"}
+              </span>
+              <DsBadge tone={fechasConRegistro.has(a.fecha) ? "success" : "danger"}>{fechasConRegistro.has(a.fecha) ? "Realizada" : "No realizada"}</DsBadge>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -12411,47 +13297,47 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           ← Volver a Usuarios
         </button>
         <CabeceraFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} />
-        <div style={{ display: "flex", gap: 6, margin: "16px 0 14px" }}>
-          {[
-            { id: "resumen", label: "Resumen" },
-            { id: "historial", label: "Historial" },
-            { id: "cmj", label: "CMJ" },
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setPestana(v.id)}
-              style={{
-                fontSize: 12.5,
-                padding: "7px 12px",
-                borderRadius: dsR.md,
-                border: `1px solid ${pestana === v.id ? ds.accent : ds.border}`,
-                background: pestana === v.id ? ds.accentSubtle : "transparent",
-                color: pestana === v.id ? ds.accent : ds.inkSecondary,
-                cursor: "pointer",
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
+        {/* Rail de navegación de la ficha — mismo patrón que el mockup de
+            Fase 6 (Equipos y usuarios): un carril vertical de pestañas en
+            vez de una fila de píldoras, para que quepan más secciones sin
+            amontonarse. Solo lleva las 3 pestañas que ya tienen contenido
+            real (Resumen, Historial, Control de fatiga) — Calendario, Notas
+            y Datos y accesos del mockup todavía no tienen un dato o flujo
+            real detrás en este módulo, así que no se añaden como pestañas
+            vacías. */}
+        <div style={{ display: "flex", gap: 16, margin: "16px 0 0", alignItems: "flex-start" }}>
+          <nav style={{ width: 168, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+            {[
+              { id: "resumen", label: "Resumen", icon: <Home size={14} /> },
+              { id: "historial", label: "Historial", icon: <History size={14} /> },
+              { id: "cmj", label: "Control de fatiga", icon: <Activity size={14} /> },
+            ].map((v) => (
+              <DsNavItem key={v.id} active={pestana === v.id} icon={v.icon} onClick={() => setPestana(v.id)}>
+                {v.label}
+              </DsNavItem>
+            ))}
+          </nav>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {pestana === "resumen" ? (
+              <ResumenFichaJugadorReal jugador={actual} />
+            ) : pestana === "historial" ? (
+              !historialLoaded ? (
+                <LoadingBlock />
+              ) : (
+                <HistorialPorJugador
+                  players={players}
+                  jugadorInicial={actual.id}
+                  tareasById={tareasById}
+                  ejerciciosById={ejerciciosById}
+                  sesionesById={sesionesById}
+                  registros={registros}
+                />
+              )
+            ) : (
+              <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
+            )}
+          </div>
         </div>
-        {pestana === "resumen" ? (
-          <ResumenFichaJugadorReal jugador={actual} />
-        ) : pestana === "historial" ? (
-          !historialLoaded ? (
-            <LoadingBlock />
-          ) : (
-            <HistorialPorJugador
-              players={players}
-              jugadorInicial={actual.id}
-              tareasById={tareasById}
-              ejerciciosById={ejerciciosById}
-              sesionesById={sesionesById}
-              registros={registros}
-            />
-          )
-        ) : (
-          <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
-        )}
       </div>
     </PantallaBase>
   );
