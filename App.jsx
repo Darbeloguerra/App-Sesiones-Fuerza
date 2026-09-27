@@ -3627,7 +3627,22 @@ function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWid
       <GlobalStyles />
       <SidebarEntrenadorReal activo={activo} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
       <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px 48px" }}>
-        <div style={{ maxWidth: 860, margin: "0 auto" }}>{children}</div>
+        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 16 }}>
+            <div style={{ flex: 1, maxWidth: 280, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "6px 12px", color: ds.inkMuted, fontSize: 12 }}>
+              🔍 Buscar jugador, ejercicio...
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+                {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
+              </span>
+              <div style={{ width: 27, height: 27, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
+                <Bell size={13} />
+              </div>
+            </div>
+          </div>
+          {children}
+        </div>
       </div>
     </div>
   );
@@ -3773,13 +3788,23 @@ function useDatosDashboardEntrenador() {
       .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     return regs.slice(-5).map((it) => Number(it.cargaReal));
   };
+  // Nombres de ejercicio + nº de tareas reales de esta semana para la línea
+  // de detalle bajo cada jugador en "Quién necesita atención" (mockup:
+  // "Sentadilla, press banca · 6 tareas") — mismo filtro que cargaMedia
+  // (real, con carga registrada, sin CMJ ni Resistencia) para que la
+  // metadata cuadre exactamente con el % mostrado al lado.
+  const detalleTareasSemanaJugador = (jugadorId) => {
+    const regs = equipoHistory.filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= lunes && it.date <= hoy);
+    const nombres = [...new Set(regs.map((it) => it.name).filter(Boolean))];
+    return { nombresEjercicios: nombres, tareasCount: regs.length };
+  };
   const variaciones = activos
     .map((p) => {
       const actual = cargaMedia(p.id, lunes, hoy);
       const anterior = cargaMedia(p.id, lunesAnterior, domingoAnterior);
       if (actual == null || anterior == null || anterior === 0) return null;
       const pct = ((actual - anterior) / anterior) * 100;
-      return { jugador: p, pct, serieReciente: serieRecienteJugador(p.id) };
+      return { jugador: p, pct, serieReciente: serieRecienteJugador(p.id), ...detalleTareasSemanaJugador(p.id) };
     })
     .filter(Boolean)
     .sort((a, b) => a.pct - b.pct);
@@ -4115,7 +4140,8 @@ function sparklinePuntos(valores) {
 // muchos jugadores sin que cada uno ocupe tanto alto — el % ya dice lo
 // esencial, el detalle no aporta tanto como para pagar ese espacio en móvil.
 function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
-  const { jugador, pct, serieReciente } = variacion;
+  const { jugador, pct, serieReciente, nombresEjercicios, tareasCount } = variacion;
+  const metaTareas = tareasCount ? `${(nombresEjercicios || []).slice(0, 2).join(", ")}${(nombresEjercicios || []).length > 2 ? "…" : ""} · ${tareasCount} tarea${tareasCount === 1 ? "" : "s"}` : "";
   const positivo = pct >= 0;
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
   const avatarSize = compact ? 18 : 22;
@@ -4168,6 +4194,7 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
     <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
       {fila}
       <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
+        {metaTareas && <div style={{ marginBottom: 2 }}>{metaTareas}</div>}
         Carga media {positivo ? "por encima" : "por debajo"} de la semana pasada ({positivo ? "+" : ""}
         {pct.toFixed(0)}%).
       </div>
@@ -9866,7 +9893,7 @@ function TagBibliotecaReal({ color = ds.inkSecondary, solido, children }) {
   );
 }
 
-function MiniaturaEjercicioReal({ ejercicio, color, Icono, variantesCount }) {
+function MiniaturaEjercicioReal({ ejercicio, color, Icono, variantesCount, personalizado }) {
   const url = ejercicio.gif_url;
   const miniatura = url ? miniaturaTarea(url) : null;
   const tieneVideo = !!url && (extractYouTubeId(url) || esVideoDirecto(url));
@@ -9923,6 +9950,24 @@ function MiniaturaEjercicioReal({ ejercicio, color, Icono, variantesCount }) {
           {variantesCount} variante{variantesCount > 1 ? "s" : ""}
         </div>
       )}
+      {personalizado && (
+        <div
+          style={{
+            position: "absolute",
+            right: 10,
+            top: 10,
+            fontFamily: dsF.mono,
+            fontSize: 9,
+            fontWeight: 700,
+            padding: "3px 7px",
+            borderRadius: dsR.full,
+            background: ds.accent,
+            color: ds.accentInk,
+          }}
+        >
+          Personalizado
+        </div>
+      )}
     </div>
   );
 }
@@ -9939,7 +9984,7 @@ function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, 
   return (
     <div style={{ position: "relative", display: "flex", flexDirection: "column", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, overflow: "hidden", boxShadow: dsSh.elevation1 }}>
       <button onClick={() => onEditar(matriz)} style={botonReset} title="Editar ejercicio">
-        <MiniaturaEjercicioReal ejercicio={matriz} color={color} Icono={Icono} variantesCount={variantes.length} />
+        <MiniaturaEjercicioReal ejercicio={matriz} color={color} Icono={Icono} variantesCount={variantes.length} personalizado={matriz.es_personalizado !== false} />
         <div style={{ padding: "10px 12px 9px" }}>
           <div style={{ fontFamily: dsF.sans, fontSize: 13, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>{matriz.nombre}</div>
           <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -9956,11 +10001,6 @@ function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, 
             {nombreCategoria && (
               <TagBibliotecaReal color={ds.accent} solido>
                 {nombreCategoria}
-              </TagBibliotecaReal>
-            )}
-            {matriz.es_personalizado !== false && (
-              <TagBibliotecaReal color={ds.accent} solido>
-                Personalizado
               </TagBibliotecaReal>
             )}
           </div>
@@ -10022,7 +10062,7 @@ function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, 
   );
 }
 
-function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, ejercicioEditar, matrizPreset, error, onEliminar, errorEliminando }) {
+function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, ejercicioEditar, matrizPreset, error, onEliminar, errorEliminando, onEditarOtro, onCrearVariante }) {
   // matrizPreset: cuando se abre desde el botón "+V" de un ejercicio ya
   // existente, trae el bloque/categoría/etiquetas de partida ya rellenos —
   // el nombre y el vídeo siguen siendo del todo propios de la variante.
@@ -10061,9 +10101,67 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   const quitarFila = (key) => setFilasVariantes((prev) => prev.filter((f) => f.key !== key));
   const anadirFila = () => setFilasVariantes((prev) => [...prev, { key: Math.random().toString(36).slice(2), material: materialesDisponibles[0] || "", unilateral: false, url: "" }]);
 
+  // Split-panel (mockup Fase 6): esta pantalla reemplaza la rejilla de
+  // ejercicios por completo, no aparece como modal flotante encima —
+  // columna izquierda con la miniatura grande y la lista de variantes
+  // hermanas (misma matriz), columna derecha con el formulario de siempre.
+  const anchoDesktopPanel = useAnchoVentana() >= 900;
+  const colorBloquePanel = BLOQUE_COLOR_REAL[bloque] || ds.chart2;
+  const IconoBloquePanel = BLOQUE_ICONO_REAL[bloque] || Dumbbell;
+  const esVariante = !!ejercicioEditar?.ejercicio_base_id;
+  const idMatrizReal = ejercicioEditar?.ejercicio_base_id || (ejercicioEditar && !esVariante ? ejercicioEditar.id : "") || matrizPreset?.id || "";
+  const matrizHermana = esVariante && idMatrizReal ? (ejercicios || []).find((e) => e.id === idMatrizReal) : null;
+  const variantesHermanas = idMatrizReal ? (ejercicios || []).filter((e) => e.ejercicio_base_id === idMatrizReal && e.id !== ejercicioEditar?.id) : [];
+  const matrizParaNuevaVariante = matrizHermana || (ejercicioEditar && !esVariante ? ejercicioEditar : matrizPreset) || null;
+
   return (
-    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 14, maxHeight: "85vh", overflowY: "auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <button
+        onClick={onCerrar}
+        style={{ display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start", background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}
+      >
+        <ChevronLeft size={16} /> Volver a Ejercicios
+      </button>
+      <div style={{ display: "grid", gridTemplateColumns: anchoDesktopPanel ? "1fr 1fr" : "1fr", gap: 20, alignItems: "start" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          <div style={{ borderRadius: dsR.xl, overflow: "hidden", border: `1px solid ${ds.borderSoft}` }}>
+            <MiniaturaEjercicioReal ejercicio={{ gif_url: videoUrl }} color={colorBloquePanel} Icono={IconoBloquePanel} variantesCount={0} />
+          </div>
+          {(idMatrizReal || ejercicioEditar) && (
+            <div>
+              <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 8 }}>VARIANTES</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {esVariante && matrizHermana && (
+                  <button
+                    onClick={() => onEditarOtro && onEditarOtro(matrizHermana)}
+                    style={{ textAlign: "left", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, color: ds.ink, cursor: "pointer" }}
+                  >
+                    {matrizHermana.nombre} <span style={{ color: ds.inkMuted, fontSize: 11 }}>(principal)</span>
+                  </button>
+                )}
+                {variantesHermanas.map((v) => (
+                  <button
+                    key={v.id}
+                    onClick={() => onEditarOtro && onEditarOtro(v)}
+                    style={{ textAlign: "left", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, color: ds.ink, cursor: "pointer" }}
+                  >
+                    {v.nombre}
+                  </button>
+                ))}
+                {variantesHermanas.length === 0 && !esVariante && <div style={{ fontSize: 12, color: ds.inkMuted }}>Sin variantes todavía</div>}
+              </div>
+              {matrizParaNuevaVariante && onCrearVariante && (
+                <button
+                  onClick={() => onCrearVariante(matrizParaNuevaVariante)}
+                  style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5, justifyContent: "center", width: "100%", background: "transparent", border: `1px dashed ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
+                >
+                  <Plus size={13} /> Añadir variante
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>{ejercicioEditar ? "Editar ejercicio" : "Nuevo ejercicio"}</div>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE</span>
@@ -10196,21 +10294,14 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                       </option>
                     ))}
                   </select>
-                  <button
-                    onClick={() => actualizarFila(f.key, { unilateral: !f.unilateral })}
-                    style={{
-                      fontSize: 11,
-                      padding: "0 10px",
-                      borderRadius: dsR.sm,
-                      border: `1px solid ${f.unilateral ? ds.accent : ds.border}`,
-                      background: f.unilateral ? ds.accentSubtle : "transparent",
-                      color: f.unilateral ? ds.accent : ds.inkSecondary,
-                      cursor: "pointer",
-                      whiteSpace: "nowrap",
-                    }}
+                  <select
+                    value={f.unilateral ? "uni" : "bi"}
+                    onChange={(e) => actualizarFila(f.key, { unilateral: e.target.value === "uni" })}
+                    style={{ fontSize: 11, padding: "0 8px", borderRadius: dsR.sm, border: `1px solid ${f.unilateral ? ds.accent : ds.border}`, background: f.unilateral ? ds.accentSubtle : "transparent", color: f.unilateral ? ds.accent : ds.inkSecondary, cursor: "pointer", whiteSpace: "nowrap" }}
                   >
-                    {f.unilateral ? "Unilateral" : "Bilateral"}
-                  </button>
+                    <option value="bi">Bilateral</option>
+                    <option value="uni">Unilateral</option>
+                  </select>
                   <button onClick={() => quitarFila(f.key)} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.danger, borderRadius: dsR.sm, padding: "0 10px", cursor: "pointer" }}>
                     <Trash2 size={14} />
                   </button>
@@ -10291,6 +10382,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           >
             {guardando ? "Guardando..." : ejercicioEditar ? "Guardar cambios" : "Guardar ejercicio"}
           </DsButton>
+        </div>
         </div>
       </div>
     </div>
@@ -10683,6 +10775,43 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
         </label>
         {vistaPrincipal === "sesiones" ? (
           <VistaSesionesBibliotecaReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+        ) : panelAbierto ? (
+          <PanelNuevoEjercicioReal
+            categorias={categorias}
+            ejercicios={ejercicios}
+            ejercicioEditar={ejercicioEditando}
+            matrizPreset={matrizParaVariante}
+            onGuardar={guardarEjercicio}
+            error={errorGuardado}
+            errorEliminando={errorBorrado}
+            onEditarOtro={(ej) => {
+              setMatrizParaVariante(null);
+              setEjercicioEditando(ej);
+              setErrorBorrado("");
+            }}
+            onCrearVariante={(matriz) => {
+              setMatrizParaVariante(matriz);
+              setEjercicioEditando(null);
+              setErrorBorrado("");
+            }}
+            onEliminar={
+              ejercicioEditando
+                ? async () => {
+                    const ok = await eliminarEjercicio(ejercicioEditando.id);
+                    if (ok) {
+                      setPanelAbierto(false);
+                      setEjercicioEditando(null);
+                    }
+                  }
+                : undefined
+            }
+            onCerrar={() => {
+              setPanelAbierto(false);
+              setEjercicioEditando(null);
+              setMatrizParaVariante(null);
+              setErrorBorrado("");
+            }}
+          />
         ) : (
         <>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
@@ -10905,34 +11034,6 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
         </>
         )}
       </div>
-      {vistaPrincipal === "ejercicios" && panelAbierto && (
-        <PanelNuevoEjercicioReal
-          categorias={categorias}
-          ejercicios={ejercicios}
-          ejercicioEditar={ejercicioEditando}
-          matrizPreset={matrizParaVariante}
-          onGuardar={guardarEjercicio}
-          error={errorGuardado}
-          errorEliminando={errorBorrado}
-          onEliminar={
-            ejercicioEditando
-              ? async () => {
-                  const ok = await eliminarEjercicio(ejercicioEditando.id);
-                  if (ok) {
-                    setPanelAbierto(false);
-                    setEjercicioEditando(null);
-                  }
-                }
-              : undefined
-          }
-          onCerrar={() => {
-            setPanelAbierto(false);
-            setEjercicioEditando(null);
-            setMatrizParaVariante(null);
-            setErrorBorrado("");
-          }}
-        />
-      )}
     </PantallaEntrenadorAncha>
   );
 }
@@ -11013,20 +11114,6 @@ function IconoBloqueDiseno({ id }) {
     default:
       return null;
   }
-}
-
-function EtiquetaModoDiseno({ modo }) {
-  const map = {
-    rotativo: { texto: "ROTATIVO AUTO", color: ds.accent },
-    "rotativo-categoria": { texto: "ROTATIVO · POR CATEGORÍA", color: ds.accent },
-    manual: { texto: "MANUAL", color: ds.warning },
-  };
-  const cfg = map[modo];
-  return (
-    <span style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.06em", color: cfg.color, border: `1px solid ${cfg.color}55`, borderRadius: 4, padding: "2px 6px", whiteSpace: "nowrap" }}>
-      {cfg.texto}
-    </span>
-  );
 }
 
 function CampoEtiquetadoDiseno({ etiqueta, children, w }) {
@@ -11197,7 +11284,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <CampoEtiquetadoDiseno etiqueta="MODO" w={50}>
+        <CampoEtiquetadoDiseno etiqueta="MODO" w={62}>
           <select
             value={tarea.modo}
             onChange={(e) => onCambiar({ ...tarea, modo: e.target.value })}
@@ -11247,7 +11334,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
                 ligeras (por debajo de ~10 reps hasta el fallo la relación
                 reps-%1RM ya no es lineal, y la autopercepción del RIR se
                 degrada mucho en series largas) — para esos casos, %1RM. */}
-            <CampoEtiquetadoDiseno etiqueta="CARGA POR" w={62}>
+            <CampoEtiquetadoDiseno etiqueta="CARGA POR" w={72}>
               <select
                 value={tarea.modoCarga === "pct1rm" ? "pct1rm" : "rir"}
                 onChange={(e) => onCambiar({ ...tarea, modoCarga: e.target.value })}
@@ -12096,6 +12183,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   // reutilizar (con "Reutilizar como nueva" seguramente quieras el mismo
   // nombre — puedes cambiarlo aquí mismo si no).
   const [nombre, setNombre] = useState(base?.nombre || "");
+  // Cabecera de configuración plegable (mockup Fase 6): en una sesión nueva
+  // arranca abierta porque el entrenador todavía tiene que rellenarla; al
+  // editar una ya guardada arranca plegada — casi siempre solo se quiere
+  // tocar el contenido de los bloques, no volver a repasar fechas/PARA/MD.
+  const [detallesAbiertos, setDetallesAbiertos] = useState(!isEditing);
   const [fechas, setFechas] = useState(sesionExistente?.fechas?.length ? sesionExistente.fechas : [todayStr()]);
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? null);
@@ -12969,82 +13061,91 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
             Un jugador ya registró datos de esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
-        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>NOMBRE DE PLANTILLA (OPCIONAL — PARA BUSCARLA LUEGO EN LA BIBLIOTECA)</span>
-            <input
-              value={nombre}
-              onChange={(e) => setNombre(e.target.value)}
-              placeholder='Ej. "Fuerza tren inferior — pretemporada"'
-              style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }}
-            />
-          </label>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>OBJETIVO (OPCIONAL)</span>
-            <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }} />
-          </label>
-          <div style={{ marginBottom: 4 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>PARA</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              {[
-                { id: "equipo", label: "Todo el equipo" },
-                { id: "concretos", label: "Jugadores concretos" },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTargetPlayerIds(t.id === "equipo" ? null : targetPlayerIds || [])}
-                  style={{
-                    flex: 1,
-                    padding: "7px 0",
-                    borderRadius: 8,
-                    border: `1px solid ${ds.border}`,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    background: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accentSubtle : "transparent",
-                    color: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accent : ds.inkSecondary,
-                  }}
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
+        <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
+        {/* Barra de configuración plegable — mismo patrón que .details-bar
+            del mockup: cabecera con chevron + resumen de una línea, cuerpo
+            en rejilla que se despliega al clicar. Ahorra el espacio vertical
+            que antes se comía siempre, incluso una vez ya rellenada. */}
+        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden" }}>
+          <div
+            onClick={() => setDetallesAbiertos((v) => !v)}
+            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", cursor: "pointer" }}
+          >
+            <ChevronDown size={15} style={{ color: ds.inkMuted, flexShrink: 0, transition: "transform .15s", transform: detallesAbiertos ? "rotate(180deg)" : "none" }} />
+            <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 800, color: ds.ink, flexShrink: 0 }}>{nombre || (isEditing ? "Sesión sin nombre" : "Nueva sesión")}</span>
+            <span style={{ fontSize: 11, color: ds.inkMuted, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {(targetPlayerIds === null ? "Todo el equipo" : `${(targetPlayerIds || []).length} jugador(es) concretos`)} · {fechas.length} fecha{fechas.length === 1 ? "" : "s"} · {md || "sin MD"}
+            </span>
+          </div>
+          {detallesAbiertos && (
+            <div style={{ padding: "4px 14px 15px", display: "grid", gridTemplateColumns: anchoDesktop ? "repeat(4, 1fr)" : "1fr 1fr", gap: 14 }}>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Nombre de plantilla</span>
+                <input
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  placeholder='Ej. "Fuerza tren inferior — pretemporada"'
+                  style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Objetivo</span>
+                <input
+                  value={objetivo}
+                  onChange={(e) => setObjetivo(e.target.value)}
+                  placeholder="Opcional"
+                  style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }}
+                />
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Para</span>
+                <select
+                  value={targetPlayerIds === null ? "equipo" : "concretos"}
+                  onChange={(e) => setTargetPlayerIds(e.target.value === "equipo" ? null : targetPlayerIds || [])}
+                  style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, fontWeight: 600, padding: "7px 9px" }}
                 >
-                  {t.label}
-                </button>
-              ))}
+                  <option value="equipo">Todo el equipo</option>
+                  <option value="concretos">Jugadores concretos</option>
+                </select>
+              </label>
+              <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>MD</span>
+                <select value={md} onChange={(e) => setMd(e.target.value)} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }}>
+                  <option value="">Sin clasificar</option>
+                  {MD_TAGS.filter((t) => t !== "Sin MD").map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {targetPlayerIds !== null && (
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
+                </div>
+              )}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={{ display: "block", marginBottom: 6, fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Fechas en las que se aplica</span>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                  {fechas.map((f) => (
+                    <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
+                      {f}
+                      <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
+                        ×
+                      </span>
+                    </span>
+                  ))}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }} />
+                  <button onClick={addFecha} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
+                    + Añadir fecha
+                  </button>
+                </div>
+              </div>
             </div>
-            {targetPlayerIds !== null && (
-              <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
-            )}
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>FECHAS EN LAS QUE SE APLICA ESTA SESIÓN</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              {fechas.map((f) => (
-                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
-                  {f}
-                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
-                    ×
-                  </span>
-                </span>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }} />
-              <button onClick={addFecha} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
-                + Añadir fecha
-              </button>
-            </div>
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>MD (OPCIONAL)</div>
-            <select value={md} onChange={(e) => setMd(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px", maxWidth: 160 }}>
-              <option value="">Sin clasificar</option>
-              {MD_TAGS.filter((t) => t !== "Sin MD").map((t) => (
-                <option key={t} value={t}>
-                  {t}
-                </option>
-              ))}
-            </select>
-          </div>
+          )}
         </div>
 
         <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start", pointerEvents: readOnly ? "none" : undefined }}>
@@ -13793,29 +13894,15 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
           </label>
           <div style={{ marginBottom: 4 }}>
             <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>PARA</div>
-            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
-              {[
-                { id: "equipo", label: "Todo el equipo" },
-                { id: "concretos", label: "Jugadores concretos" },
-              ].map((t) => (
-                <button
-                  key={t.id}
-                  onClick={() => setTargetPlayerIds(t.id === "equipo" ? null : targetPlayerIds || [])}
-                  style={{
-                    flex: 1,
-                    padding: "7px 0",
-                    borderRadius: 8,
-                    border: `1px solid ${ds.border}`,
-                    cursor: "pointer",
-                    fontSize: 12,
-                    fontWeight: 600,
-                    background: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accentSubtle : "transparent",
-                    color: (t.id === "equipo") === (targetPlayerIds === null) ? ds.accent : ds.inkSecondary,
-                  }}
-                >
-                  {t.label}
-                </button>
-              ))}
+            <div style={{ marginBottom: 8 }}>
+              <select
+                value={targetPlayerIds === null ? "equipo" : "concretos"}
+                onChange={(e) => setTargetPlayerIds(e.target.value === "equipo" ? null : targetPlayerIds || [])}
+                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, fontWeight: 600, padding: "8px 10px" }}
+              >
+                <option value="equipo">Todo el equipo</option>
+                <option value="concretos">Jugadores concretos</option>
+              </select>
             </div>
             {targetPlayerIds !== null && (
               <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
@@ -13990,7 +14077,24 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
 
   // screen === "coach"
   if (historialJugador) {
-    return <FichaJugadorModuloReal jugador={historialJugador} onBack={() => setHistorialJugador(null)} />;
+    return (
+      <FichaJugadorModuloReal
+        jugador={historialJugador}
+        onBack={() => setHistorialJugador(null)}
+        onAbrirModulo={(m) => {
+          // Navegar desde el rail lateral de la ficha (a otro módulo del
+          // entrenador) tiene que cerrar la ficha primero — si no,
+          // historialJugador se queda puesto y AppRouter la seguiría
+          // mostrando por encima de cualquier coachModulo nuevo.
+          setHistorialJugador(null);
+          setCoachModulo(m);
+        }}
+        onCerrarSesion={() => {
+          setHistorialJugador(null);
+          setScreen("portal");
+        }}
+      />
+    );
   }
   if (coachModulo === "roster") {
     return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
@@ -15315,7 +15419,7 @@ function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion })
 // más las añadidas aquí (Progreso, Notas, Datos y accesos). Calendario se
 // deja como placeholder honesto, igual que el propio mockup: no hay
 // calendario_asignaciones todavía (llega con Fase 6 → Calendario).
-function FichaJugadorModuloReal({ jugador, onBack }) {
+function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
@@ -15358,7 +15462,7 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
 
   if (!actual) {
     return (
-      <PantallaBase rol="entrenador" maxWidth={900}>
+      <PantallaEntrenadorAncha activo="usuarios" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -15366,12 +15470,12 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           ← Volver a Usuarios
         </button>
         <div style={{ color: ds.inkMuted, fontSize: 13, marginTop: 20 }}>Este jugador ya no existe.</div>
-      </PantallaBase>
+      </PantallaEntrenadorAncha>
     );
   }
 
   return (
-    <PantallaBase rol="entrenador" maxWidth={900}>
+    <PantallaEntrenadorAncha activo="usuarios" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <button
           onClick={onBack}
@@ -15450,6 +15554,6 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           </div>
         </div>
       </div>
-    </PantallaBase>
+    </PantallaEntrenadorAncha>
   );
 }
