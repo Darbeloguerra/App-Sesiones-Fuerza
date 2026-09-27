@@ -11549,7 +11549,7 @@ function FichaJugadorResistencia({ tipo, modalidad, intensidad, distancia, jugad
 // mockup_diseno_sesion.html (campoResistencia, renderCamposHtml,
 // cambiarCapacidadResistencia, cambiarEstructuraManual, cambiarModalidad,
 // actualizarIndicadores) a props/estado de React reales.
-function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar, jugadorReferencia }) {
+function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, onEliminar, jugadorReferencia, ejercicios, onEjercicioCreado }) {
   const [forzandoEstructura, setForzandoEstructura] = useState(false);
   const tipo = tarea.tipoResistenciaCardio || "";
   const modalidad = tarea.modalidad || "carrera";
@@ -11564,8 +11564,23 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
     setForzandoEstructura(false);
     onCambiar({ ...tarea, ...camposVacios, capacidad: capId, tipoResistenciaCardio: c.tipo, estructuraManual: false });
   };
-  const cambiarModalidadTarea = (nuevaModalidad) => {
-    onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad });
+  // La modalidad (Carrera/Bici/Elíptica/Piscina/Otro) ES la elección de
+  // "qué ejercicio" para una tarea de Resistencia — ya no hace falta pasar
+  // primero por el buscador de la Biblioteca. Al cambiarla, se resuelve (o
+  // se crea si no existe todavía) el ejercicio con ese mismo nombre, para
+  // que la tarea siga teniendo un ejercicio_id válido al guardar.
+  const cambiarModalidadTarea = async (nuevaModalidad) => {
+    const nombreModalidad = MODALIDADES_RESISTENCIA[nuevaModalidad];
+    try {
+      const creado = await resolveEjercicio(ejercicios || [], { nombre: nombreModalidad, bloque: "", tags_descriptivos: [] });
+      onEjercicioCreado?.(creado);
+      onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad, nombre: creado.nombre, ejercicioId: creado.id });
+    } catch (e) {
+      // Si falla el guardado (sin conexión), al menos se cambia la
+      // modalidad en local — el nombre/ejercicio se reintentará la próxima
+      // vez que se toque este campo.
+      onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad });
+    }
   };
   const cambiarEstructuraManual = (nuevoTipo) => {
     setForzandoEstructura(false);
@@ -11968,6 +11983,22 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     onCambiarTareas([...tareas, base]);
   };
 
+  // Para Resistencia, igual que fuera de circuitos: se añade directamente
+  // con la modalidad por defecto (Carrera) en vez de abrir el buscador de
+  // la Biblioteca — la modalidad se elige dentro de la propia tarea.
+  const agregarResistenciaDirectaAlCircuito = async () => {
+    try {
+      const creado = await resolveEjercicio(ejercicios, { nombre: MODALIDADES_RESISTENCIA.carrera, bloque: "", tags_descriptivos: [] });
+      onEjercicioCreado?.(creado);
+      onCambiarTareas([
+        ...tareas,
+        { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" },
+      ]);
+    } catch (e) {
+      onError?.("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
+    }
+  };
+
   return (
     <div style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: 10, padding: 12, display: "flex", flexDirection: "column", gap: 10, background: `${ds.surface}40` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -12030,7 +12061,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
         {tareas.map((t, i) =>
           bloque === "Resistencia" ? (
-            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} />
+            <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} ejercicios={ejercicios} onEjercicioCreado={onEjercicioCreado} />
           ) : (
             <FilaTareaReal
               key={t.key}
@@ -12048,7 +12079,17 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
           )
         )}
       </div>
-      <SelectorEjercicioReal ejercicios={ejercicios} bloque={bloque} onAdd={agregarEjercicioAlCircuito} onAsignarZona={onAsignarZona} />
+      {bloque === "Resistencia" ? (
+        <button
+          type="button"
+          onClick={agregarResistenciaDirectaAlCircuito}
+          style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500, alignSelf: "flex-start" }}
+        >
+          + Ejercicio
+        </button>
+      ) : (
+        <SelectorEjercicioReal ejercicios={ejercicios} bloque={bloque} onAdd={agregarEjercicioAlCircuito} onAsignarZona={onAsignarZona} />
+      )}
     </div>
   );
 }
@@ -12612,8 +12653,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
           series: esResistencia ? "" : t.series,
           cantidad: esResistencia ? "" : t.cantidad,
           rir: esResistencia ? "" : t.rir,
-          modo_carga: esResistencia ? "" : t.modoCarga || "rir",
-          pct1rm: esResistencia ? "" : t.pct1rm || "",
+          // modo_carga tiene un CHECK en la base de datos (null o 'rir'/'pct1rm')
+          // y pct1rm es numeric — un "" (string vacío) no es válido para
+          // ninguno de los dos y el guardado fallaba con 400. Tienen que ir
+          // como null, nunca como cadena vacía.
+          modo_carga: esResistencia ? null : t.modoCarga || "rir",
+          pct1rm: esResistencia || t.pct1rm === "" || t.pct1rm == null ? null : t.pct1rm,
           resistencia_data: esResistencia ? serializarResistencia(t) : "",
           tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
           material: JSON.stringify(t.materiales || []), // el material se guarda siempre, aunque el bloque no muestre carga (antes se perdía en Core)
@@ -12640,8 +12685,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
               series: esResistencia ? "" : t.series,
               cantidad: esResistencia ? "" : t.cantidad,
               rir: esResistencia ? "" : t.rir,
-              modo_carga: esResistencia ? "" : t.modoCarga || "rir",
-              pct1rm: esResistencia ? "" : t.pct1rm || "",
+              modo_carga: esResistencia ? null : t.modoCarga || "rir",
+              pct1rm: esResistencia || t.pct1rm === "" || t.pct1rm == null ? null : t.pct1rm,
               resistencia_data: esResistencia ? serializarResistencia(t) : "",
               tipo_resistencia: mostrarCarga ? t.tipoResistencia || "" : "",
               material: JSON.stringify(t.materiales || []), // idem: antes se perdía en Core al ir dentro de un circuito
@@ -13453,6 +13498,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                         onCambiar={(nuevo) => setTareasResistencia((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
                         onEliminar={() => setTareasResistencia((prev) => prev.filter((x) => x.key !== t.key))}
                         jugadorReferencia={jugadorReferenciaResistencia}
+                        ejercicios={ejercicios}
+                        onEjercicioCreado={addEjercicioLocal}
                       />
                     ))}
                     {circuitosResistencia.map((c) => (
@@ -13474,26 +13521,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                       />
                     ))}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal
-                        ejercicios={ejercicios}
-                        bloque="Resistencia"
-                        onAsignarZona={asignarZonaYActualizar}
-                        onAdd={async (eOClic) => {
-                          let ejercicioId = eOClic.id;
-                          let nombre = eOClic.nombre;
-                          if (!ejercicioId) {
-                            try {
-                              const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: eOClic.tags_descriptivos || [] });
-                              ejercicioId = creado.id;
-                              addEjercicioLocal(creado);
-                            } catch (e) {
-                              setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
-                              return;
-                            }
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const creado = await resolveEjercicio(ejercicios, { nombre: MODALIDADES_RESISTENCIA.carrera, bloque: "", tags_descriptivos: [] });
+                            addEjercicioLocal(creado);
+                            setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
+                          } catch (e) {
+                            setError("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
                           }
-                          setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                         }}
-                      />
+                        style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}
+                      >
+                        + Ejercicio
+                      </button>
                       <button
                         onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
