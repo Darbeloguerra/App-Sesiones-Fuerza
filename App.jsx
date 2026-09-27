@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search, Zap, Bell, Calendar, AlertTriangle, Home, TrendingUp, Activity } from "lucide-react";
+import { Plus, Trash2, Check, Dumbbell, ChevronLeft, ChevronRight, ChevronDown, User, ClipboardList, Loader2, Lock, Eye, EyeOff, RefreshCw, Play, Target, Send, CalendarClock, History, Pencil, BookOpen, Search, Zap, Bell, Calendar, AlertTriangle, Home, TrendingUp, Activity, Heart, LayoutGrid } from "lucide-react";
 
 // ============================================================
 // SISTEMA DE DISEÑO "FUERZA" — incrustado aquí mismo (antes eran 3
@@ -323,9 +323,14 @@ const ENTITY_TABLE = {
   circuitos: "circuitos",
   registros: "registros",
   grupos: "grupos",
+  // Notas del entrenador sobre un jugador (pestaña "Notas" de la ficha,
+  // Fase 6 → Equipos y usuarios) — tabla nueva, mínima, mismo patrón que el
+  // resto (ver sql/add_notas_jugador.sql). Se apoya en la infraestructura
+  // genérica de api.list/save/delete, sin nada especial.
+  notasJugador: "notas_jugador",
 };
 
-const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp" };
+const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota" };
 function genId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
@@ -970,6 +975,10 @@ function usePlayers() {
         fcMaxPpm: r.fc_max_ppm != null && r.fc_max_ppm !== "" ? Number(r.fc_max_ppm) : null,
         fcMaxProtocolo: r.fc_max_protocolo || null,
         fcMaxFecha: r.fc_max_fecha || null,
+        // Objetivo actual del jugador (texto libre corto) — mostrado y
+        // editable desde la pestaña Resumen de la ficha (Fase 6 → Equipos y
+        // usuarios, mini-card "Objetivo actual"). Ver sql/add_objetivo_actual_jugador.sql.
+        objetivoActual: r.objetivo_actual || "",
       })),
     [rows]
   );
@@ -981,17 +990,19 @@ function usePlayers() {
         const groupIds = p.groupIds || [];
         const gruposIds = p.gruposIds || [];
         const estado = p.estado || "activo";
+        const objetivoActual = p.objetivoActual || "";
         if (
           original &&
           original.nombre === p.name &&
           original.pin === p.pin &&
           original.estado === estado &&
           JSON.stringify(original.categorias_preventivas || []) === JSON.stringify(groupIds) &&
-          JSON.stringify(original.grupos_ids || []) === JSON.stringify(gruposIds)
+          JSON.stringify(original.grupos_ids || []) === JSON.stringify(gruposIds) &&
+          (original.objetivo_actual || "") === objetivoActual
         ) {
           return original; // sin cambios reales: misma referencia -> no se reguarda
         }
-        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds };
+        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds, objetivo_actual: objetivoActual };
       });
       return saveRows(nextRows);
     },
@@ -2755,6 +2766,16 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
   const [panelGrupoAbierto, setPanelGrupoAbierto] = useState(false);
   const [errorAccion, setErrorAccion] = useState("");
+  // Las tres vistas del mockup de Fase 6 (Equipos y usuarios): Equipos
+  // (tarjetas por grupo), Independientes (página propia) y Usuarios (el
+  // directorio plano que ya existía, sin tocar su lógica de filtros). Un
+  // grupo real ("grupos", entidad ya existente) hace aquí de "equipo" del
+  // mockup — no se crea ninguna tabla/entidad nueva para esto.
+  const [vista, setVista] = useState("equipos");
+  const [equipoAbiertoId, setEquipoAbiertoId] = useState(null);
+  // Preseleccionado al pulsar "+ Añadir jugador" desde dentro del detalle de
+  // un equipo — así el alta queda ya asignada a ese grupo sin un segundo paso.
+  const [grupoAltaPreset, setGrupoAltaPreset] = useState(null);
 
   if (!playersLoaded || !categoriasLoaded || !coachPinLoaded || !gruposLoaded || !progLoaded || !equipoLoaded) return <LoadingBlock />;
 
@@ -2790,6 +2811,34 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
     adherenciaPorJugador.set(jugadorId, Math.round(((cumplidasPorJugador.get(jugadorId) || 0) / total) * 100));
   });
 
+  // Las 3 stats agregadas que pide la vista Equipos (tarjeta de grupo,
+  // detalle de equipo y la página de Independientes): jugadores, adherencia
+  // MEDIA DEL GRUPO (cumplidas/asignadas del conjunto, mismo criterio que
+  // adherenciaEquipo en ResumenFichaJugadorReal — no la media de los
+  // porcentajes individuales, que pondera distinto a quien tiene pocas
+  // sesiones asignadas) y activos hoy (mismo criterio que pendientesHoy en
+  // useDatosDashboardEntrenador: ya registrado hoy). grupoId === null pide
+  // los independientes.
+  const statsGrupo = (grupoId) => {
+    const jugadoresGrupo = players.filter((p) =>
+      grupoId === null ? (p.gruposIds || []).length === 0 : (p.gruposIds || []).includes(grupoId)
+    );
+    let asignadas = 0;
+    let cumplidas = 0;
+    let activosHoy = 0;
+    jugadoresGrupo.forEach((p) => {
+      asignadas += asignadasPorJugador.get(p.id) || 0;
+      cumplidas += cumplidasPorJugador.get(p.id) || 0;
+      if (registroPorJugadorFechaRoster.has(`${p.id}::${hoyRoster}`)) activosHoy++;
+    });
+    return {
+      jugadores: jugadoresGrupo,
+      total: jugadoresGrupo.length,
+      adherenciaMedia: asignadas ? Math.round((cumplidas / asignadas) * 100) : null,
+      activosHoy,
+    };
+  };
+
   // El código de entrenador nunca puede coincidir con el PIN de un jugador
   // (si coinciden, quien entra con ese número accede como entrenador a todo
   // el sistema de gestión) — se incluye siempre en el conjunto de PINs
@@ -2816,8 +2865,11 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   };
 
   const agregarJugador = async ({ nombre, pin }) => {
-    const ok = await savePlayers([...players, { name: nombre, pin, estado: "activo", groupIds: [], gruposIds: [] }]);
-    if (ok) setPanelAltaAbierto(false);
+    const ok = await savePlayers([...players, { name: nombre, pin, estado: "activo", groupIds: [], gruposIds: grupoAltaPreset ? [grupoAltaPreset] : [] }]);
+    if (ok) {
+      setPanelAltaAbierto(false);
+      setGrupoAltaPreset(null);
+    }
   };
 
   const cambiarCategorias = async (id, nuevas) => {
@@ -2864,81 +2916,427 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const suspendidos = players.filter((j) => j.estado === "suspendido").length;
   const independientes = players.filter((j) => (j.gruposIds || []).length === 0).length;
 
+  const grupoAbierto = vista === "equipos" && equipoAbiertoId ? grupos.find((g) => g.id === equipoAbiertoId) || null : null;
+  const jugadoresEnEquipo = players.filter((p) => (p.gruposIds || []).length > 0).length;
+
   return (
     <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
-          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-            {activos} activos · {suspendidos} suspendidos · {independientes} independientes
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-          <DsInput
-            value={busqueda}
-            onChange={(e) => setBusqueda(e.target.value)}
-            placeholder="Buscar usuario..."
-            style={{ flex: 1, minWidth: 160 }}
+        {/* view-switch del mockup de Fase 6 (Equipos y usuarios): tres
+            vistas, no un valor binario — sigue siendo un grupo de botones
+            (como DsTabSwitcher en el resto de la app), no un <select>. */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+          <DsTabSwitcher
+            tabs={[
+              { id: "equipos", label: "Equipos" },
+              { id: "independientes", label: "Independientes" },
+              { id: "usuarios", label: "Usuarios" },
+            ]}
+            active={vista}
+            onChange={(v) => {
+              setVista(v);
+              setEquipoAbiertoId(null);
+            }}
           />
         </div>
-        <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-          {[
-            { id: "todos", label: "Todos" },
-            { id: "activo", label: "Activos" },
-            { id: "suspendido", label: "Suspendidos" },
-            { id: "independientes", label: "Independientes" },
-            ...grupos.map((g) => ({ id: g.id, label: g.nombre })),
-          ].map((f) => (
-            <button
-              key={f.id}
-              onClick={() => setFiltro(f.id)}
-              style={{
-                fontSize: 12.5,
-                padding: "8px 12px",
-                borderRadius: dsR.md,
-                border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`,
-                background: filtro === f.id ? ds.accentSubtle : "transparent",
-                color: filtro === f.id ? ds.accent : ds.inkSecondary,
-                cursor: "pointer",
-                whiteSpace: "nowrap",
+
+        {errorAccion && (
+          <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
+            {errorAccion}
+          </div>
+        )}
+
+        {vista === "equipos" && !grupoAbierto && (
+          <div>
+            <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+              <div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>EQUIPOS</div>
+                <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Equipos</h1>
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                  {grupos.length} {grupos.length === 1 ? "equipo" : "equipos"} · {jugadoresEnEquipo} jugadores en equipo · {independientes} independientes
+                </div>
+              </div>
+              <button
+                onClick={() => setPanelGrupoAbierto(true)}
+                style={{ fontSize: 12.5, fontWeight: 700, padding: "9px 14px", borderRadius: dsR.md, border: `1.5px dashed ${ds.accentBorderSubtle}`, background: "transparent", color: ds.accent, cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                + Nuevo equipo
+              </button>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 12 }}>
+              {grupos.map((g) => (
+                <TarjetaEquipoReal key={g.id} grupo={g} stats={statsGrupo(g.id)} onAbrir={() => setEquipoAbiertoId(g.id)} />
+              ))}
+              <TarjetaIndependientesReal count={independientes} onAbrir={() => setVista("independientes")} />
+              {grupos.length === 0 && (
+                <div style={{ gridColumn: "1 / -1", color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+                  Todavía no has creado ningún equipo — usa "+ Nuevo equipo" para empezar.
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {vista === "equipos" && grupoAbierto && (
+          <DetalleEquipoReal
+            grupo={grupoAbierto}
+            stats={statsGrupo(grupoAbierto.id)}
+            categorias={categorias}
+            grupos={grupos}
+            adherenciaPorJugador={adherenciaPorJugador}
+            onAccion={manejarAccion}
+            onCambiarCategorias={cambiarCategorias}
+            onCambiarGrupos={cambiarGrupos}
+            onBack={() => setEquipoAbiertoId(null)}
+            onAddPlayer={() => {
+              setGrupoAltaPreset(grupoAbierto.id);
+              setPanelAltaAbierto(true);
+            }}
+            onEditGroup={() => setPanelGrupoAbierto(true)}
+          />
+        )}
+
+        {vista === "independientes" && (
+          <VistaIndependientesReal
+            stats={statsGrupo(null)}
+            categorias={categorias}
+            grupos={grupos}
+            adherenciaPorJugador={adherenciaPorJugador}
+            onAccion={manejarAccion}
+            onCambiarCategorias={cambiarCategorias}
+            onCambiarGrupos={cambiarGrupos}
+            onAddIndependiente={() => {
+              setGrupoAltaPreset(null);
+              setPanelAltaAbierto(true);
+            }}
+          />
+        )}
+
+        {vista === "usuarios" && (
+          <div>
+            <div style={{ marginBottom: 18 }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
+              <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
+              <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                {activos} activos · {suspendidos} suspendidos · {independientes} independientes
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
+              <DsInput
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar usuario..."
+                style={{ flex: 1, minWidth: 160 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
+              {[
+                { id: "todos", label: "Todos" },
+                { id: "activo", label: "Activos" },
+                { id: "suspendido", label: "Suspendidos" },
+                { id: "independientes", label: "Independientes" },
+                ...grupos.map((g) => ({ id: g.id, label: g.nombre })),
+              ].map((f) => (
+                <button
+                  key={f.id}
+                  onClick={() => setFiltro(f.id)}
+                  style={{
+                    fontSize: 12.5,
+                    padding: "8px 12px",
+                    borderRadius: dsR.md,
+                    border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`,
+                    background: filtro === f.id ? ds.accentSubtle : "transparent",
+                    color: filtro === f.id ? ds.accent : ds.inkSecondary,
+                    cursor: "pointer",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+              <button
+                onClick={() => setPanelGrupoAbierto(true)}
+                style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: dsR.md, border: `1px dashed ${ds.chart2}66`, background: "transparent", color: ds.chart2, cursor: "pointer", whiteSpace: "nowrap" }}
+              >
+                + Grupo
+              </button>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {visibles.map((j) => (
+                <FilaJugadorReal
+                  key={j.id}
+                  jugador={j}
+                  categorias={categorias}
+                  grupos={grupos}
+                  adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
+                  onAccion={manejarAccion}
+                  onCambiarCategorias={cambiarCategorias}
+                  onCambiarGrupos={cambiarGrupos}
+                />
+              ))}
+              {visibles.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
+            </div>
+            <DsButton
+              variant="secondary"
+              onClick={() => {
+                setGrupoAltaPreset(null);
+                setPanelAltaAbierto(true);
               }}
+              style={{ width: "100%", marginTop: 16, borderStyle: "dashed", borderColor: ds.accentBorderSubtle, color: ds.accent }}
             >
-              {f.label}
-            </button>
-          ))}
-          <button
-            onClick={() => setPanelGrupoAbierto(true)}
-            style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: dsR.md, border: `1px dashed ${ds.chart2}66`, background: "transparent", color: ds.chart2, cursor: "pointer", whiteSpace: "nowrap" }}
-          >
-            + Grupo
-          </button>
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {errorAccion && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px" }}>{errorAccion}</div>}
-          {visibles.map((j) => (
-            <FilaJugadorReal
-              key={j.id}
-              jugador={j}
-              categorias={categorias}
-              grupos={grupos}
-              adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
-              onAccion={manejarAccion}
-              onCambiarCategorias={cambiarCategorias}
-              onCambiarGrupos={cambiarGrupos}
-            />
-          ))}
-          {visibles.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
-        </div>
-        <DsButton variant="secondary" onClick={() => setPanelAltaAbierto(true)} style={{ width: "100%", marginTop: 16, borderStyle: "dashed", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
-          + Añadir usuario
-        </DsButton>
+              + Añadir usuario
+            </DsButton>
+          </div>
+        )}
       </div>
-      {panelAltaAbierto && <PanelAltaReal pinsExistentes={pinsOcupados()} onGuardar={agregarJugador} onCerrar={() => setPanelAltaAbierto(false)} />}
+      {panelAltaAbierto && (
+        <PanelAltaReal
+          pinsExistentes={pinsOcupados()}
+          onGuardar={agregarJugador}
+          onCerrar={() => {
+            setPanelAltaAbierto(false);
+            setGrupoAltaPreset(null);
+          }}
+        />
+      )}
       {panelGrupoAbierto && (
         <PanelGestionGruposReal grupos={grupos} onCrear={crearGrupo} onEliminar={eliminarGrupo} onCerrar={() => setPanelGrupoAbierto(false)} />
       )}
     </PantallaEntrenadorAncha>
+  );
+}
+
+// Iniciales para el avatar-stack de una tarjeta de equipo — mismo criterio
+// que ya usa CabeceraFichaJugadorReal para el avatar grande de la ficha.
+function inicialesNombre(name) {
+  return (
+    (name || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0].toUpperCase())
+      .join("") || "?"
+  );
+}
+// Paleta decorativa para el avatar-stack — solo variación visual (quién es
+// cada iniciales ya se ve en el título al pasar el ratón), no un dato nuevo.
+const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
+
+// Tarjeta de un equipo (grupo real) en la vista Equipos — nombre, avatar-
+// stack de sus jugadores y las 3 stats agregadas (jugadores / adherencia
+// media / activos hoy), calculadas en GestionRosterReal.statsGrupo.
+function TarjetaEquipoReal({ grupo, stats, onAbrir }) {
+  const visibles = stats.jugadores.slice(0, 3);
+  const resto = stats.total - visibles.length;
+  return (
+    <button
+      onClick={onAbrir}
+      style={{
+        textAlign: "left",
+        cursor: "pointer",
+        background: `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
+        border: `1px solid ${ds.borderSoft}`,
+        borderRadius: dsR.xl,
+        padding: "15px 16px",
+        boxShadow: dsSh.elevation1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 11,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div>
+          <h3 style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", margin: 0, color: ds.ink }}>{grupo.nombre}</h3>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{stats.total} {stats.total === 1 ? "jugador" : "jugadores"}</div>
+        </div>
+        <div style={{ width: 32, height: 32, borderRadius: dsR.md, background: ds.accentSubtle, color: ds.accent, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <IconoModulo tipo="personas" />
+        </div>
+      </div>
+      {stats.total > 0 && (
+        <div style={{ display: "flex", alignItems: "center" }}>
+          {visibles.map((p, i) => (
+            <div
+              key={p.id}
+              title={p.name}
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: "50%",
+                background: AVATAR_STACK_COLORES[i % AVATAR_STACK_COLORES.length],
+                color: "#fff",
+                font: `600 9px ${dsF.sans}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `2px solid ${ds.surface}`,
+                marginLeft: i === 0 ? 0 : -7,
+                flexShrink: 0,
+              }}
+            >
+              {inicialesNombre(p.name)}
+            </div>
+          ))}
+          {resto > 0 && (
+            <div style={{ width: 22, height: 22, borderRadius: "50%", background: ds.border, color: ds.inkSecondary, font: `600 8.5px ${dsF.mono}`, display: "flex", alignItems: "center", justifyContent: "center", border: `2px solid ${ds.surface}`, marginLeft: -7, flexShrink: 0 }}>
+              +{resto}
+            </div>
+          )}
+        </div>
+      )}
+      <div style={{ display: "flex", gap: 16, borderTop: `1px solid ${ds.border}`, paddingTop: 10 }}>
+        <div>
+          <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink }}>{stats.total}</div>
+          <div style={{ font: `600 8.5px ${dsF.mono}`, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>Jugadores</div>
+        </div>
+        <div>
+          <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink }}>{stats.adherenciaMedia != null ? `${stats.adherenciaMedia}%` : "—"}</div>
+          <div style={{ font: `600 8.5px ${dsF.mono}`, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>Adherencia</div>
+        </div>
+        <div>
+          <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink }}>{stats.activosHoy}</div>
+          <div style={{ font: `600 8.5px ${dsF.mono}`, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>Hoy activos</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: ds.accent }}>Ver equipo →</div>
+    </button>
+  );
+}
+
+// Tarjeta especial "Independientes" de la vista Equipos — estilo punteado,
+// lleva a su propia página (VistaIndependientesReal).
+function TarjetaIndependientesReal({ count, onAbrir }) {
+  return (
+    <button
+      onClick={onAbrir}
+      style={{
+        textAlign: "left",
+        cursor: "pointer",
+        background: "transparent",
+        border: `1px dashed ${ds.border}`,
+        borderRadius: dsR.xl,
+        padding: "15px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 11,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div>
+          <h3 style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, letterSpacing: "-0.01em", margin: 0, color: ds.ink }}>Independientes</h3>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>Sin equipo asignado</div>
+        </div>
+        <div style={{ width: 32, height: 32, borderRadius: dsR.md, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <User size={16} />
+        </div>
+      </div>
+      <div style={{ display: "flex", gap: 16, borderTop: `1px solid ${ds.border}`, paddingTop: 10 }}>
+        <div>
+          <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink }}>{count}</div>
+          <div style={{ font: `600 8.5px ${dsF.mono}`, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.04em", marginTop: 1 }}>Jugadores</div>
+        </div>
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: ds.accent }}>Ver independientes →</div>
+    </button>
+  );
+}
+
+// Fila de las 3 stats agregadas (Jugadores / Adherencia media / Activos
+// hoy) — misma pieza en el detalle de un equipo y en Independientes.
+function TeamStatsRowReal({ stats }) {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 10, marginBottom: 16 }}>
+      <MiniStat icon={<User size={12} />} label="Jugadores" value={stats.total} />
+      <MiniStat icon={<TrendingUp size={12} />} label="Adherencia media" value={stats.adherenciaMedia != null ? `${stats.adherenciaMedia}%` : "—"} accent />
+      <MiniStat icon={<Zap size={12} />} label="Activos hoy" value={`${stats.activosHoy} / ${stats.total}`} />
+    </div>
+  );
+}
+
+// Detalle de un equipo: roster filtrado a ese grupo + sus 3 stats
+// agregadas. Reutiliza FilaJugadorReal tal cual (misma edición de
+// categorías/grupos/PIN/menú de acciones que en Usuarios), no una fila
+// nueva — así asignar/quitar del grupo desde aquí sigue funcionando igual.
+function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onBack, onAddPlayer, onEditGroup }) {
+  return (
+    <div>
+      <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
+        ← Volver a Equipos
+      </button>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>EQUIPO</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>{grupo.nombre}</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{stats.total} {stats.total === 1 ? "jugador" : "jugadores"}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onEditGroup}
+            title="Gestionar equipos"
+            style={{ width: 34, height: 34, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.canvas, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", flexShrink: 0 }}
+          >
+            <Pencil size={14} />
+          </button>
+          <DsButton variant="secondary" onClick={onAddPlayer}>+ Añadir jugador</DsButton>
+        </div>
+      </div>
+      <TeamStatsRowReal stats={stats} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {stats.jugadores.map((j) => (
+          <FilaJugadorReal
+            key={j.id}
+            jugador={j}
+            categorias={categorias}
+            grupos={grupos}
+            adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
+            onAccion={onAccion}
+            onCambiarCategorias={onCambiarCategorias}
+            onCambiarGrupos={onCambiarGrupos}
+          />
+        ))}
+        {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Todavía no hay jugadores en este equipo.</div>}
+      </div>
+    </div>
+  );
+}
+
+// Página propia de Independientes (no solo un chip de filtro): mismas 3
+// stats agregadas + roster, reutilizando FilaJugadorReal — su "+" junto a
+// los chips de grupo ya asigna a un equipo (equivalente al botón "Asignar a
+// equipo" del mockup), sin duplicar esa lógica en una fila nueva.
+function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onAddIndependiente }) {
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
+        <div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>INDEPENDIENTES</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Independientes</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{stats.total} {stats.total === 1 ? "jugador sin equipo asignado" : "jugadores sin equipo asignado"}</div>
+        </div>
+        <button
+          onClick={onAddIndependiente}
+          style={{ fontSize: 12.5, fontWeight: 700, padding: "9px 14px", borderRadius: dsR.md, border: `1.5px dashed ${ds.accentBorderSubtle}`, background: "transparent", color: ds.accent, cursor: "pointer", whiteSpace: "nowrap" }}
+        >
+          + Añadir independiente
+        </button>
+      </div>
+      <TeamStatsRowReal stats={stats} />
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {stats.jugadores.map((j) => (
+          <FilaJugadorReal
+            key={j.id}
+            jugador={j}
+            categorias={categorias}
+            grupos={grupos}
+            adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
+            onAccion={onAccion}
+            onCambiarCategorias={onCambiarCategorias}
+            onCambiarGrupos={onCambiarGrupos}
+          />
+        ))}
+        {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No hay jugadores independientes — todos están asignados a un equipo.</div>}
+      </div>
+    </div>
   );
 }
 
@@ -3103,7 +3501,7 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
           <>
             <TiraStatsCompactaReal datos={datos} />
 
-            <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} borradores={datos.borradores} compact />
+            <PanelSemanaDashboardReal onAbrirModulo={onAbrirModulo} borradores={datos.borradores} semanaDias={datos.semanaDias} jugadoresSinTrabajo={datos.jugadoresSinTrabajo} compact />
 
             <div style={{ marginBottom: 12 }}>
               <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
@@ -3283,19 +3681,57 @@ function useDatosDashboardEntrenador() {
   let ocurrenciasSemana = 0;
   let ocurrenciasRealizadas = 0;
   const asignacionesSemana = []; // [{ jugadorId, date }] — solo fechas ya llegadas, para adherencia
-  sesiones
-    .filter((s) => s.enviada)
-    .forEach((s) => {
-      const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : activos.map((p) => p.id);
-      (s.fechas || []).forEach((f) => {
-        if (f < lunes || f > domingo) return;
+  // Para "Tu semana" (panel L-D) y "jugadores sin trabajo": mismas fechas
+  // enviadas/borrador dentro de la semana, pero acumuladas por fecha (para
+  // el punto de estado de cada día) y por jugador (para saber quién tiene
+  // algún destino asignado esta semana, publicado o no). Reutiliza el mismo
+  // bucle de arriba en vez de recorrer `sesiones` una tercera vez.
+  const fechasConEnviada = new Set(); // fechas de la semana con >=1 sesión ENVIADA ese día
+  const fechasConCualquiera = new Set(); // fechas de la semana con >=1 sesión (enviada o borrador)
+  const jugadoresConTrabajoSemana = new Set(); // jugadorId con algún destino (enviado o borrador) esta semana, cualquier fecha
+  sesiones.forEach((s) => {
+    const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : activos.map((p) => p.id);
+    (s.fechas || []).forEach((f) => {
+      if (f < lunes || f > domingo) return;
+      if (s.enviada) {
         ocurrenciasSemana++;
+        fechasConEnviada.add(f);
         if (f <= hoy) {
           ocurrenciasRealizadas++;
           destino.forEach((jugadorId) => asignacionesSemana.push({ jugadorId, date: f }));
         }
-      });
+      }
+      fechasConCualquiera.add(f);
+      destino.forEach((jugadorId) => jugadoresConTrabajoSemana.add(jugadorId));
     });
+  });
+
+  // "Tu semana": un punto de estado por día L-D. Regla honesta y simple
+  // (documentada también en el mockup): "ok" = sesión ENVIADA ese día y ya
+  // ha pasado (o es hoy); "pending" = alguna sesión (enviada o borrador)
+  // ese día y todavía no ha pasado (es hoy o futuro); en cualquier otro
+  // caso, "empty" — incluido el caso borde de un borrador en un día YA
+  // pasado y nunca publicado, que no encaja honestamente en "ok" (no se
+  // publicó) ni en "pending" (ya pasó). El mockup contempla un cuarto
+  // estado invisible ("dot--none", día sin dato determinable) que aquí NO
+  // se usa: con `sesiones` ya sabemos siempre si hubo o no trabajo ese
+  // día, así que "empty" siempre es un dato real, nunca un placeholder.
+  const semanaDias = [];
+  for (let i = 0; i < 7; i++) {
+    const f = sumarDiasFecha(lunes, i);
+    let estado;
+    if (f <= hoy && fechasConEnviada.has(f)) estado = "ok";
+    else if (f >= hoy && fechasConCualquiera.has(f)) estado = "pending";
+    else estado = "empty";
+    semanaDias.push({ fecha: f, dow: ["L", "M", "X", "J", "V", "S", "D"][i], dayNum: new Date(f + "T00:00:00").getDate(), isToday: f === hoy, estado });
+  }
+
+  // "N jugadores sin trabajo": activos que no aparecen como destino de
+  // ninguna sesión (enviada o borrador) en ningún día de la semana en
+  // curso — sin la restricción `f <= hoy` de la adherencia, porque aquí
+  // interesa si ya tienen algo planificado para el resto de la semana, no
+  // solo lo ya ocurrido.
+  const jugadoresSinTrabajo = activos.filter((p) => !jugadoresConTrabajoSemana.has(p.id));
 
   // Adherencia: SOLO la semana en curso, con el dato que la sostiene
   // (cumplidas / planificadas). Ya NO se compara contra la semana anterior
@@ -3321,13 +3757,29 @@ function useDatosDashboardEntrenador() {
     if (!regs.length) return null;
     return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
   };
+  // Serie reciente para el sparkline de cada fila: los últimos registros
+  // REALES de carga de ese jugador (mismo filtro que cargaMedia — sin CMJ
+  // ni Resistencia, con cargaReal numérico), ordenados por fecha y
+  // recortados a los últimos 5. Sin límite de "esta semana": si la
+  // trayectoria reciente cae parcialmente en la semana anterior no pasa
+  // nada, sigue siendo dato real del jugador. Con menos de 2 puntos no hay
+  // trayectoria que dibujar (un punto no es una línea) — se deja vacía y el
+  // sparkline simplemente no se pinta para esa fila, en vez de rellenar con
+  // valores inventados.
+  const serieRecienteJugador = (jugadorId) => {
+    const regs = equipoHistory
+      .filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null)
+      .slice()
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+    return regs.slice(-5).map((it) => Number(it.cargaReal));
+  };
   const variaciones = activos
     .map((p) => {
       const actual = cargaMedia(p.id, lunes, hoy);
       const anterior = cargaMedia(p.id, lunesAnterior, domingoAnterior);
       if (actual == null || anterior == null || anterior === 0) return null;
       const pct = ((actual - anterior) / anterior) * 100;
-      return { jugador: p, pct };
+      return { jugador: p, pct, serieReciente: serieRecienteJugador(p.id) };
     })
     .filter(Boolean)
     .sort((a, b) => a.pct - b.pct);
@@ -3355,6 +3807,8 @@ function useDatosDashboardEntrenador() {
     adherenciaActual,
     cumplidasSemana,
     asignacionesSemana,
+    semanaDias,
+    jugadoresSinTrabajo,
     variaciones,
     atencionSemaforo,
     sesionHoy,
@@ -3381,6 +3835,8 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
     adherenciaActual,
     cumplidasSemana,
     asignacionesSemana,
+    semanaDias,
+    jugadoresSinTrabajo,
     variaciones,
     atencionSemaforo,
     sesionHoy,
@@ -3439,7 +3895,7 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
           />
         </div>
 
-        <CalendarioPlaceholderDashboardReal onAbrirModulo={onAbrirModulo} borradores={borradores} />
+        <PanelSemanaDashboardReal onAbrirModulo={onAbrirModulo} borradores={borradores} semanaDias={semanaDias} jugadoresSinTrabajo={jugadoresSinTrabajo} />
 
         <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={playersById} />
 
@@ -3544,17 +4000,25 @@ function TiraStatsCompactaReal({ datos }) {
   );
 }
 
-// Reserva el espacio de "Tu semana" (calendario del entrenador) ya en el
-// layout, tal y como pide el mockup — pero SIN la tira de días con estado
-// diario (L-D), porque calendario_asignaciones todavía no existe: inventar
-// esos puntos por día sería fabricar datos. En cuanto se implemente
-// Calendario (Fase 6), este placeholder se sustituye por el panel real con
-// los mismos huecos que ya tiene reservados.
-// Lo que SÍ es un dato real ya disponible aquí es "borradores" (sesiones
-// creadas pero aún sin publicar) — el mismo aviso "N sesiones sin diseñar"
-// del mockup, mostrado como el mismo chip con número grande.
-function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact, borradores }) {
-  const hayBorradores = typeof borradores === "number" && borradores > 0;
+// "Tu semana": tira de 7 días (L-D, semana de calendario en curso) + dos
+// alert-chips, tal y como pide el mockup — ya con dato real: el estado de
+// cada día viene de `semanaDias` (useDatosDashboardEntrenador, derivado de
+// `sesiones`) y las dos cifras de las chips son "borradores" (ya se
+// calculaba) y "jugadoresSinTrabajo" (activos sin ningún destino esta
+// semana, enviado o borrador). El mockup contempla un cuarto estado de
+// punto invisible ("dot--none", día sin dato determinable); no se usa aquí
+// porque con `sesiones` siempre se puede decidir honestamente si un día
+// está "ok", "pending" o "empty" — ver el comentario en `semanaDias` dentro
+// del hook. El enlace "Calendario →" del mockup no tiene módulo dedicado
+// todavía en la app, así que apunta a "Programación" (sesión de hoy y
+// próximas), el módulo más cercano — igual que el resto de accesos de este
+// panel, nunca un href muerto.
+function PanelSemanaDashboardReal({ onAbrirModulo, compact, borradores, semanaDias, jugadoresSinTrabajo }) {
+  const nSinDisenar = borradores || 0;
+  const nSinTrabajo = jugadoresSinTrabajo ? jugadoresSinTrabajo.length : 0;
+  const colorDot = (estado) => (estado === "ok" ? ds.success : estado === "pending" ? ds.warning : ds.inkMuted);
+  const opacidadDot = (estado) => (estado === "empty" ? 0.45 : 1);
+
   return (
     <div
       style={{
@@ -3562,42 +4026,87 @@ function CalendarioPlaceholderDashboardReal({ onAbrirModulo, compact, borradores
         marginBottom: 12,
         display: "flex",
         alignItems: "center",
-        gap: compact ? 8 : 12,
+        gap: compact ? 10 : 16,
         background: ds.surfaceRaised,
         border: `1px solid ${ds.borderSoft}`,
         borderRadius: compact ? dsR.lg : dsR.xl,
-        padding: compact ? "8px 12px" : "10px 16px",
+        padding: compact ? "9px 12px" : "10px 16px",
+        flexWrap: compact ? "wrap" : "nowrap",
       }}
     >
-      <div style={{ width: compact ? 20 : 24, height: compact ? 20 : 24, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-        <Calendar size={compact ? 11 : 13} />
+      <div style={{ display: "flex", gap: compact ? 3 : 5, flexShrink: 0 }}>
+        {(semanaDias || []).map((d) => (
+          <div
+            key={d.fecha}
+            title={d.fecha}
+            style={{
+              width: compact ? 24 : 34,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 4,
+              padding: "4px 1px",
+              borderRadius: dsR.sm,
+              background: d.isToday ? ds.accentSubtle : "transparent",
+            }}
+          >
+            <div style={{ fontFamily: dsF.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 600, color: ds.inkMuted, textTransform: "uppercase" }}>{d.dow}</div>
+            <div style={{ fontFamily: dsF.display, fontSize: compact ? 10.5 : 12, fontWeight: 700, color: ds.ink }}>{d.dayNum}</div>
+            <span style={{ width: 5, height: 5, borderRadius: "50%", background: colorDot(d.estado), opacity: opacidadDot(d.estado), flexShrink: 0 }} />
+          </div>
+        ))}
       </div>
-      <div style={{ flex: 1, minWidth: 0, fontSize: compact ? 10.5 : 11.5, color: ds.inkMuted, whiteSpace: compact ? "nowrap" : "normal", overflow: compact ? "hidden" : "visible", textOverflow: compact ? "ellipsis" : "clip" }}>
-        {compact ? (
-          <span>
-            <span style={{ color: ds.inkSecondary, fontWeight: 600 }}>Tu semana</span> · calendario diario llega con Fase 6
-          </span>
-        ) : (
-          <>
-            <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Tu semana</div>
-            <div>El calendario diario del entrenador llega con Fase 6 — todavía no hay sesiones programadas por fecha que mostrar aquí.</div>
-          </>
-        )}
-      </div>
-      {hayBorradores && (
-        <div style={{ display: "flex", alignItems: "baseline", gap: 5, flexShrink: 0, whiteSpace: "nowrap" }}>
-          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800, color: ds.warning }}>{borradores}</span>
-          <span style={{ fontSize: compact ? 10 : 11, fontWeight: 600, color: ds.warning }}>{borradores === 1 ? "sesión sin publicar" : "sesiones sin publicar"}</span>
+
+      {!compact && <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0, margin: "2px 0" }} />}
+
+      <div style={{ display: "flex", gap: compact ? 14 : 20, flex: 1, alignItems: "center", flexWrap: "wrap", minWidth: compact ? "100%" : 0 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: compact ? 10.5 : 11.5, fontWeight: 600, color: ds.warning, whiteSpace: "nowrap" }}>
+          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800 }}>{nSinDisenar}</span>
+          sesiones sin diseñar
+          <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.inkSecondary, textDecoration: "underline", textDecorationColor: ds.border, fontWeight: 600, fontSize: compact ? 9.5 : 10.5 }}>
+            Terminar →
+          </button>
         </div>
-      )}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: compact ? 10.5 : 11.5, fontWeight: 600, color: nSinTrabajo > 0 ? ds.danger : ds.inkMuted, whiteSpace: "nowrap" }}>
+          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800 }}>{nSinTrabajo}</span>
+          jugadores sin trabajo
+          <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.inkSecondary, textDecoration: "underline", textDecorationColor: ds.border, fontWeight: 600, fontSize: compact ? 9.5 : 10.5 }}>
+            Ver →
+          </button>
+        </div>
+      </div>
+
       <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: compact ? 10.5 : 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
-        {compact ? "Ver →" : "Ver programación →"}
+        Calendario →
       </button>
     </div>
   );
 }
 
 const SEM_COLOR_DASHBOARD = { red: ds.danger, amber: ds.warning, green: ds.success };
+
+// Sparkline de "Quién necesita atención": convierte una serie REAL de
+// valores de carga (2 a 5 puntos, ver `serieRecienteJugador` en el hook) en
+// los puntos de un <polyline> sobre un viewBox 0 0 52 20, igual que el
+// mockup. Normaliza al rango real de esos valores (min→y=17, max→y=3, con
+// margen arriba/abajo); si todos los valores son iguales dibuja una línea
+// plana en el centro. Con menos de 2 puntos no hay trayectoria real que
+// mostrar — devuelve null y la fila simplemente no pinta sparkline, en vez
+// de rellenar con datos inventados.
+function sparklinePuntos(valores) {
+  if (!valores || valores.length < 2) return null;
+  const min = Math.min(...valores);
+  const max = Math.max(...valores);
+  const n = valores.length;
+  const stepX = 52 / (n - 1);
+  return valores
+    .map((v, i) => {
+      const x = i * stepX;
+      const y = max === min ? 10 : 17 - ((v - min) / (max - min)) * 14;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(" ");
+}
 
 // Fila de "Quién necesita atención": nadie va destacado por defecto — el
 // semáforo da la severidad de un vistazo y el detalle solo se despliega al
@@ -3606,12 +4115,20 @@ const SEM_COLOR_DASHBOARD = { red: ds.danger, amber: ds.warning, green: ds.succe
 // muchos jugadores sin que cada uno ocupe tanto alto — el % ya dice lo
 // esencial, el detalle no aporta tanto como para pagar ese espacio en móvil.
 function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
-  const { jugador, pct } = variacion;
+  const { jugador, pct, serieReciente } = variacion;
   const positivo = pct >= 0;
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
   const avatarSize = compact ? 18 : 22;
   const pad = compact ? "5px 0" : "8px 0";
   const fontSize = compact ? 11 : 11.5;
+  // Sparkline en ambas variantes: a 38x14 (desktop) / 30x12 (compact) cabe
+  // sin apretar la fila compact, que ya es más baja pero no tan estrecha
+  // como para tener que sacrificarlo — a diferencia del párrafo de detalle,
+  // que sí se omite en compact. Con <2 puntos reales, `sparklinePuntos`
+  // devuelve null y no se pinta nada (ni aquí ni en desktop).
+  const puntos = sparklinePuntos(serieReciente);
+  const sparkW = compact ? 30 : 38;
+  const sparkH = compact ? 12 : 14;
 
   const fila = (
     <summary style={{ display: "flex", alignItems: "center", gap: compact ? 7 : 9, padding: pad }}>
@@ -3633,6 +4150,11 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
           <div style={{ fontSize, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
         )}
       </div>
+      {puntos && (
+        <svg width={sparkW} height={sparkH} viewBox="0 0 52 20" style={{ flexShrink: 0 }}>
+          <polyline points={puntos} fill="none" stroke={SEM_COLOR_DASHBOARD[semaforo]} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      )}
       <span style={{ fontFamily: dsF.mono, fontSize: compact ? 10 : 10.5, fontWeight: 700, color: positivo ? ds.success : ds.danger, flexShrink: 0, minWidth: 34, textAlign: "right" }}>
         {positivo ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
       </span>
@@ -9155,6 +9677,65 @@ function pct1RMporRTF(rtf) {
   return TABLA_PCT_1RM_POR_RTF[base] + (TABLA_PCT_1RM_POR_RTF[base + 1] - TABLA_PCT_1RM_POR_RTF[base]) * resto;
 }
 
+// Motor de "récord de carga" (e1RM) del jugador, extraído a una función
+// reutilizable — es EXACTAMENTE el mismo cálculo que ya vive dentro de la
+// pantalla del jugador (agrupar por ejercicio+equipo con materialEfectivo,
+// e1RM por marca con e1rmDeRegistro/pct1RMporRTF, mejor marca vs. segunda
+// mejor para el "% sobre tu récord anterior"), aquí compartido por la ficha
+// del entrenador: el record-callout de Resumen y "Récords personales" de
+// Progreso (Fase 6 → Equipos y usuarios) NO reinventan el cálculo, lo leen
+// de aquí. Devuelve un registro por ejercicio+equipo con al menos un e1RM
+// válido, con su mejor marca actual, la fecha en que se logró, el % sobre
+// la siguiente mejor marca, y la serie cronológica completa de e1RM (para
+// la mini-gráfica "línea discontinua en la mejor marca + anillo verde").
+function calcularRecordsCargaJugador(items) {
+  const registrosConCarga = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
+  const equiposPorNombre = new Map();
+  items
+    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .forEach((it) => {
+      const eq = materialEfectivo(it);
+      if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
+      equiposPorNombre.get(it.name).add(eq);
+    });
+  const etiqueta = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
+  const e1rmDeRegistro = (it) => {
+    const reps = Number(it.repsReal);
+    const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+    const carga = Number(it.cargaReal);
+    if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+    if (reps > REPS_MAX_RIR_FIABLE) return null;
+    const pct = pct1RMporRTF(reps + rir);
+    return pct ? carga / pct : null;
+  };
+  const registrosPorEjercicio = new Map();
+  registrosConCarga.forEach((it) => {
+    const equipo = materialEfectivo(it);
+    const clave = `${it.name}::${equipo}`;
+    if (!registrosPorEjercicio.has(clave)) registrosPorEjercicio.set(clave, { nombre: it.name, equipo, regs: [] });
+    registrosPorEjercicio.get(clave).regs.push(it);
+  });
+  const records = [];
+  registrosPorEjercicio.forEach(({ nombre, equipo, regs }, clave) => {
+    const conE1rm = regs.map((it) => ({ it, e1rm: e1rmDeRegistro(it) })).filter((x) => x.e1rm != null);
+    if (!conE1rm.length) return;
+    const ordenados = [...conE1rm].sort((a, b) => b.e1rm - a.e1rm);
+    const maxActual = ordenados[0];
+    const maxAnterior = ordenados.find((x) => x.it.id !== maxActual.it.id && x.e1rm < maxActual.e1rm);
+    const pctSobreAnterior = maxAnterior ? ((maxActual.e1rm - maxAnterior.e1rm) / maxAnterior.e1rm) * 100 : null;
+    const puntosCron = [...conE1rm].sort((a, b) => new Date(a.it.date) - new Date(b.it.date));
+    records.push({
+      clave,
+      nombre: etiqueta(nombre, equipo),
+      valor: Math.round(maxActual.e1rm),
+      fecha: maxActual.it.date,
+      pctSobreAnterior,
+      puntos: puntosCron.map(({ it, e1rm }) => ({ date: it.date, valor: Math.round(e1rm), reps: it.repsReal, rir: it.rirReal })),
+    });
+  });
+  return records;
+}
+
 // A partir de una marca previa con OTRO diseño (reps/RIR distinto al de
 // hoy), estima una carga de partida para el diseño de hoy: calcula el e1RM
 // implícito en la marca previa (carga / %1RM de su RTF) y lo vuelve a bajar
@@ -9205,6 +9786,14 @@ const UNIDAD_POR_MODO = { reps: "reps", tiempo: "seg", minutos: "min", metros: "
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
 const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior", "Zona media", "Global"];
 const TIPOS_TEJIDO_BIBLIOTECA = ["Muscular", "Tendinosa", "Articular"];
+// Naturaleza: solo tiene sentido dentro del bloque "Fuerza" (mockup v2) —
+// distingue un movimiento de fuerza general de uno específico del deporte
+// (p. ej. una zancada búlgara orientada al gesto de cambio de dirección).
+const NATURALEZA_BIBLIOTECA = ["General", "Específica del deporte"];
+// Lateralidad del ejercicio en sí (distinto de tareas.lateralidad, que es la
+// elegida al añadirlo a una sesión concreta, y distinto de sin_lateralidad,
+// que oculta esta etiqueta por completo cuando no aplica, p. ej. bici estática).
+const LATERALIDAD_BIBLIOTECA = ["Bilateral", "Unilateral"];
 
 function TagChipReal({ tag, activo, onClick }) {
   return (
@@ -9342,13 +9931,13 @@ function MiniaturaEjercicioReal({ ejercicio, color, Icono, variantesCount }) {
 // en el mockup), y si tiene variantes, sus nombres justo debajo dentro de
 // la misma tarjeta — así la rejilla visual del mockup convive con el
 // agrupamiento matriz+variantes que ya funcionaba en la lista real.
-function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, onCrearVariante }) {
+function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, onCrearVariante, onToggleFavorito }) {
   const color = BLOQUE_COLOR_REAL[matriz.bloque] || ds.chart2;
   const Icono = BLOQUE_ICONO_REAL[matriz.bloque] || Dumbbell;
   const nombreCategoria = categorias.find((c) => c.id === matriz.categoria_preventiva_id)?.nombre;
   const botonReset = { display: "block", width: "100%", background: "transparent", border: "none", margin: 0, padding: 0, font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer" };
   return (
-    <div style={{ display: "flex", flexDirection: "column", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, overflow: "hidden", boxShadow: dsSh.elevation1 }}>
+    <div style={{ position: "relative", display: "flex", flexDirection: "column", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, overflow: "hidden", boxShadow: dsSh.elevation1 }}>
       <button onClick={() => onEditar(matriz)} style={botonReset} title="Editar ejercicio">
         <MiniaturaEjercicioReal ejercicio={matriz} color={color} Icono={Icono} variantesCount={variantes.length} />
         <div style={{ padding: "10px 12px 9px" }}>
@@ -9360,14 +9949,49 @@ function TarjetaFamiliaEjercicioReal({ matriz, variantes, categorias, onEditar, 
             {(matriz.tags_descriptivos || []).map((t) => (
               <TagBibliotecaReal key={t}>{t}</TagBibliotecaReal>
             ))}
+            {matriz.naturaleza && (
+              <TagBibliotecaReal color={ds.accent}>{matriz.naturaleza === "Específica del deporte" ? "Específica" : matriz.naturaleza}</TagBibliotecaReal>
+            )}
+            {matriz.lateralidad && matriz.sin_lateralidad !== "si" && <TagBibliotecaReal>{matriz.lateralidad}</TagBibliotecaReal>}
             {nombreCategoria && (
               <TagBibliotecaReal color={ds.accent} solido>
                 {nombreCategoria}
               </TagBibliotecaReal>
             )}
+            {matriz.es_personalizado !== false && (
+              <TagBibliotecaReal color={ds.accent} solido>
+                Personalizado
+              </TagBibliotecaReal>
+            )}
           </div>
         </div>
       </button>
+      {onToggleFavorito && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFavorito(matriz);
+          }}
+          title={matriz.favorito ? "Quitar de favoritos" : "Marcar como favorito"}
+          style={{
+            position: "absolute",
+            right: 8,
+            top: 8,
+            width: 24,
+            height: 24,
+            borderRadius: dsR.full,
+            background: "rgba(10,18,32,0.55)",
+            border: "none",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            zIndex: 2,
+          }}
+        >
+          <Heart size={12} color={matriz.favorito ? ds.accent : "#fff"} fill={matriz.favorito ? ds.accent : "none"} />
+        </button>
+      )}
       {variantes.length > 0 && (
         <div style={{ borderTop: `1px solid ${ds.border}`, padding: "4px 6px" }}>
           {variantes.map((v) => (
@@ -9410,6 +10034,8 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   const [tagsSel, setTagsSel] = useState(base?.tags_descriptivos || []);
   const [videoUrl, setVideoUrl] = useState(ejercicioEditar?.gif_url || "");
   const [sinLateralidad, setSinLateralidad] = useState(ejercicioEditar?.sin_lateralidad === "si");
+  const [naturaleza, setNaturaleza] = useState(base?.naturaleza || "");
+  const [lateralidad, setLateralidad] = useState(base?.lateralidad || "");
   const [materialesDisponibles] = useMaterialesDisponibles();
   const [filasVariantes, setFilasVariantes] = useState(() =>
     Object.entries(ejercicioEditar?.videos_variantes || {}).map(([clave, url]) => {
@@ -9485,6 +10111,30 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
             </select>
           </label>
         )}
+        {bloque === "Fuerza" && (
+          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NATURALEZA (solo aplica a Fuerza, opcional)</span>
+            <select value={naturaleza} onChange={(e) => setNaturaleza(e.target.value)} style={campoSelectReal()}>
+              <option value="">Sin especificar</option>
+              {NATURALEZA_BIBLIOTECA.map((n) => (
+                <option key={n} value={n}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>LATERALIDAD (opcional)</span>
+          <select value={lateralidad} onChange={(e) => setLateralidad(e.target.value)} style={campoSelectReal()}>
+            <option value="">Sin especificar</option>
+            {LATERALIDAD_BIBLIOTECA.map((l) => (
+              <option key={l} value={l}>
+                {l}
+              </option>
+            ))}
+          </select>
+        </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -9628,6 +10278,8 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                 ejercicio_base_id: ejercicioBaseId || "",
                 tags_descriptivos: tagsSel,
                 sin_lateralidad: sinLateralidad ? "si" : "",
+                naturaleza: bloque === "Fuerza" ? naturaleza || null : null,
+                lateralidad: lateralidad || null,
                 gif_url: videoUrl,
                 videos_variantes: Object.fromEntries(
                   filasVariantes.filter((f) => f.material && f.url.trim()).map((f) => [claveVideoVariante(f.material, f.unilateral), f.url.trim()])
@@ -9700,30 +10352,275 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
   );
 }
 
+// Tarjeta de plantilla para la rejilla de "Sesiones" del mockup v2 (mismo
+// patrón visual que TarjetaFamiliaEjercicioReal: gradiente por bloque +
+// icono). El color/ícono se toma de la primera tarea de la plantilla, igual
+// que MiniaturaEjercicioReal hace con el bloque del ejercicio.
+function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir }) {
+  const primeraTarea = plantilla.tareas[0];
+  const color = BLOQUE_COLOR_REAL[primeraTarea?.bloque_sesion] || ds.chart2;
+  const Icono = BLOQUE_ICONO_REAL[primeraTarea?.bloque_sesion] || ClipboardList;
+  const ultimaFecha = (plantilla.fechas || []).slice().sort().reverse()[0];
+  const nombresTareas = plantilla.tareas.map((t) => t.nombreEjercicio).filter(Boolean);
+  const preview = nombresTareas.length > 3 ? `${nombresTareas.slice(0, 3).join(" · ")} +${nombresTareas.length - 3} más` : nombresTareas.join(" · ") || "Sin tareas todavía";
+  return (
+    <button
+      onClick={onAbrir}
+      style={{
+        textAlign: "left",
+        cursor: "pointer",
+        background: `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
+        border: `1px solid ${ds.borderSoft}`,
+        borderRadius: dsR.xl,
+        padding: "15px 16px",
+        boxShadow: dsSh.elevation1,
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        font: "inherit",
+        color: "inherit",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{plantilla.nombre}</div>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{ultimaFecha ? `Última vez: ${fmtHaceDias(ultimaFecha)}` : "Sin usar todavía"}</div>
+        </div>
+        <div style={{ width: 30, height: 30, borderRadius: dsR.md, background: `${color}22`, color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Icono size={15} />
+        </div>
+      </div>
+      <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.6, borderTop: `1px solid ${ds.border}`, paddingTop: 9 }}>{preview}</div>
+      <div style={{ fontFamily: dsF.sans, fontSize: 11, fontWeight: 700, color: ds.accent, marginTop: "auto" }}>Ver plantilla →</div>
+    </button>
+  );
+}
+
+// Vista "Sesiones" dentro de Biblioteca (mockup v2: view-switch arriba de la
+// rejilla). Reutiliza tal cual los datos y el criterio de "plantilla" que ya
+// existía en ProgramacionReal (Biblioteca de sesiones: cualquier sesión con
+// nombre puesto por el entrenador) y los editores reales (DisenoSesionReal /
+// DinamicaComplementariaReal) para Editar/Asignar — no se inventa ningún
+// flujo nuevo de guardado ni de asignación.
+function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
+  const { loaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
+  const [busqueda, setBusqueda] = useState("");
+  const [plantillaSelId, setPlantillaSelId] = useState(null);
+  const [modoEditor, setModoEditor] = useState(null); // null | "editar" | "asignar"
+
+  if (!loaded) return <LoadingBlock />;
+
+  const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
+  const sesionIdsSet = new Set(sesiones.map((s) => s.id));
+  const tareasBySesion = new Map();
+  tareas
+    .filter((t) => sesionIdsSet.has(t.sesion_id))
+    .forEach((t) => {
+      if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
+      const e = ejerciciosById.get(t.ejercicio_id) || {};
+      tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
+    });
+  const conTareas = sesiones.map((s) => ({
+    ...s,
+    tareas: (tareasBySesion.get(s.id) || []).slice().sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0)),
+  }));
+
+  // Mismo criterio que "Biblioteca de sesiones" en Programación: cualquier
+  // sesión con nombre puesto por el entrenador es una plantilla, esté o no
+  // ya programada/pasada.
+  const plantillas = conTareas
+    .filter((s) => s.nombre && s.nombre.trim())
+    .filter((s) => !busqueda.trim() || s.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
+    .sort((a, b) => a.nombre.localeCompare(b.nombre));
+
+  const plantillaSel = plantillaSelId ? conTareas.find((s) => s.id === plantillaSelId) : null;
+
+  if (modoEditor && plantillaSel) {
+    const esComplementaria = plantillaSel.tipo === "complementaria";
+    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const cerrar = () => setModoEditor(null);
+    return (
+      <EditorComponent
+        sesionExistente={modoEditor === "editar" ? plantillaSel : undefined}
+        plantilla={modoEditor === "asignar" ? plantillaSel : undefined}
+        onBack={cerrar}
+        onGuardado={() => {
+          invalidateBootstrapCache();
+          retry();
+          cerrar();
+          if (modoEditor === "asignar") setPlantillaSelId(null);
+        }}
+      />
+    );
+  }
+
+  if (plantillaSel) {
+    const tareasSel = plantillaSel.tareas;
+    const primeraTarea = tareasSel[0];
+    const color = BLOQUE_COLOR_REAL[primeraTarea?.bloque_sesion] || ds.chart2;
+    const Icono = BLOQUE_ICONO_REAL[primeraTarea?.bloque_sesion] || ClipboardList;
+    const ultimaFecha = (plantillaSel.fechas || []).slice().sort().reverse()[0];
+    const esPct1rm = primeraTarea?.modo_carga === "pct1rm";
+    return (
+      <div>
+        <button
+          onClick={() => setPlantillaSelId(null)}
+          style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, cursor: "pointer", padding: 0, marginBottom: 16 }}
+        >
+          ← Volver a Sesiones
+        </button>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, flexWrap: "wrap", marginBottom: 18 }}>
+          <div>
+            <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 8px" }}>{plantillaSel.nombre}</h1>
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Tareas</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink }}>{tareasSel.length} tarea{tareasSel.length === 1 ? "" : "s"}</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Última vez</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink }}>{ultimaFecha ? fmtHaceDias(ultimaFecha) : "Sin fecha todavía"}</div>
+              </div>
+              <div>
+                <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Destinatarios</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink }}>
+                  {!plantillaSel.jugadores_destino || !plantillaSel.jugadores_destino.length ? "Todo el equipo" : `${plantillaSel.jugadores_destino.length} jugador(es)`}
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+            <DsButton variant="secondary" onClick={() => setModoEditor("editar")}>
+              Editar
+            </DsButton>
+            <DsButton onClick={() => setModoEditor("asignar")}>Asignar</DsButton>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "280px 1fr", gap: 16 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {tareasSel.map((t, i) => (
+              <div key={t.id} style={{ padding: "10px 11px", borderRadius: dsR.md, border: `1px solid ${ds.borderSoft}`, background: ds.surfaceRaised }}>
+                <div style={{ fontSize: 11.5, fontWeight: 700, color: ds.ink }}>
+                  {i + 1}. {t.nombreEjercicio}
+                </div>
+                <div style={{ fontSize: 10, color: ds.inkMuted, marginTop: 1 }}>{formatearDetalleTareaCoach(t)}</div>
+              </div>
+            ))}
+            {tareasSel.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "10px 0" }}>Esta plantilla todavía no tiene tareas.</div>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                borderRadius: dsR.xl,
+                aspectRatio: "16 / 8",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                border: `1px solid ${ds.borderSoft}`,
+                background: `linear-gradient(135deg, ${color}, ${ds.surfaceRaised})`,
+              }}
+            >
+              <Icono size={40} color="#fff" style={{ opacity: 0.45 }} />
+            </div>
+            {primeraTarea && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
+                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Modo de carga</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{esPct1rm ? "% 1RM" : "RIR"}</div>
+                </div>
+                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Series × reps</div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>
+                    {primeraTarea.series ? `${primeraTarea.series} × ` : ""}
+                    {primeraTarea.cantidad ?? "—"}
+                  </div>
+                </div>
+                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
+                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
+                    {esPct1rm ? "% 1RM objetivo" : "RIR objetivo"}
+                  </div>
+                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{esPct1rm ? primeraTarea.pct1rm ?? "—" : primeraTarea.rir ?? "—"}</div>
+                </div>
+              </div>
+            )}
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, lineHeight: 1.5, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px" }}>
+              Esta configuración es la real de la app (no la de un mockup): series/RIR o %1RM con carga sugerida a partir del e1RM del jugador — se edita desde "Editar", igual que siempre.
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
+        <div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{plantillas.length} plantillas guardadas</div>
+        </div>
+        <DsButton onClick={() => onAbrirModulo && onAbrirModulo("programacion")}>+ Diseñar sesión</DsButton>
+      </div>
+      <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar plantilla..." style={{ marginBottom: 14, maxWidth: 320 }} />
+      {plantillas.length === 0 ? (
+        <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>
+          {busqueda ? "Ninguna plantilla coincide con esa búsqueda." : 'Todavía no has puesto nombre a ninguna sesión. Ponle uno al diseñarla (en "Diseñar sesión") para que aparezca aquí.'}
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
+          {plantillas.map((p) => (
+            <TarjetaPlantillaBibliotecaReal key={p.id} plantilla={p} onAbrir={() => setPlantillaSelId(p.id)} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [bloqueFiltro, setBloqueFiltro] = useState("Todos");
   const [zonaFiltro, setZonaFiltro] = useState("Todas");
   const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
+  const [naturalezaFiltro, setNaturalezaFiltro] = useState("Todas");
+  const [lateralidadFiltro, setLateralidadFiltro] = useState("Todas");
   const [busqueda, setBusqueda] = useState("");
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false);
   const [panelAbierto, setPanelAbierto] = useState(false);
   const [ejercicioEditando, setEjercicioEditando] = useState(null);
   const [matrizParaVariante, setMatrizParaVariante] = useState(null);
   const [vista, setVista] = useState("lista");
+  // view-switch del mockup v2: "Ejercicios" es lo de siempre; "Sesiones"
+  // muestra la biblioteca de plantillas que hasta ahora vivía escondida
+  // dentro de Programación (botón colapsable "Biblioteca de sesiones").
+  const [vistaPrincipal, setVistaPrincipal] = useState("ejercicios");
+  // lib-tabs del mockup v2: Todos / Personalizados / Favoritos.
+  const [libTab, setLibTab] = useState("todos");
   const [errorBorrado, setErrorBorrado] = useState("");
   const [errorGuardado, setErrorGuardado] = useState("");
 
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
-  const hayFiltrosActivos = bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || categoriaFiltro !== "Todas";
+  const hayFiltrosActivos =
+    bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || categoriaFiltro !== "Todas" || naturalezaFiltro !== "Todas" || lateralidadFiltro !== "Todas";
 
   const visibles = ejercicios
     .filter((e) => (bloqueFiltro === "Todos" ? true : e.bloque === bloqueFiltro))
     .filter((e) => (zonaFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(zonaFiltro)))
     .filter((e) => (categoriaFiltro === "Todas" ? true : e.categoria_preventiva_id === categoriaFiltro))
+    .filter((e) => (naturalezaFiltro === "Todas" ? true : e.naturaleza === naturalezaFiltro))
+    .filter((e) => (lateralidadFiltro === "Todas" ? true : e.lateralidad === lateralidadFiltro))
+    .filter((e) => (libTab === "personalizados" ? e.es_personalizado !== false : true))
+    .filter((e) => (libTab === "favoritos" ? !!e.favorito : true))
     .filter((e) => (e.nombre || "").toLowerCase().includes(busqueda.toLowerCase()));
+
+  const toggleFavorito = (ej) => {
+    saveEjercicios(ejercicios.map((e) => (e.id === ej.id ? { ...e, favorito: !e.favorito } : e)));
+  };
+
+  const totalPersonalizados = ejercicios.filter((e) => e.es_personalizado !== false).length;
+  const totalFavoritos = ejercicios.filter((e) => e.favorito).length;
 
   const abrirEdicion = (ej) => {
     setEjercicioEditando(ej);
@@ -9777,11 +10674,23 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   return (
     <PantallaEntrenadorAncha activo="biblioteca" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
+        <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14, width: 200 }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BIBLIOTECA</span>
+          <select value={vistaPrincipal} onChange={(e) => setVistaPrincipal(e.target.value)} style={campoSelectReal({ maxWidth: 200 })}>
+            <option value="ejercicios">Ejercicios</option>
+            <option value="sesiones">Sesiones</option>
+          </select>
+        </label>
+        {vistaPrincipal === "sesiones" ? (
+          <VistaSesionesBibliotecaReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+        ) : (
+        <>
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
           <div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>BIBLIOTECA</div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ejercicios</h1>
-            <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{ejercicios.length} ejercicios creados</div>
+            <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+              {ejercicios.length} ejercicios · {totalPersonalizados} personalizados · {totalFavoritos} favoritos
+            </div>
           </div>
           <button
             onClick={() => {
@@ -9809,13 +10718,25 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             +
           </button>
         </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 16, width: 220 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VISTA</span>
-          <select value={vista} onChange={(e) => setVista(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
-            <option value="lista">Lista y filtros</option>
-            <option value="rotacion">Orden de rotación</option>
-          </select>
-        </label>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 220 }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VISTA</span>
+            <select value={vista} onChange={(e) => setVista(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+              <option value="lista">Lista y filtros</option>
+              <option value="rotacion">Orden de rotación</option>
+            </select>
+          </label>
+          {vista === "lista" && (
+            <label style={{ display: "flex", flexDirection: "column", gap: 5, width: 200 }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>PESTAÑA</span>
+              <select value={libTab} onChange={(e) => setLibTab(e.target.value)} style={campoSelectReal({ maxWidth: 200 })}>
+                <option value="todos">Todos los ejercicios</option>
+                <option value="personalizados">Personalizados</option>
+                <option value="favoritos">♥ Favoritos</option>
+              </select>
+            </label>
+          )}
+        </div>
         {vista === "lista" ? (
           <>
             <div style={{ display: "flex", gap: 8, marginBottom: 14, position: "relative" }}>
@@ -9886,6 +10807,30 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
                     </label>
                     <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        Naturaleza <span style={{ color: ds.inkMuted, textTransform: "none", letterSpacing: 0 }}>(solo Fuerza)</span>
+                      </span>
+                      <select value={naturalezaFiltro} onChange={(e) => setNaturalezaFiltro(e.target.value)} style={campoSelectReal()}>
+                        <option value="Todas">Todas</option>
+                        {NATURALEZA_BIBLIOTECA.map((n) => (
+                          <option key={n} value={n}>
+                            {n}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Lateralidad</span>
+                      <select value={lateralidadFiltro} onChange={(e) => setLateralidadFiltro(e.target.value)} style={campoSelectReal()}>
+                        <option value="Todas">Todas</option>
+                        {LATERALIDAD_BIBLIOTECA.map((l) => (
+                          <option key={l} value={l}>
+                            {l}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                      <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                         Categoría preventiva <span style={{ color: ds.inkMuted, textTransform: "none", letterSpacing: 0 }}>(solo Preventivo)</span>
                       </span>
                       <select value={categoriaFiltro} onChange={(e) => setCategoriaFiltro(e.target.value)} style={campoSelectReal()}>
@@ -9940,6 +10885,7 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
                       variantes={variantes}
                       categorias={categorias}
                       onEditar={abrirEdicion}
+                      onToggleFavorito={toggleFavorito}
                       onCrearVariante={() => {
                         setMatrizParaVariante(matriz);
                         setEjercicioEditando(null);
@@ -9954,8 +10900,10 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
         ) : (
           <VistaOrdenRotacionReal ejercicios={ejercicios} categorias={categorias} onReordenar={reordenarCategoria} />
         )}
+        </>
+        )}
       </div>
-      {panelAbierto && (
+      {vistaPrincipal === "ejercicios" && panelAbierto && (
         <PanelNuevoEjercicioReal
           categorias={categorias}
           ejercicios={ejercicios}
@@ -10193,15 +11141,23 @@ function NotaTareaReal({ nota, onCambiar }) {
 function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio }) {
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
   const etiquetaModo = { reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" };
-  const ciclarModo = () => {
-    const idx = modosDisponibles.indexOf(tarea.modo);
-    onCambiar({ ...tarea, modo: modosDisponibles[(idx + 1) % modosDisponibles.length] });
-  };
   const tipoResistencia = tarea.tipoResistencia || "Peso libre";
 
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+          <div style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {miniaturaTarea(tarea.gif) && (
+              <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 32, height: 32, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            )}
+            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+                <Play size={11} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
+              </div>
+            )}
+          </div>
+        )}
         {orden != null && (
           <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
@@ -10225,28 +11181,38 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
       {mostrarCarga && (
         <div>
           <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 4 }}>TIPO DE RESISTENCIA</div>
-          <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
+          <select
+            value={tipoResistencia}
+            onChange={(e) => onCambiar({ ...tarea, tipoResistencia: e.target.value })}
+            style={{ width: 180, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+          >
             {["Peso libre", "Elástica", "Peso corporal"].map((t) => (
-              <button
-                key={t}
-                onClick={() => onCambiar({ ...tarea, tipoResistencia: t })}
-                style={{ fontSize: 11, padding: "5px 9px", borderRadius: 6, border: `1px solid ${tipoResistencia === t ? ds.accent : ds.border}`, background: tipoResistencia === t ? ds.accentSubtle : "transparent", color: tipoResistencia === t ? ds.accent : ds.inkSecondary, cursor: "pointer" }}
-              >
+              <option key={t} value={t}>
                 {t}
-              </button>
+              </option>
             ))}
-          </div>
+          </select>
         </div>
       )}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <CampoEtiquetadoDiseno etiqueta="MODO" w={50}>
-          <button onClick={ciclarModo} style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }} title="Alternar reps / seg / min / metros">
-            {etiquetaModo[tarea.modo]}
-          </button>
+          <select
+            value={tarea.modo}
+            onChange={(e) => onCambiar({ ...tarea, modo: e.target.value })}
+            style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }}
+            title="Elegir reps / seg / min / metros"
+          >
+            {modosDisponibles.map((m) => (
+              <option key={m} value={m}>
+                {etiquetaModo[m]}
+              </option>
+            ))}
+          </select>
         </CampoEtiquetadoDiseno>
         <CampoEtiquetadoDiseno etiqueta="LADO" w={92}>
-          <button
-            onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })}
+          <select
+            value={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"}
+            onChange={(e) => onCambiar({ ...tarea, lateralidad: e.target.value })}
             style={{
               fontFamily: dsF.mono,
               fontSize: 10.5,
@@ -10262,8 +11228,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             }}
             title="Bilateral: a la vez con las dos piernas/brazos. Unilateral: se repite cada lado por separado."
           >
-            {tarea.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}
-          </button>
+            <option value="bilateral">Bilateral</option>
+            <option value="unilateral">Unilateral</option>
+          </select>
         </CampoEtiquetadoDiseno>
         <CampoEtiquetadoDiseno etiqueta="SERIES" w={44}>
           <input value={tarea.series} onChange={(e) => onCambiar({ ...tarea, series: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
@@ -10279,8 +11246,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
                 reps-%1RM ya no es lineal, y la autopercepción del RIR se
                 degrada mucho en series largas) — para esos casos, %1RM. */}
             <CampoEtiquetadoDiseno etiqueta="CARGA POR" w={62}>
-              <button
-                onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })}
+              <select
+                value={tarea.modoCarga === "pct1rm" ? "pct1rm" : "rir"}
+                onChange={(e) => onCambiar({ ...tarea, modoCarga: e.target.value })}
                 style={{
                   fontFamily: dsF.mono,
                   fontSize: 10,
@@ -10293,10 +11261,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
                   textAlign: "center",
                   cursor: "pointer",
                 }}
-                title="Alternar entre pautar por RIR o por % directo del 1RM estimado (recomendado para cargas ligeras)"
+                title="Elegir entre pautar por RIR o por % directo del 1RM estimado (recomendado para cargas ligeras)"
               >
-                {tarea.modoCarga === "pct1rm" ? "%1RM" : "RIR"}
-              </button>
+                <option value="rir">RIR</option>
+                <option value="pct1rm">%1RM</option>
+              </select>
             </CampoEtiquetadoDiseno>
             {tarea.modoCarga === "pct1rm" ? (
               <CampoEtiquetadoDiseno etiqueta="% 1RM" w={48}>
@@ -10514,6 +11483,18 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+          <div style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {miniaturaTarea(tarea.gif) && (
+              <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 32, height: 32, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+            )}
+            {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+                <Play size={11} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
+              </div>
+            )}
+          </div>
+        )}
         {orden != null && (
           <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
@@ -12691,7 +13672,7 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos }) {
 // "cumplida") que adherenciaActual en useDatosDashboardEntrenador, aquí
 // reescrito para comparar a ESTE jugador contra la media de todo el equipo
 // activo — reutiliza useEquipoHistory, no trae registros nuevos.
-function ResumenFichaJugadorReal({ jugador }) {
+function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) {
   const [players, , playersLoaded] = usePlayers();
   const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
   const { loaded: historyLoaded, items } = usePlayerHistory(jugador.id);
@@ -12786,8 +13767,68 @@ function ResumenFichaJugadorReal({ jugador }) {
 
   const ultimosRegistros = asignacionesJugador.slice(0, 4);
 
+  // insight: una frase construida ÚNICAMENTE a partir de los mismos datos
+  // que ya calcula este componente (asignadas/cumplidas de esta semana +
+  // racha de semanas) — mismo patrón que el mockup, sin ninguna cifra nueva.
+  const fechasSemanaActual = fechasAsignadas(lunes, hoy);
+  const cumplidasSemanaActual = fechasSemanaActual.filter((f) => fechasConRegistro.has(f)).length;
+  let insightTexto = null;
+  if (fechasSemanaActual.length > 0) {
+    insightTexto = `${cumplidasSemanaActual} de las ${fechasSemanaActual.length} sesiones que ya le tocaban esta semana registradas`;
+    insightTexto += rachaSemanas > 0 ? `, dentro de una racha de ${rachaSemanas} ${rachaSemanas === 1 ? "semana cumpliendo" : "semanas cumpliendo"} el plan.` : ".";
+  } else if (rachaSemanas > 0) {
+    insightTexto = `Sin sesiones asignadas todavía esta semana. Lleva una racha de ${rachaSemanas} ${rachaSemanas === 1 ? "semana cumpliendo" : "semanas cumpliendo"} el plan.`;
+  }
+
+  // record-callout: el récord de carga (e1RM) más reciente de este jugador,
+  // mismo motor que alimenta las gráficas de fuerza (calcularRecordsCargaJugador,
+  // compartido con la pestaña Progreso) — solo se muestra si es de los
+  // últimos 30 días; si no hay ninguno reciente, se omite el banner en vez
+  // de inventarlo.
+  const recordsCarga = calcularRecordsCargaJugador(items);
+  const recordMasReciente = recordsCarga.length
+    ? [...recordsCarga].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0))[0]
+    : null;
+  const hace30Dias = sumarDiasFecha(hoy, -30);
+  const recordParaBanner = recordMasReciente && recordMasReciente.fecha >= hace30Dias ? recordMasReciente : null;
+
   return (
     <div>
+      {insightTexto && (
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "11px 13px", marginBottom: 14 }}>
+          <div style={{ width: 22, height: 22, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <TrendingUp size={12} />
+          </div>
+          <p style={{ fontSize: 12, color: ds.ink, lineHeight: 1.5, margin: 0 }}>{insightTexto}</p>
+        </div>
+      )}
+
+      {recordParaBanner && (
+        <div style={{ display: "flex", gap: 11, alignItems: "center", background: `linear-gradient(90deg, ${ds.accentSubtle}, transparent)`, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "11px 13px", marginBottom: 14 }}>
+          <div style={{ width: 30, height: 30, borderRadius: dsR.full, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <Zap size={15} />
+          </div>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+            <b style={{ color: ds.ink, fontWeight: 700 }}>Nuevo récord el {fmtDateShort(recordParaBanner.fecha)}:</b> {recordParaBanner.nombre} — {recordParaBanner.valor} kg (1RM est.)
+            {recordParaBanner.pctSobreAnterior != null && (
+              <span style={{ color: ds.success, fontWeight: 700 }}> +{Math.round(recordParaBanner.pctSobreAnterior)}% sobre su récord anterior</span>
+            )}
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 18 }}>
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "13px 14px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>
+            <Calendar size={13} color={ds.accent} /> Próxima sesión
+          </div>
+          <p style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, margin: 0 }}>
+            Todavía no hay una sesión asignada en su calendario — se completará cuando Calendario esté disponible.
+          </p>
+        </div>
+        <ObjetivoActualCardReal jugador={jugador} onGuardar={onGuardarObjetivo} />
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
         <MiniStat
           icon={<TrendingUp size={12} />}
@@ -12854,6 +13895,90 @@ function ResumenFichaJugadorReal({ jugador }) {
           ))}
         </div>
       )}
+
+      {onNavigateTab && (
+        <>
+          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, margin: "18px 0 10px" }}>Accesos rápidos</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button
+              onClick={() => onNavigateTab("cmj")}
+              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
+            >
+              <Activity size={13} /> Control de fatiga
+            </button>
+            <button
+              onClick={() => onNavigateTab("notas")}
+              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
+            >
+              <BookOpen size={13} /> Añadir nota
+            </button>
+            <button
+              onClick={() => onNavigateTab("datos")}
+              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
+            >
+              <Pencil size={13} /> Editar datos
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Mini-card "Objetivo actual" (Resumen de la ficha) — único dato de esta
+// pestaña sin equivalente real todavía (jugador.objetivoActual, ver
+// sql/add_objetivo_actual_jugador.sql): texto libre corto, editable en el
+// sitio, sin un panel aparte.
+function ObjetivoActualCardReal({ jugador, onGuardar }) {
+  const [editando, setEditando] = useState(false);
+  const [texto, setTexto] = useState(jugador.objetivoActual || "");
+  const [guardando, setGuardando] = useState(false);
+
+  if (editando) {
+    return (
+      <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "13px 14px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>
+          <Target size={13} color={ds.accent} /> Objetivo actual
+        </div>
+        <textarea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          autoFocus
+          placeholder="Ej. Recuperar fuerza en tren inferior tras la molestia de rodilla..."
+          style={{ width: "100%", minHeight: 56, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px", color: ds.ink, fontFamily: dsF.sans, fontSize: 11.5, outline: "none" }}
+        />
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+          <button onClick={() => { setTexto(jugador.objetivoActual || ""); setEditando(false); }} style={{ font: `600 11px ${dsF.sans}`, padding: "6px 11px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>
+            Cancelar
+          </button>
+          <button
+            disabled={guardando}
+            onClick={async () => {
+              setGuardando(true);
+              await onGuardar?.(texto.trim());
+              setGuardando(false);
+              setEditando(false);
+            }}
+            style={{ font: `700 11px ${dsF.sans}`, padding: "6px 11px", borderRadius: dsR.md, border: "none", background: ds.accent, color: ds.accentInk, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+          >
+            {guardando ? "Guardando..." : "Guardar"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "13px 14px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>
+        <Target size={13} color={ds.accent} /> Objetivo actual
+      </div>
+      <p style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, margin: 0 }}>
+        {jugador.objetivoActual || "Todavía no se ha definido un objetivo para este jugador."}
+      </p>
+      <span onClick={() => setEditando(true)} style={{ fontSize: 10.5, color: ds.accent, fontWeight: 600, marginTop: 6, display: "inline-block", cursor: "pointer" }}>
+        Editar objetivo
+      </span>
     </div>
   );
 }
@@ -12930,6 +14055,80 @@ function CmjGraficaEvolucionMultiReal({ series, decimalesEje = 1 }) {
             <span style={{ width: 9, height: 9, borderRadius: "50%", background: s.color, display: "inline-block", flexShrink: 0 }} />
             {s.label}
           </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Pequeño múltiplo por variable (estilo VALD ForceDecks, como en el mockup
+// de Fase 6): línea + puntos de los últimos tests, con bandas de fondo
+// verde/ámbar/rojo cuando la variable lleva umbral propio (ambarPct/rojoPct
+// ya individualizado por cmjBuildPlayers) — la referencia de la banda es el
+// mejor valor de la ventana mostrada, igual idea que "mejor marca" en
+// GraficaProgresoCargaReal. Sin umbral (velocidad), se dibuja solo la línea.
+function CmjMiniMultiploReal({ metric, puntos, umbral, color }) {
+  if (puntos.length < 2) {
+    return (
+      <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, font: `700 11.5px ${dsF.sans}`, color: ds.ink, marginBottom: 8 }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+          {metric.label}
+        </div>
+        <div style={{ color: ds.inkMuted, fontSize: 11, padding: "18px 0", textAlign: "center" }}>Sin suficientes tests para trazar la evolución.</div>
+      </div>
+    );
+  }
+  const width = 280;
+  const height = 78;
+  const padX = 10;
+  const padTop = 8;
+  const padBottom = 16;
+  const valores = puntos.map((p) => p.valor);
+  const ultimo = puntos[puntos.length - 1];
+  const primero = puntos[0];
+  const deltaUltimo = cmjPct(ultimo.valor, primero.valor);
+  const referencia = Math.max(...valores);
+  const bandas = umbral ? { verdeHasta: referencia * (1 - umbral.ambarPct / 100), ambarHasta: referencia * (1 - umbral.rojoPct / 100) } : null;
+  const allVals = bandas ? [...valores, bandas.verdeHasta, bandas.ambarHasta] : valores;
+  const minV = Math.min(...allVals);
+  const maxV = Math.max(...allVals);
+  const rango = maxV - minV || 1;
+  const coordY = (v) => height - padBottom - ((v - minV) / rango) * (height - padTop - padBottom);
+  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const coordX = (i) => padX + i * stepX;
+  return (
+    <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, font: `700 11.5px ${dsF.sans}`, color: ds.ink }}>
+          <span style={{ width: 7, height: 7, borderRadius: "50%", background: color, flexShrink: 0 }} />
+          {metric.label}
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <span style={{ font: `800 16px ${dsF.display}`, color: ds.ink }}>{cmjFmt(ultimo.valor, metric.decimals)}</span>
+          <span style={{ font: `600 9.5px ${dsF.mono}`, color: ds.inkMuted, marginLeft: 2 }}>{metric.unit}</span>
+          {umbral && deltaUltimo != null && (
+            <div style={{ font: `700 10px ${dsF.mono}`, color: deltaUltimo < 0 ? ds.warning : ds.success, marginTop: 1 }}>{cmjSigned(deltaUltimo, 0)}</div>
+          )}
+          {!umbral && <div style={{ font: `700 10px ${dsF.mono}`, color: ds.inkMuted, marginTop: 1 }}>informativa</div>}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 78, display: "block" }}>
+        {bandas && (
+          <>
+            <rect x={0} y={0} width={width} height={Math.max(0, coordY(bandas.verdeHasta))} fill={`${ds.success}1E`} />
+            <rect x={0} y={Math.max(0, coordY(bandas.verdeHasta))} width={width} height={Math.max(0, coordY(bandas.ambarHasta) - coordY(bandas.verdeHasta))} fill={`${ds.warning}1E`} />
+            <rect x={0} y={Math.max(0, coordY(bandas.ambarHasta))} width={width} height={Math.max(0, height - coordY(bandas.ambarHasta))} fill={`${ds.danger}1E`} />
+          </>
+        )}
+        <polyline points={puntos.map((p, i) => `${coordX(i).toFixed(1)},${coordY(p.valor).toFixed(1)}`).join(" ")} fill="none" stroke={color} strokeWidth={1.5} strokeLinecap="round" />
+        {puntos.map((p, i) => (
+          <circle key={i} cx={coordX(i)} cy={coordY(p.valor)} r={i === puntos.length - 1 ? 5.5 : 4} fill={i === puntos.length - 1 ? color : ds.surfaceRaised} stroke={color} strokeWidth={2} />
+        ))}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, padding: "0 2px" }}>
+        {puntos.map((p, i) => (
+          <span key={i} style={{ font: `600 8px ${dsF.mono}`, color: ds.inkMuted }}>{p.tag ? CMJ_TAG_META[p.tag].label : fmtDateShort(p.date)}</span>
         ))}
       </div>
     </div>
@@ -13085,8 +14284,136 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
 
   const statusMeta = CMJ_STATUS_META[player.combinedStatus];
 
+  // ---- Bloque de cabecera del mockup (banner de estado + alerta de
+  // divergencia + tira de 4 métricas con "mejor histórico" + pequeños
+  // múltiplos con bandas de color) — se antepone a la vista detallada de
+  // filtros/tabla que ya existía, reutilizando EXACTAMENTE los mismos datos
+  // del motor CMJ (cmjBuildPlayers/cmjMotivoDia/cmjMotivoRecuperacion,
+  // player.umbral con su ambarPct/rojoPct ya individualizado) — sin
+  // recalcular ni inventar ningún umbral nuevo.
+  const ultimoRegistro = player.sorted[player.sorted.length - 1];
+  const dayFieldBanner = player.lastMicro
+    ? player.lastMicro.md1 && (!player.lastMicro.md2 || new Date(player.lastMicro.md1.date) >= new Date(player.lastMicro.md2.date))
+      ? "md1"
+      : player.lastMicro.md2
+      ? "md2"
+      : null
+    : null;
+  const motivoBanner = player.lastMicro
+    ? dayFieldBanner
+      ? cmjMotivoDia(player.lastMicro, dayFieldBanner, player.umbral)
+      : cmjMotivoRecuperacion(player.lastMicro.recuperacion, player.umbral)
+    : { status: "gray", motivo: "Sin tests suficientes todavía para valorar su estado.", nivel: null };
+  const bannerMeta = CMJ_STATUS_META[motivoBanner.status];
+  const tagUltimo = ultimoRegistro.tag ? CMJ_TAG_META[ultimoRegistro.tag] : null;
+
+  const mejorHistoricoMetrica = (metric) => {
+    const vals = player.sorted.map((r) => metric.get(r)).filter((v) => v != null);
+    return vals.length ? Math.max(...vals) : null;
+  };
+  const deltaUltimoMetrica = (metric) => {
+    if (!player.lastMicro) return null;
+    if (dayFieldBanner === "md1") return player.lastMicro.metrics[metric.key]?.md1Delta ?? null;
+    if (dayFieldBanner === "md2") return player.lastMicro.metrics[metric.key]?.md2Delta ?? null;
+    return player.lastMicro.recuperacion ? player.lastMicro.recuperacion.metrics[metric.key]?.delta ?? null : null;
+  };
+  const statusUltimoMetrica = (metric) => {
+    if (!player.lastMicro) return "gray";
+    if (dayFieldBanner === "md1") return player.lastMicro.metrics[metric.key]?.md1Status ?? "gray";
+    if (dayFieldBanner === "md2") return player.lastMicro.metrics[metric.key]?.md2Status ?? "gray";
+    return player.lastMicro.recuperacion ? player.lastMicro.recuperacion.metrics[metric.key]?.status ?? "gray" : "gray";
+  };
+  // Últimos 4 tests con valor en cada variable, para los pequeños múltiplos.
+  const ultimos4 = player.sorted.slice(-4);
+
   return (
     <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          gap: 12,
+          padding: "14px 16px",
+          borderRadius: dsR.lg,
+          marginBottom: 14,
+          border: `1px solid ${bannerMeta.color}55`,
+          background: bannerMeta.bg,
+        }}
+      >
+        <div style={{ width: 11, height: 11, borderRadius: "50%", background: bannerMeta.color, marginTop: 3, flexShrink: 0 }} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <b style={{ fontSize: 13, color: ds.ink }}>Estado CMJ: {bannerMeta.label}</b>
+          <p style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.5, margin: "4px 0 0" }}>{motivoBanner.motivo}</p>
+        </div>
+        <div style={{ font: `600 10px ${dsF.mono}`, color: ds.inkMuted, whiteSpace: "nowrap", flexShrink: 0 }}>
+          Test del {fmtDateShort(ultimoRegistro.date)}{tagUltimo ? ` · ${tagUltimo.label}` : ""}
+        </div>
+      </div>
+
+      {player.lastMicro?.divergente && (
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: `${ds.warning}15`, border: `1px dashed ${ds.warning}66`, borderRadius: dsR.md, padding: "11px 13px", marginBottom: 16 }}>
+          <div style={{ color: ds.warning, fontSize: 15, flexShrink: 0, lineHeight: 1 }}>⚠</div>
+          <p style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.5, margin: 0 }}>
+            <b style={{ color: ds.ink }}>Divergencia detectada:</b> la altura no delata la caída, pero potencia y/o fuerza relativas sí — es señal de que {jugadorNombre} está saltando "igual de alto" con otra estrategia, menos explosiva. La altura sola lo estaría ocultando.
+          </p>
+        </div>
+      )}
+
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Sus marcas</div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 9, marginBottom: 16 }}>
+        {CMJ_METRIC_LIST.map((m) => {
+          const valorActual = m.get(ultimoRegistro);
+          const mejor = mejorHistoricoMetrica(m);
+          const delta = m.drivesStatus ? deltaUltimoMetrica(m) : null;
+          const dotStatus = m.drivesStatus ? statusUltimoMetrica(m) : "gray";
+          const dotColor = { red: ds.danger, amber: ds.warning, green: ds.success, gray: ds.inkMuted }[dotStatus];
+          return (
+            <div key={m.key} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "10px 12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 5, font: `600 9px ${dsF.mono}`, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 5 }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: dotColor, flexShrink: 0 }} />
+                {m.label}
+              </div>
+              <div style={{ font: `800 16px ${dsF.display}`, color: ds.ink }}>
+                {cmjFmt(valorActual, m.decimals)}
+                <span style={{ fontSize: 11, fontWeight: 400, color: ds.inkMuted, marginLeft: 2 }}>{m.unit}</span>
+                {m.drivesStatus ? (
+                  delta != null && <span style={{ font: `700 10.5px ${dsF.mono}`, marginLeft: 5, color: delta < 0 ? (dotStatus === "gray" ? ds.inkMuted : ds.danger) : ds.inkMuted }}>{cmjSigned(delta, 0)}</span>
+                ) : (
+                  <span style={{ font: `700 10.5px ${dsF.mono}`, marginLeft: 5, color: ds.inkMuted }}>informativa</span>
+                )}
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 6, marginTop: 7, paddingTop: 7, borderTop: `1px solid ${ds.border}`, font: `600 9px ${dsF.mono}`, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Mejor <b style={{ font: `800 13px ${dsF.display}`, color: ds.accent, textTransform: "none", letterSpacing: "normal" }}>{mejor != null ? `${cmjFmt(mejor, m.decimals)} ${m.unit}` : "—"}</b>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Evolución por variable — últimos {ultimos4.length} tests</div>
+      <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "2px 0 12px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, font: `600 10px ${dsF.sans}`, color: ds.inkSecondary }}>
+          <span style={{ width: 11, height: 8, borderRadius: 2, background: `${ds.success}30`, border: `1px solid ${ds.success}`, flexShrink: 0 }} />Dentro de su umbral
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, font: `600 10px ${dsF.sans}`, color: ds.inkSecondary }}>
+          <span style={{ width: 11, height: 8, borderRadius: 2, background: `${ds.warning}30`, border: `1px solid ${ds.warning}`, flexShrink: 0 }} />Zona de atención
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, font: `600 10px ${dsF.sans}`, color: ds.inkSecondary }}>
+          <span style={{ width: 11, height: 8, borderRadius: 2, background: `${ds.danger}30`, border: `1px solid ${ds.danger}`, flexShrink: 0 }} />Zona de riesgo
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 8 }}>
+        {CMJ_METRIC_LIST.map((m) => {
+          const puntos = ultimos4.filter((r) => m.get(r) != null).map((r) => ({ date: r.date, tag: r.tag, valor: m.get(r) }));
+          const color = m.key === "velocidad" ? ds.chart2 : CMJ_METRIC_CHART_COLOR[m.key];
+          return <CmjMiniMultiploReal key={m.key} metric={m} puntos={puntos} umbral={m.drivesStatus ? player.umbral[m.key] : null} color={color} />;
+        })}
+      </div>
+      <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 18 }}>
+        Cada variable en su propia escala, con las bandas de su umbral individualizado ({player.umbral.altura?.personalizado ? "personalizado a este jugador" : "umbral general del equipo, todavía sin Inicios suficientes para individualizarlo"}) — la velocidad no lleva bandas porque no determina el estado.
+      </div>
+
+      <div style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 700, color: ds.ink, marginBottom: 4 }}>Explorar en detalle</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4, flexWrap: "wrap" }}>
         <div style={{ fontSize: 12, color: ds.inkMuted }}>
           {player.nTests} tests · primer test {fmtDateShort(player.sorted[0].date)} · último {fmtDateShort(player.sorted[player.sorted.length - 1].date)}
@@ -13245,18 +14572,320 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   );
 }
 
+// Mini-gráfica semanal compacta (adherencia / volumen de la pestaña
+// Progreso) — mismo lenguaje visual que las mini-gráficas de Control de
+// fatiga (línea + puntos + referencia discontinua), pero con una única
+// serie y una referencia que puede ser fija (80% = semana cumplida) o "su
+// propia mejor semana" (con anillo verde en el punto que la alcanza), igual
+// patrón que GraficaProgresoCargaReal.
+function MiniGraficaSemanalReal({ puntos, refValor, refLabel, resaltarMejor }) {
+  if (puntos.length < 2) {
+    return <div style={{ color: ds.inkMuted, fontSize: 11.5, padding: "18px 0", textAlign: "center" }}>Hace falta más historial para trazar la evolución.</div>;
+  }
+  const width = 280;
+  const height = 74;
+  const padX = 10;
+  const padTop = 16;
+  const padBottom = 14;
+  const valores = puntos.map((p) => p.valor);
+  const maxSerie = Math.max(...valores);
+  const refLinea = refValor != null ? refValor : resaltarMejor ? maxSerie : null;
+  const allVals = refLinea != null ? [...valores, refLinea] : valores;
+  const minV = Math.min(...allVals, 0);
+  const maxV = Math.max(...allVals);
+  const rango = maxV - minV || 1;
+  const stepX = (width - padX * 2) / (puntos.length - 1);
+  const coordX = (i) => padX + i * stepX;
+  const coordY = (v) => height - padBottom - ((v - minV) / rango) * (height - padTop - padBottom);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+  const indiceMejor = resaltarMejor ? valores.indexOf(maxSerie) : -1;
+  return (
+    <div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height, display: "block" }}>
+        {refLinea != null && (
+          <>
+            <line x1={padX} y1={coordY(refLinea)} x2={width - padX} y2={coordY(refLinea)} stroke={ds.inkMuted} strokeWidth={1} strokeOpacity={0.4} strokeDasharray="4 4" />
+            {refLabel && <text x={width - padX} y={coordY(refLinea) - 4} fontSize="7.5" fill={ds.inkMuted} textAnchor="end">{refLabel}</text>}
+          </>
+        )}
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round" />
+        {puntos.map((p, i) => {
+          const esUltimo = i === puntos.length - 1;
+          const esMejor = i === indiceMejor;
+          return (
+            <g key={i}>
+              {esMejor && <circle cx={coordX(i)} cy={coordY(p.valor)} r={7} fill="none" stroke={ds.success} strokeWidth={2} />}
+              <circle cx={coordX(i)} cy={coordY(p.valor)} r={esUltimo ? 5.5 : 4} fill={esUltimo ? ds.accent : ds.surfaceRaised} stroke={ds.accent} strokeWidth={2} />
+            </g>
+          );
+        })}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, padding: "0 2px" }}>
+        {puntos.map((p, i) => (
+          <span key={i} style={{ font: `600 8px ${dsF.mono}`, color: ds.inkMuted }}>{p.label}</span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Pestaña "Progreso" de la ficha — NO es un placeholder: reutiliza el mismo
+// motor que ya está verificado en GraficaProgresoCargaReal/e1RM
+// (calcularRecordsCargaJugador, compartido con el record-callout de
+// Resumen) para mostrar adherencia semanal, volumen de entrenamiento por
+// semana y récords personales de los últimos 30 días — todo con datos
+// reales de usePlayerHistory, nada inventado.
+function ProgresoFichaJugadorReal({ jugador }) {
+  const { loaded, items } = usePlayerHistory(jugador.id);
+  if (!loaded) return <LoadingBlock />;
+
+  const hoy = todayStr();
+  const lunes = inicioSemanaCalendario(hoy);
+  const fechasConRegistro = new Set(items.filter((it) => it.done).map((it) => it.date));
+
+  // 6 últimas semanas de calendario (S-5 .. Actual), mismo límite superior
+  // "hoy" en la semana en curso que el resto de la ficha. Cada semana
+  // muestra su propia adherencia (cumplidas/asignadas por calendario, sin
+  // sesiones asignadas todavía) — no hay dato de "sesiones que tocaban" en
+  // usePlayerHistory por sí solo, así que aquí se recorren directamente los
+  // registros HECHOS por semana como aproximación de adherencia (misma
+  // fuente que fechasConRegistro), etiquetando cada semana con la fecha de
+  // su lunes.
+  const N_SEMANAS = 6;
+  const semanas = [];
+  for (let i = N_SEMANAS - 1; i >= 0; i--) {
+    const inicio = sumarDiasFecha(lunes, -7 * i);
+    const fin = i === 0 ? hoy : sumarDiasFecha(inicio, 6);
+    semanas.push({ inicio, fin, esActual: i === 0 });
+  }
+  // Volumen: nº de series completadas de fuerza (mismo filtro que cargaMedia
+  // en ResumenFichaJugadorReal: done, sin Resistencia, sin CMJ) por semana —
+  // reutiliza el campo `sets` ya presente en cada item de usePlayerHistory.
+  const puntosAdherencia = semanas.map((s) => {
+    const enSemana = items.filter((it) => it.date >= s.inicio && it.date <= s.fin);
+    const hechos = enSemana.filter((it) => it.done).length;
+    // Aproximación honesta: sin "asignadas" reales por semana en este hook,
+    // se usa el nº de tareas con registro (hecho o no) como universo de esa
+    // semana — igual que hace HistorialPorJugador para pintar la semana.
+    const total = new Set(enSemana.map((it) => it.id)).size;
+    return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: total ? Math.round((hechos / total) * 100) : 0 };
+  });
+  const puntosVolumen = semanas.map((s) => {
+    const series = items
+      .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= s.inicio && it.date <= s.fin)
+      .reduce((sum, it) => sum + (Number(it.sets) || 0), 0);
+    return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: series };
+  });
+  const adherenciaActualVal = puntosAdherencia[puntosAdherencia.length - 1]?.valor;
+  const volumenActualVal = puntosVolumen[puntosVolumen.length - 1]?.valor;
+  const mejorSemanaVolumen = Math.max(...puntosVolumen.map((p) => p.valor));
+
+  // Récords personales de los últimos 30 días — mismo motor que el
+  // record-callout de Resumen. Si ninguno cae en la ventana, se muestra el
+  // estado vacío honesto en vez de forzar algo.
+  const hace30Dias = sumarDiasFecha(hoy, -30);
+  const recordsRecientes = calcularRecordsCargaJugador(items)
+    .filter((r) => r.fecha >= hace30Dias)
+    .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 8 }}>
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, font: `700 11.5px ${dsF.sans}`, color: ds.ink }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: ds.accent, flexShrink: 0 }} />Adherencia semanal
+            </div>
+            <span style={{ font: `800 16px ${dsF.display}`, color: ds.ink }}>{adherenciaActualVal}<small style={{ font: `600 9.5px ${dsF.mono}`, color: ds.inkMuted, marginLeft: 2 }}>%</small></span>
+          </div>
+          <MiniGraficaSemanalReal puntos={puntosAdherencia} refValor={80} refLabel="80% = semana cumplida" />
+        </div>
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
+          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, font: `700 11.5px ${dsF.sans}`, color: ds.ink }}>
+              <span style={{ width: 7, height: 7, borderRadius: "50%", background: ds.accent, flexShrink: 0 }} />Volumen de entrenamiento
+            </div>
+            <span style={{ font: `800 16px ${dsF.display}`, color: ds.ink }}>{volumenActualVal}<small style={{ font: `600 9.5px ${dsF.mono}`, color: ds.inkMuted, marginLeft: 2 }}>series</small></span>
+          </div>
+          <MiniGraficaSemanalReal puntos={puntosVolumen} refLabel={`mejor semana · ${mejorSemanaVolumen}`} resaltarMejor />
+        </div>
+      </div>
+      <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 18 }}>
+        Cada cajón lleva su línea de referencia (umbral real de "semana cumplida" en Adherencia; su propia mejor semana en Volumen) y destaca el punto que la alcanza.
+      </div>
+
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Récords personales · últimos 30 días</div>
+      {recordsRecientes.length === 0 ? (
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "20px 16px", textAlign: "center", color: ds.inkMuted, fontSize: 12 }}>
+          Sin récords nuevos en los últimos 30 días.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
+          {recordsRecientes.map((r) => (
+            <div key={r.clave} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
+              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, font: `700 11.5px ${dsF.sans}`, color: ds.ink, minWidth: 0 }}>
+                  <span style={{ width: 7, height: 7, borderRadius: "50%", background: ds.success, flexShrink: 0 }} />
+                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.nombre}</span>
+                </div>
+                <span style={{ font: `800 16px ${dsF.display}`, color: ds.ink, flexShrink: 0 }}>
+                  {r.valor}<small style={{ font: `600 9.5px ${dsF.mono}`, color: ds.inkMuted, marginLeft: 2 }}>kg</small>
+                  {r.pctSobreAnterior != null && <span style={{ font: `700 10px ${dsF.mono}`, color: ds.success, marginLeft: 5 }}>▲{Math.round(r.pctSobreAnterior)}%</span>}
+                </span>
+              </div>
+              <GraficaProgresoCargaReal puntos={r.puntos} unidad="kg" mostrarListaCompleta={false} />
+            </div>
+          ))}
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 10 }}>
+        Solo se listan los ejercicios donde se ha batido récord (1RM estimado) en los últimos 30 días — mismo motor que "Tus récords" del jugador y mismo lenguaje visual que las gráficas de fuerza.
+      </div>
+    </div>
+  );
+}
+
+// Pestaña "Notas" — campo nuevo (tabla notas_jugador, ver
+// sql/add_notas_jugador.sql): textarea + lista de notas anteriores con
+// autor y fecha, mismo patrón CRUD genérico (api.list/save) que el resto de
+// entidades de la app.
+function NotasFichaJugadorReal({ jugador }) {
+  const [notas, saveNotas, loaded] = useEntityList("notasJugador", { jugador_id: jugador.id });
+  const [texto, setTexto] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+
+  if (!loaded) return <LoadingBlock />;
+
+  const ordenadas = [...notas].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+
+  const guardarNota = async () => {
+    const limpio = texto.trim();
+    if (!limpio) return;
+    setError("");
+    setGuardando(true);
+    const ok = await saveNotas([...notas, { jugador_id: jugador.id, autor: "David", fecha: todayStr(), texto: limpio }]);
+    setGuardando(false);
+    if (ok) setTexto("");
+    else setError("No se pudo guardar la nota. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+
+  return (
+    <div>
+      <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: 13, marginBottom: 16 }}>
+        <textarea
+          value={texto}
+          onChange={(e) => setTexto(e.target.value)}
+          placeholder={`Escribe una nota sobre ${jugador.name} — molestias, observaciones, acuerdos...`}
+          style={{ width: "100%", minHeight: 56, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", color: ds.ink, fontFamily: dsF.sans, fontSize: 12, outline: "none" }}
+        />
+        {error && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{error}</div>}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+          <DsButton size="sm" disabled={!texto.trim() || guardando} onClick={guardarNota}>
+            {guardando ? "Guardando..." : "Guardar nota"}
+          </DsButton>
+        </div>
+      </div>
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 4 }}>Notas anteriores</div>
+      {ordenadas.length === 0 ? (
+        <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay ninguna nota sobre {jugador.name}.</div>
+      ) : (
+        <div>
+          {ordenadas.map((n) => (
+            <div key={n.id} style={{ borderBottom: `1px solid ${ds.border}`, padding: "11px 0" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 5 }}>
+                <span style={{ font: `700 11.5px ${dsF.sans}`, color: ds.ink }}>{n.autor}</span>
+                <span style={{ font: `600 10px ${dsF.mono}`, color: ds.inkMuted }}>{fmtDateShort(n.fecha)}</span>
+              </div>
+              <p style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.5, margin: 0 }}>{n.texto}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Pestaña "Datos y accesos" — resumen de datos que YA existen (grupo,
+// categoría, estado, PIN) + danger zone que llama a las MISMAS acciones que
+// ya expone MenuAccionesReal (onAccion "suspender"/"activar"/"eliminar"),
+// sin duplicar esa lógica aquí.
+function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion }) {
+  const [pinVisible, setPinVisible] = useState(false);
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
+  const suspendido = jugador.estado === "suspendido";
+  const nombresGrupos = (jugador.gruposIds || []).map((id) => grupos.find((g) => g.id === id)?.nombre).filter(Boolean);
+  const nombresCategorias = (jugador.groupIds || []).map((id) => categorias.find((c) => c.id === id)?.nombre).filter(Boolean);
+
+  const Dato = ({ label, value }) => (
+    <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
+      <div style={{ font: `600 9px ${dsF.mono}`, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: ds.ink }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, maxWidth: 640, marginBottom: 18 }}>
+        <Dato label="Grupo" value={nombresGrupos.length ? nombresGrupos.join(", ") : "Independiente"} />
+        <Dato label="Categoría preventiva" value={nombresCategorias.length ? nombresCategorias.join(", ") : "Ninguna"} />
+        <Dato label="Estado" value={suspendido ? "Suspendido" : "Activo"} />
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
+          <div style={{ font: `600 9px ${dsF.mono}`, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>PIN de acceso</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: ds.ink, display: "flex", alignItems: "center", gap: 8 }}>
+            {pinVisible ? jugador.pin : "••••"}
+            <span onClick={() => setPinVisible((v) => !v)} style={{ color: ds.accent, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+              {pinVisible ? "ocultar" : "mostrar"}
+            </span>
+          </div>
+        </div>
+      </div>
+      <div style={{ maxWidth: 640, border: `1px solid ${ds.dangerBorderSubtle}`, background: `${ds.danger}12`, borderRadius: dsR.lg, padding: "13px 15px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <p style={{ fontSize: 11.5, color: ds.inkSecondary, maxWidth: 340, lineHeight: 1.4, margin: 0 }}>
+          Suspender el acceso bloquea su PIN sin borrar su historial. Eliminar el usuario es permanente.
+        </p>
+        <div style={{ display: "flex", gap: 8, flexShrink: 0 }}>
+          <button
+            onClick={() => onAccion(jugador.id, suspendido ? "activar" : "suspender")}
+            style={{ font: `700 11.5px ${dsF.sans}`, padding: "8px 13px", borderRadius: dsR.md, border: `1px solid ${suspendido ? ds.successBorderSubtle : ds.dangerBorderSubtle}`, background: "transparent", color: suspendido ? ds.success : ds.danger, cursor: "pointer" }}
+          >
+            {suspendido ? "Activar usuario" : "Suspender usuario"}
+          </button>
+          {confirmarEliminar ? (
+            <button
+              onClick={() => onAccion(jugador.id, "eliminar")}
+              style={{ font: `700 11.5px ${dsF.sans}`, padding: "8px 13px", borderRadius: dsR.md, border: `1px solid ${ds.danger}`, background: `${ds.danger}22`, color: ds.danger, cursor: "pointer" }}
+            >
+              ¿Seguro? Confirmar
+            </button>
+          ) : (
+            <button
+              onClick={() => setConfirmarEliminar(true)}
+              style={{ font: `700 11.5px ${dsF.sans}`, padding: "8px 13px", borderRadius: dsR.md, border: `1px solid ${ds.dangerBorderSubtle}`, background: "transparent", color: ds.danger, cursor: "pointer" }}
+            >
+              Eliminar perfil
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Ficha de un jugador concreto, abierta desde Usuarios ("Ver ficha").
-// Cabecera de identidad + tres pestañas: Resumen (nuevo), Historial (es
-// HistorialPorJugador tal cual ya existía, sin cambios — la misma pieza que
-// usa el módulo de Historial general, aquí preseleccionando a este jugador
-// pero sin perder la posibilidad de cambiar a otro desde su desplegable) y
-// CMJ (Parte 5: evolución del salto de este jugador, independiente de
-// Historial porque son cosas diferentes — fuerza vs. salto).
+// Cabecera de identidad + las pestañas del mockup de Fase 6 (Equipos y
+// usuarios) que ya tienen un dato o flujo real detrás: Resumen, Historial
+// (es HistorialPorJugador tal cual ya existía, sin cambios — la misma pieza
+// que usa el módulo de Historial general) y Control de fatiga (Parte 5),
+// más las añadidas aquí (Progreso, Notas, Datos y accesos). Calendario se
+// deja como placeholder honesto, igual que el propio mockup: no hay
+// calendario_asignaciones todavía (llega con Fase 6 → Calendario).
 function FichaJugadorModuloReal({ jugador, onBack }) {
-  const [players, , playersLoaded] = usePlayers();
+  const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
   const [pestana, setPestana] = useState("resumen");
+  const [errorAccion, setErrorAccion] = useState("");
   const { loaded: historialLoaded, sesiones, tareas, registros, ejercicios, retry: retryHistorial } = useHistorialData();
   useEffect(() => {
     if (pestana === "historial") retryHistorial();
@@ -13272,6 +14901,25 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
   // que se abrió esta ficha — se resuelve siempre contra la lista fresca de
   // usePlayers() en vez de quedarse con el objeto que llegó por prop.
   const actual = players.find((p) => p.id === jugador?.id) || jugador;
+
+  // Mismas acciones que ya expone MenuAccionesReal en Usuarios (suspender /
+  // activar / eliminar) — se reutiliza la función, no se duplica la lógica,
+  // solo se expone también desde la pestaña "Datos y accesos" de la ficha.
+  const manejarAccionDatos = async (id, accion) => {
+    setErrorAccion("");
+    let ok = true;
+    if (accion === "suspender") ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "suspendido" } : p)));
+    else if (accion === "activar") ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "activo" } : p)));
+    else if (accion === "eliminar") {
+      ok = await savePlayers(players.filter((p) => p.id !== id));
+      if (ok) onBack?.();
+    }
+    if (!ok) setErrorAccion("No se pudo completar la acción. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+  const guardarObjetivo = async (nuevoTexto) => {
+    const ok = await savePlayers(players.map((p) => (p.id === actual.id ? { ...p, objetivoActual: nuevoTexto } : p)));
+    if (!ok) setErrorAccion("No se pudo guardar el objetivo. Comprueba tu conexión e inténtalo de nuevo.");
+  };
 
   if (!actual) {
     return (
@@ -13297,20 +14945,32 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           ← Volver a Usuarios
         </button>
         <CabeceraFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} />
+        {errorAccion && (
+          <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", margin: "12px 0 0" }}>
+            {errorAccion}
+          </div>
+        )}
         {/* Rail de navegación de la ficha — mismo patrón que el mockup de
-            Fase 6 (Equipos y usuarios): un carril vertical de pestañas en
-            vez de una fila de píldoras, para que quepan más secciones sin
-            amontonarse. Solo lleva las 3 pestañas que ya tienen contenido
-            real (Resumen, Historial, Control de fatiga) — Calendario, Notas
-            y Datos y accesos del mockup todavía no tienen un dato o flujo
-            real detrás en este módulo, así que no se añaden como pestañas
-            vacías. */}
+            Fase 6 (Equipos y usuarios): un carril vertical de pestañas, con
+            las 7 secciones del mockup (Calendario se deja como placeholder
+            honesto, sin calendario_asignaciones todavía). */}
         <div style={{ display: "flex", gap: 16, margin: "16px 0 0", alignItems: "flex-start" }}>
           <nav style={{ width: 168, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
             {[
               { id: "resumen", label: "Resumen", icon: <Home size={14} /> },
+              { id: "calendario", label: "Calendario", icon: <Calendar size={14} /> },
               { id: "historial", label: "Historial", icon: <History size={14} /> },
               { id: "cmj", label: "Control de fatiga", icon: <Activity size={14} /> },
+              { id: "progreso", label: "Progreso", icon: <TrendingUp size={14} /> },
+            ].map((v) => (
+              <DsNavItem key={v.id} active={pestana === v.id} icon={v.icon} onClick={() => setPestana(v.id)}>
+                {v.label}
+              </DsNavItem>
+            ))}
+            <div style={{ height: 1, background: ds.border, margin: "6px 4px" }} />
+            {[
+              { id: "notas", label: "Notas", icon: <BookOpen size={14} /> },
+              { id: "datos", label: "Datos y accesos", icon: <Lock size={14} /> },
             ].map((v) => (
               <DsNavItem key={v.id} active={pestana === v.id} icon={v.icon} onClick={() => setPestana(v.id)}>
                 {v.label}
@@ -13319,7 +14979,17 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
           </nav>
           <div style={{ flex: 1, minWidth: 0 }}>
             {pestana === "resumen" ? (
-              <ResumenFichaJugadorReal jugador={actual} />
+              <ResumenFichaJugadorReal jugador={actual} onNavigateTab={setPestana} onGuardarObjetivo={guardarObjetivo} />
+            ) : pestana === "calendario" ? (
+              <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: 22, maxWidth: 520, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ width: 30, height: 30, borderRadius: dsR.sm, background: ds.border, color: ds.inkSecondary, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Calendar size={15} />
+                </div>
+                <h4 style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: ds.ink, margin: 0 }}>Calendario de {actual.name}</h4>
+                <p style={{ fontSize: 12, color: ds.inkMuted, lineHeight: 1.55, margin: 0 }}>
+                  Aquí vivirá su calendario mensual de solo lectura, con los días que tiene trabajo preparado — llega con Fase 6 → Calendario. Hoy no hay <code>calendario_asignaciones</code> que mostrar, así que este hueco se queda reservado y vacío hasta entonces.
+                </p>
+              </div>
             ) : pestana === "historial" ? (
               !historialLoaded ? (
                 <LoadingBlock />
@@ -13333,8 +15003,14 @@ function FichaJugadorModuloReal({ jugador, onBack }) {
                   registros={registros}
                 />
               )
-            ) : (
+            ) : pestana === "cmj" ? (
               <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
+            ) : pestana === "progreso" ? (
+              <ProgresoFichaJugadorReal jugador={actual} />
+            ) : pestana === "notas" ? (
+              <NotasFichaJugadorReal jugador={actual} />
+            ) : (
+              <DatosAccesosFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onAccion={manejarAccionDatos} />
             )}
           </div>
         </div>
