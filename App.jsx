@@ -1136,6 +1136,7 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     tareaId: nuevo ? undefined : t.id,
     nombre: e.nombre || "(ejercicio eliminado)",
     ejercicioId: t.ejercicio_id,
+    gif: e.gif_url || "",
     modo: t.modo || "reps",
     series: t.series ?? "",
     cantidad: t.cantidad ?? "",
@@ -11574,7 +11575,7 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
     try {
       const creado = await resolveEjercicio(ejercicios || [], { nombre: nombreModalidad, bloque: "", tags_descriptivos: [] });
       onEjercicioCreado?.(creado);
-      onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad, nombre: creado.nombre, ejercicioId: creado.id });
+      onCambiar({ ...tarea, ...camposVacios, modalidad: nuevaModalidad, nombre: creado.nombre, ejercicioId: creado.id, gif: creado.gif_url || "" });
     } catch (e) {
       // Si falla el guardado (sin conexión), al menos se cambia la
       // modalidad en local — el nombre/ejercicio se reintentará la próxima
@@ -11962,6 +11963,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
   const agregarEjercicioAlCircuito = async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
+    let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       // Si crear el ejercicio falla (sin conexión, backend atascado...) hay
       // que avisar y parar aquí — si no, se seguía intentando añadir la
@@ -11970,6 +11972,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       try {
         const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
+        gifUrl = creado.gif_url || "";
         onEjercicioCreado?.(creado);
       } catch (e) {
         onError?.("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
@@ -11978,8 +11981,8 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
     }
     const base =
       bloque === "Resistencia"
-        ? { key: Date.now() + Math.random(), nombre, ejercicioId, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
-        : { key: Date.now() + Math.random(), nombre, ejercicioId, modo: "reps", series: "", cantidad: "", rir: "", modoCarga: "rir", pct1rm: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
+        ? { key: Date.now() + Math.random(), nombre, ejercicioId, gif: gifUrl, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }
+        : { key: Date.now() + Math.random(), nombre, ejercicioId, gif: gifUrl, modo: "reps", series: "", cantidad: "", rir: "", modoCarga: "rir", pct1rm: "", tipoResistencia: "Peso libre", materiales: [], lateralidad: "bilateral", nota: "" };
     onCambiarTareas([...tareas, base]);
   };
 
@@ -11992,7 +11995,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       onEjercicioCreado?.(creado);
       onCambiarTareas([
         ...tareas,
-        { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" },
+        { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, gif: creado.gif_url || "", tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" },
       ]);
     } catch (e) {
       onError?.("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
@@ -12099,6 +12102,11 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
     key: Date.now() + Math.random(),
     nombre: ejercicio.nombre,
     ejercicioId: ejercicio.id,
+    // El vídeo del ejercicio viaja con la tarea desde que se crea, para que
+    // la miniatura con el ▶ salga también mientras se está diseñando la
+    // sesión, no solo en la vista previa del móvil (que sí lo resolvía por
+    // su cuenta buscando el ejercicio — de ahí la diferencia que se veía).
+    gif: ejercicio.gif_url || "",
     modo: "reps",
     series: "",
     cantidad: "",
@@ -12534,17 +12542,19 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const agregarTarea = (bloqueSetter) => async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
+    let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       try {
         const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
+        gifUrl = creado.gif_url || "";
         addEjercicioLocal(creado);
       } catch (e) {
         setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
         return;
       }
     }
-    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
+    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl })]);
   };
 
   const elegirEjercicioActivacion = async (ejercicioOClic) => {
@@ -12571,17 +12581,19 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
   const elegirEjercicioMovilidadManual = async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
+    let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       try {
         const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
+        gifUrl = creado.gif_url || "";
         addEjercicioLocal(creado);
       } catch (e) {
         setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
         return;
       }
     }
-    setTareaMovilidadManual(nuevaTareaBase({ id: ejercicioId, nombre }));
+    setTareaMovilidadManual(nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl }));
   };
 
   const guardar = async (comoBorrador = false) => {
@@ -13527,7 +13539,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                           try {
                             const creado = await resolveEjercicio(ejercicios, { nombre: MODALIDADES_RESISTENCIA.carrera, bloque: "", tags_descriptivos: [] });
                             addEjercicioLocal(creado);
-                            setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
+                            setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, gif: creado.gif_url || "", tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
                           } catch (e) {
                             setError("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
                           }
@@ -13829,17 +13841,19 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, onBack, onGuar
   const agregarTarea = (bloqueSetter) => async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
+    let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       try {
         const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
+        gifUrl = creado.gif_url || "";
         addEjercicioLocal(creado);
       } catch (e) {
         setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
         return;
       }
     }
-    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre })]);
+    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl })]);
   };
 
   const guardar = async () => {
