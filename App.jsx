@@ -10699,23 +10699,25 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             }}
             title="Nuevo ejercicio"
             style={{
-              width: 42,
               height: 42,
+              padding: "0 18px",
               borderRadius: dsR.full,
               background: ds.accent,
               border: "none",
               color: ds.accentInk,
-              fontSize: 22,
+              fontSize: 13,
               fontWeight: 700,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
+              gap: 6,
               cursor: "pointer",
               flexShrink: 0,
+              whiteSpace: "nowrap",
               boxShadow: dsSh.accentGlow,
             }}
           >
-            +
+            <span style={{ fontSize: 18, lineHeight: 1 }}>+</span> Nuevo ejercicio
           </button>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
@@ -13108,7 +13110,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, onBack, onGuardado }) {
                   <div style={{ fontSize: 14.5, fontWeight: 600 }}>{bloqueInfo.nombre}</div>
                   <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{bloqueInfo.descripcion}</div>
                 </div>
-                <EtiquetaModoDiseno modo={bloqueInfo.modo} />
               </div>
               <div style={{ padding: 14 }}>
                 {bloqueActivo === "activacion" && (
