@@ -1789,8 +1789,12 @@ function useEntityByIds(entity, ids) {
 function usePlayerHistory(playerId) {
   const [registrosTraidos, , registrosLoaded, , retryRegistros] = useEntityList("registros", playerId ? { jugador_id: playerId } : false);
   // Mismo blindaje que en la pantalla del jugador: el backend no filtra de
-  // verdad por jugador_id, así que se filtra siempre aquí también.
-  const registros = playerId ? registrosTraidos.filter((r) => r.jugador_id === playerId) : [];
+  // verdad por jugador_id, así que se filtra siempre aquí también. Se
+  // excluyen además los registros "enviado: false" — son un progreso
+  // guardado sin confirmar (ver "Guardar sin enviar" en la sesión del
+  // jugador), y no deben contar todavía como sesión hecha en ninguna
+  // estadística (adherencia, rachas, Historial, ficha de jugador...).
+  const registros = playerId ? registrosTraidos.filter((r) => r.jugador_id === playerId && r.enviado !== false) : [];
   const tareaIds = registros.map((r) => r.tarea_id);
   const [tareas, tareasLoaded] = useEntityByIds("tareas", tareaIds);
   const ejercicioIds = tareas.map((t) => t.ejercicio_id);
@@ -1854,7 +1858,10 @@ function usePlayerHistory(playerId) {
 // registro, cuándo fue y cuánta carga llevaba, no todo el detalle que
 // necesita la ficha completa de un jugador.
 function useEquipoHistory() {
-  const [registros, , registrosLoaded] = useEntityList("registros");
+  const [registrosTraidos, , registrosLoaded] = useEntityList("registros");
+  // Igual que en usePlayerHistory: un registro "enviado: false" es solo un
+  // progreso guardado sin confirmar todavía, no cuenta como hecho aquí.
+  const registros = registrosTraidos.filter((r) => r.enviado !== false);
   const tareaIds = registros.map((r) => r.tarea_id);
   const [tareas, tareasLoaded] = useEntityByIds("tareas", tareaIds);
   const ejercicioIds = tareas.map((t) => t.ejercicio_id);
@@ -4973,7 +4980,6 @@ function cmjSdMuestral(arr) {
 function cmjClamp(v, min, max) { return v == null ? null : Math.min(max, Math.max(min, v)); }
 
 const CMJ_MIN_INICIOS_PARA_INDIVIDUALIZAR = 4;
-const CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION = 3;
 
 // Qué mide cada variable a nivel fisiológico y por qué una caída importa —
 // se combina con la severidad y el estado (verde/ámbar/rojo) para construir
@@ -5151,14 +5157,9 @@ function cmjMotivoDia(microResult, dayField, umbral) {
   return { status: worst, motivo: cmjNivelAccion(worstDelta, worst, u.ambarPct, u.rojoPct, dayField), nivel: cmjNivelPalabra(worstDelta, worst, u.ambarPct, u.rojoPct) };
 }
 function cmjMotivoRecuperacion(recuperacion, umbral) {
-  if (!recuperacion) return { status: "gray", motivo: "Sin MD+1 del microciclo anterior con el que comparar.", nivel: null };
-  const esFallback = recuperacion.modo === "media_inicios";
+  if (!recuperacion) return { status: "gray", motivo: "Sin Inicio del microciclo anterior con el que comparar.", nivel: null };
   if (recuperacion.status === "gray") {
-    return {
-      status: "gray", nivel: null, motivo: esFallback
-        ? `Esta semana no hubo MD+1 con el que comparar, y todavía no hay suficientes Inicios previos de este jugador para usar como respaldo (tiene ${recuperacion.nPrevios} de los ${CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION} necesarios).`
-        : "Aún sin datos suficientes para valorar la recuperación.",
-    };
+    return { status: "gray", nivel: null, motivo: "Aún sin datos suficientes para comparar con el Inicio anterior." };
   }
   let worstDelta = null, worstKey = null;
   CMJ_METRIC_LIST.filter((x) => x.drivesStatus).forEach((metric) => {
@@ -5166,16 +5167,9 @@ function cmjMotivoRecuperacion(recuperacion, umbral) {
     if (mm.status === recuperacion.status && mm.delta != null && (worstDelta == null || Math.abs(mm.delta) > Math.abs(worstDelta))) { worstDelta = mm.delta; worstKey = metric.key; }
   });
   const u = umbral[worstKey] || umbral.altura;
-  let prefijo;
-  if (esFallback) {
-    prefijo = recuperacion.status === "green"
-      ? `Sin MD+1 esta semana: comparado con su media de los últimos ${recuperacion.nPrevios} Inicios, está dentro de lo habitual. `
-      : `Sin MD+1 esta semana: comparado con su media de los últimos ${recuperacion.nPrevios} Inicios, está por debajo de lo habitual. `;
-  } else {
-    prefijo = recuperacion.status === "green"
-      ? "Recuperación adecuada respecto al MD+1 del microciclo anterior. "
-      : "No muestra la recuperación esperada tras el descanso. ";
-  }
+  const prefijo = recuperacion.status === "green"
+    ? "En línea con el Inicio del microciclo anterior. "
+    : "Por debajo del Inicio del microciclo anterior. ";
   return { status: recuperacion.status, motivo: prefijo + cmjNivelAccion(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct, "inicio"), nivel: cmjNivelPalabra(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct) };
 }
 
@@ -5299,27 +5293,21 @@ function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individualizar, p
       microResults.set(id, { ...b, metrics, status: worstStatus, heightStatus, divergente });
     });
 
-    // Chequeo de recuperación: el Inicio de cada microciclo se compara con
-    // el MD+1 del microciclo ANTERIOR. Si esa semana no tuvo MD+1, se usa
-    // como respaldo la media de los Inicios anteriores de ESTE jugador.
+    // El Inicio de cada microciclo se compara con el Inicio del microciclo
+    // ANTERIOR (mismo tipo de día, igual que MD-2/MD+1 se comparan siempre
+    // contra el Inicio de su propia semana) — así el primer día de la
+    // semana también tiene con qué contrastar, en vez de quedarse sin
+    // comparación posible por no haber todavía MD-2/MD+1 esta semana.
     microList.forEach((meta, idx) => {
       const curr = microResults.get(meta.id);
       if (!curr || !curr.inicio || idx === 0) return;
       const prev = microResults.get(microList[idx - 1].id);
-      const hayMd1Anterior = prev && prev.md1;
-      const modo = hayMd1Anterior ? "md1_anterior" : "media_inicios";
-      const iniciosPrevios = hayMd1Anterior ? [] : inicios.filter((r) => new Date(r.date) < new Date(curr.inicio.date)).slice(-10);
+      if (!prev || !prev.inicio) return;
 
       const recMetrics = {};
       let worst = "gray";
       CMJ_METRIC_LIST.filter((m) => m.drivesStatus).forEach((metric) => {
-        let baseVal;
-        if (hayMd1Anterior) {
-          baseVal = metric.get(prev.md1);
-        } else {
-          const valoresPrevios = iniciosPrevios.map((r) => metric.get(r)).filter((v) => v != null);
-          baseVal = valoresPrevios.length >= CMJ_MIN_INICIOS_PARA_RESPALDO_RECUPERACION ? cmjMean(valoresPrevios) : null;
-        }
+        const baseVal = metric.get(prev.inicio);
         const nowVal = metric.get(curr.inicio);
         const delta = (baseVal != null && nowVal != null) ? cmjPct(nowVal, baseVal) : null;
         const u = umbral[metric.key] || { ambarPct, rojoPct };
@@ -5327,7 +5315,7 @@ function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individualizar, p
         recMetrics[metric.key] = { delta, status };
         if (CMJ_STATUS_ORDER[status] < CMJ_STATUS_ORDER[worst]) worst = status;
       });
-      curr.recuperacion = { metrics: recMetrics, status: worst, modo, nPrevios: iniciosPrevios.length };
+      curr.recuperacion = { metrics: recMetrics, status: worst, modo: "inicio_anterior" };
     });
 
     const orderedIds = microList.map((m) => m.id);
@@ -6502,11 +6490,13 @@ function CmjMicrociclosReal() {
 const CMJ_UMBRAL_DEFECTO = { ambarPct: 6, rojoPct: 12, individualizar: true, protocoloDesde: "" };
 
 // Igual que en el panel original: qué mostrar HOY para un jugador depende
-// de qué día es dentro del microciclo actual. Si hoy es "Inicio", se enseña
-// el chequeo de recuperación (¿se ha recuperado del MD+1 de la semana
-// pasada?); si es MD-2 o MD+1, el estado de ese test frente al Inicio de
-// esta semana; si no hay test programado hoy, se enseña la última lectura
-// disponible de esta semana (a modo de contexto).
+// de qué día es dentro del microciclo actual. Si hoy es "Inicio", el propio
+// microciclo todavía no tiene ningún otro test con el que compararlo, así
+// que se compara contra el Inicio del microciclo ANTERIOR (mismo tipo de
+// día); si es MD-2 o MD+1, el estado de ese test frente al Inicio de esta
+// semana (ese sí existe siempre, es el primer test de la semana); si no hay
+// test programado hoy, se enseña la última lectura disponible de esta
+// semana (a modo de contexto).
 function cmjHoyDe(player, todayTag) {
   const m = player.lastMicro;
   if (!todayTag) {
@@ -9153,7 +9143,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // siempre, sea cual sea el comportamiento real del backend en cada momento.
   const registros =
     player && tareaIds.length ? registrosJugador.filter((r) => r.jugador_id === player.id && tareaIds.includes(r.tarea_id)) : [];
+  // "Cualquiera" (incluye guardados sin enviar) — sirve para restaurar en
+  // pantalla lo que el jugador ya había tecleado. "Enviados" (enviado !==
+  // false) — el único que cuenta como sesión realmente confirmada, para
+  // badges "ENVIADA" y para no dejar reabrir una sesión ya mandada.
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
+  const registrosEnviadosByTarea = new Map(registros.filter((r) => r.enviado !== false).map((r) => [r.tarea_id, r]));
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
 
   // Adherencia semanal para la cabecera del dashboard (P5 — Fase 3): mismo
@@ -9195,23 +9190,57 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [vistaJugador, setVistaJugador] = useState("dashboard");
   const sesionActual = todaySesiones.length === 1 ? todaySesiones[0] : todaySesiones.find((s) => s.id === sesionSeleccionadaId) || null;
   const necesitaElegirSesion = todaySesiones.length > 1 && !sesionActual;
+  // Si ya hay un registro ENVIADO (enviado !== false) de hoy para las tareas
+  // de ESTA sesión en concreto, es que esta sesión ya se confirmó y envió
+  // antes — se trata como ya enviada, sin dejar reabrirla. Un progreso
+  // "guardado sin enviar" no cuenta para esto. Se calcula aquí (antes de los
+  // primeros `return` de carga) porque el efecto de más abajo que restaura
+  // un borrador guardado lo necesita ya disponible.
+  const tareaIdsSesionActual = sesionActual ? tareas.filter((t) => t.sesion_id === sesionActual.id).map((t) => t.id) : [];
+  const yaEnviadaAntes = tareaIdsSesionActual.length > 0 && tareaIdsSesionActual.some((id) => registrosEnviadosByTarea.has(id));
   const estadoPorSesion = todaySesiones.map((s) => {
     const idsS = tareas.filter((t) => t.sesion_id === s.id).map((t) => t.id);
     const hechas = idsS.filter((id) => registrosByTarea.has(id)).length;
-    return { sesion: s, total: idsS.length, hechas, completa: idsS.length > 0 && hechas === idsS.length };
+    const hechasEnviadas = idsS.filter((id) => registrosEnviadosByTarea.has(id)).length;
+    return { sesion: s, total: idsS.length, hechas, completa: idsS.length > 0 && hechasEnviadas === idsS.length };
   });
 
   const [registrosDraft, setRegistrosDraft] = useState({});
-  const [hechoDraft, setHechoDraft] = useState({}); // solo local hasta confirmar envío
+  const [hechoDraft, setHechoDraft] = useState({}); // local hasta guardar (borrador) o confirmar envío
   const [gifAmpliado, setGifAmpliado] = useState(null);
   const [pidiendoConfirmacion, setPidiendoConfirmacion] = useState(false);
   const [enviado, setEnviado] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [guardandoBorrador, setGuardandoBorrador] = useState(false);
+  const [borradorGuardadoOk, setBorradorGuardadoOk] = useState(false);
   const [errorEnvio, setErrorEnvio] = useState("");
   // P6: ids de tareas cuyo aviso puntual de "nuevo récord" ya se ha
   // descartado a mano en esta sesión — el halo/badge de la tarea se queda
   // igualmente, solo se oculta el aviso.
   const [recordsDescartados, setRecordsDescartados] = useState([]);
+
+  // Restaura, una sola vez por sesión, lo que el jugador ya hubiera guardado
+  // con "Guardar sin enviar" — así un refresco de página (p. ej. porque el
+  // entrenador avisó de que cambió algo) no le hace perder lo ya tecleado.
+  const draftRestauradoRef = useRef(null);
+  useEffect(() => {
+    if (!sesionActual || yaEnviadaAntes) return;
+    if (draftRestauradoRef.current === sesionActual.id) return;
+    const hechoInicial = {};
+    const registroInicial = {};
+    tareaIdsSesionActual.forEach((id) => {
+      const r = registrosByTarea.get(id);
+      if (r && r.enviado === false) {
+        hechoInicial[id] = true;
+        registroInicial[id] = { reps: r.reps_hechas ?? "", carga: r.carga_kg ?? "", rir: r.rir ?? "", subtipo: r.subtipo_corporal || "" };
+      }
+    });
+    if (Object.keys(hechoInicial).length) {
+      draftRestauradoRef.current = sesionActual.id;
+      setHechoDraft((prev) => ({ ...hechoInicial, ...prev }));
+      setRegistrosDraft((prev) => ({ ...registroInicial, ...prev }));
+    }
+  }, [sesionActual, yaEnviadaAntes, tareaIdsSesionActual, registrosByTarea]);
 
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
@@ -9272,13 +9301,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   }
 
   const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-  // Si ya hay registros guardados de hoy para las tareas de ESTA sesión en
-  // concreto, es que esta sesión ya se confirmó y envió antes — se trata
-  // como ya enviada, sin dejar reabrirla. Antes esto miraba las tareas de
-  // TODAS las sesiones de hoy juntas, así que enviar una bloqueaba también
-  // la otra sin haberse tocado.
-  const tareaIdsSesionActual = sesionActual ? tareas.filter((t) => t.sesion_id === sesionActual.id).map((t) => t.id) : [];
-  const yaEnviadaAntes = loaded && tareaIdsSesionActual.length > 0 && tareaIdsSesionActual.some((id) => registrosByTarea.has(id));
+  // tareaIdsSesionActual / yaEnviadaAntes ya se calcularon más arriba, antes
+  // de los primeros `return` (los necesita el efecto que restaura el
+  // borrador guardado).
 
   // La referencia de "última vez" se guarda por ejercicio + equipo usado —
   // la carga con cada uno de estos no es directamente comparable entre sí
@@ -9840,41 +9865,76 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   };
   const tareasSinRegistroCompleto = todasLasTareas.filter((t) => hechoDraft[t.id] && registroIncompleto(t));
 
+  // Aviso "el entrenador cambió la sesión desde tu último guardado": se
+  // detectan dos cosas sobre los borradores (enviado: false) que el jugador
+  // ya tuviera guardados para hoy — 1) el entrenador quitó/rehizo algún
+  // ejercicio que el jugador ya había marcado (su tarea_id ya no existe en
+  // la sesión actual), o 2) el ejercicio sigue ahí pero el entrenador le
+  // cambió series/reps/RIR/%1RM/modo (guardado en snapshot_tarea al hacer
+  // el borrador, se compara contra la tarea tal como está ahora).
+  const borradoresDelJugador = tareaIdsSesionActual.map((id) => registrosByTarea.get(id)).filter((r) => r && r.enviado === false);
+  const huboCambioComposicion = registros.some((r) => r.enviado === false && !tareaIdsSesionActual.includes(r.tarea_id));
+  const huboCambioParametros = borradoresDelJugador.some((r) => {
+    if (!r.snapshot_tarea) return false;
+    const t = tareasVisualesById.get(r.tarea_id);
+    if (!t) return false;
+    try {
+      const snap = JSON.parse(r.snapshot_tarea);
+      return snap.series !== t.series || snap.cantidad !== t.cantidad || snap.rir !== t.rir || snap.pct1rm !== t.pct1rm || snap.modo !== t.modo;
+    } catch {
+      return false;
+    }
+  });
+  const sesionModificadaDesdeBorrador = !yaEnviadaAntes && (huboCambioComposicion || huboCambioParametros);
 
-  // Marcar/desmarcar hecho es SOLO local mientras no se confirme el envío —
-  // así una tarea tocada pero nunca enviada no genera ningún registro real
-  // en el backend, y la sesión no se bloquea para el entrenador antes de
-  // tiempo.
+  // Marcar/desmarcar hecho es SOLO local mientras no se guarde (borrador) o
+  // confirme el envío — así una tarea tocada pero nunca guardada no genera
+  // ningún registro real en el backend.
   const toggle = (t) => {
     setHechoDraft((prev) => ({ ...prev, [t.id]: !prev[t.id] }));
   };
+
+  // Construye las filas de "registros" a partir de lo marcado en pantalla.
+  // Reutiliza el id de un registro que ya existiera para esa tarea (típico:
+  // un "Guardar sin enviar" anterior) para que el guardado ACTUALICE esa
+  // fila en vez de crear una duplicada — si no hay ninguno, se crea nueva.
+  const construirRegistrosDesdeDraft = (enviadoFinal) =>
+    todasLasTareas
+      .filter((t) => hechoDraft[t.id])
+      .map((t) => {
+        const draft = getRegistro(t.id);
+        const existente = registrosByTarea.get(t.id);
+        return {
+          ...(existente ? { id: existente.id } : {}),
+          jugador_id: player.id,
+          tarea_id: t.id,
+          fecha: date,
+          hecho: true,
+          reps_hechas: draft.reps,
+          carga_kg: draft.carga,
+          rir: draft.rir,
+          subtipo_corporal: draft.subtipo || "",
+          enviado: enviadoFinal,
+          // Solo hace falta guardar el "recordatorio" de con qué parámetros
+          // se hizo mientras el registro sigue siendo un borrador — una vez
+          // enviado de verdad ya no se usa para nada.
+          snapshot_tarea: enviadoFinal ? "" : JSON.stringify({ series: t.series, cantidad: t.cantidad, rir: t.rir, pct1rm: t.pct1rm, modo: t.modo }),
+        };
+      });
 
   const confirmarEnvio = async () => {
     setEnviando(true);
     setErrorEnvio("");
     try {
-      const nuevos = todasLasTareas
-        .filter((t) => hechoDraft[t.id])
-        .map((t) => {
-          const draft = getRegistro(t.id);
-          return {
-            jugador_id: player.id,
-            tarea_id: t.id,
-            fecha: date,
-            hecho: true,
-            reps_hechas: draft.reps,
-            carga_kg: draft.carga,
-            rir: draft.rir,
-            subtipo_corporal: draft.subtipo || "",
-          };
-        });
-      // CRÍTICO: si esto falla o se queda a medias (Apps Script atascado,
-      // sin conexión...) y no se comprueba, el jugador ve "Sesión enviada"
-      // sin que se haya guardado nada de verdad — y el entrenador se queda
-      // sin ningún registro sin ninguna pista de qué pasó. Por eso, aquí SÍ
-      // se exige que el guardado haya confirmado éxito antes de dar el envío
-      // por bueno.
-      const ok = nuevos.length ? await saveRegistrosJugador([...registrosJugador, ...nuevos]) : true;
+      const nuevos = construirRegistrosDesdeDraft(true);
+      const tareaIdsTocadas = new Set(nuevos.map((n) => n.tarea_id));
+      const resto = registrosJugador.filter((r) => !tareaIdsTocadas.has(r.tarea_id));
+      // CRÍTICO: si esto falla o se queda a medias (sin conexión...) y no se
+      // comprueba, el jugador ve "Sesión enviada" sin que se haya guardado
+      // nada de verdad — y el entrenador se queda sin ningún registro sin
+      // ninguna pista de qué pasó. Por eso, aquí SÍ se exige que el guardado
+      // haya confirmado éxito antes de dar el envío por bueno.
+      const ok = nuevos.length ? await saveRegistrosJugador([...resto, ...nuevos]) : true;
       if (ok) {
         setEnviado(true);
       } else {
@@ -9883,6 +9943,29 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     } finally {
       setEnviando(false);
       setPidiendoConfirmacion(false);
+    }
+  };
+
+  // "Guardar sin enviar": persiste el progreso marcado como borrador
+  // (enviado: false) — no cuenta como sesión hecha en ninguna estadística ni
+  // bloquea al entrenador para seguir editando la sesión, pero sí sobrevive
+  // a un refresco de página o a que el jugador salga y vuelva a entrar.
+  const guardarSinEnviar = async () => {
+    setGuardandoBorrador(true);
+    setErrorEnvio("");
+    setBorradorGuardadoOk(false);
+    try {
+      const nuevos = construirRegistrosDesdeDraft(false);
+      const tareaIdsTocadas = new Set(nuevos.map((n) => n.tarea_id));
+      const resto = registrosJugador.filter((r) => !tareaIdsTocadas.has(r.tarea_id));
+      const ok = nuevos.length ? await saveRegistrosJugador([...resto, ...nuevos]) : true;
+      if (ok) {
+        setBorradorGuardadoOk(true);
+      } else {
+        setErrorEnvio("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+      }
+    } finally {
+      setGuardandoBorrador(false);
     }
   };
 
@@ -10406,6 +10489,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             HOY · {fmtDateLabel(date).toUpperCase()}
           </div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700, margin: "0 0 4px", letterSpacing: "-0.01em" }}>Sesión de hoy</h1>
+          {sesionModificadaDesdeBorrador && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 10, fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
+              <AlertTriangle size={14} style={{ flexShrink: 0, color: ds.warning }} />
+              Tu entrenador ha modificado esta sesión desde tu último guardado. Revisa los ejercicios antes de continuar — lo que ya tenías marcado sigue aquí, pero algo ha cambiado.
+            </div>
+          )}
           {totalTareas > 0 && (
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 16 }}>
               <DsProgressRing value={totalTareas ? (totalHechas / totalTareas) * 100 : 0} size={72} strokeWidth={7} />
@@ -10524,6 +10613,33 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 
             {errorEnvio && (
               <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
+            )}
+            {borradorGuardadoOk && !pidiendoConfirmacion && (
+              <div style={{ color: ds.success, fontSize: 12.5, background: `${ds.success}18`, border: `1px solid ${ds.successBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 22 }}>
+                Progreso guardado. Tu entrenador puede seguir tocando la sesión mientras no la envíes — vuelve cuando quieras para terminarla y enviarla.
+              </div>
+            )}
+            {!pidiendoConfirmacion && (
+              <button
+                onClick={guardarSinEnviar}
+                disabled={totalHechas === 0 || guardandoBorrador || enviando}
+                style={{
+                  width: "100%",
+                  marginTop: 14,
+                  background: "transparent",
+                  border: `1px solid ${ds.border}`,
+                  color: totalHechas === 0 ? ds.inkMuted : ds.inkSecondary,
+                  borderRadius: dsR.lg,
+                  padding: "11px 16px",
+                  fontSize: 13.5,
+                  fontWeight: 600,
+                  cursor: totalHechas === 0 ? "not-allowed" : "pointer",
+                  opacity: totalHechas === 0 ? 0.6 : guardandoBorrador ? 0.6 : 1,
+                }}
+                title="Guarda lo marcado sin enviarlo todavía — tu entrenador podrá seguir editando la sesión, y tú lo recuperarás la próxima vez que entres."
+              >
+                {guardandoBorrador ? "Guardando..." : "Guardar sin enviar"}
+              </button>
             )}
             {pidiendoConfirmacion ? (
               <div style={{ marginTop: 22 }}>
@@ -13353,12 +13469,13 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
       const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
       const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
-      // Se bloquea la sesión entera solo si ALGÚN jugador ya registró datos
-      // reales para alguna de sus tareas — mientras nadie la haya rellenado,
-      // se edita con normalidad, esté "enviada" o no.
+      // Se bloquea la sesión entera solo si ALGÚN jugador ya ENVIÓ datos
+      // reales para alguna de sus tareas — un progreso "guardado sin
+      // enviar" (enviado: false) no cuenta: mientras nadie haya confirmado
+      // el envío, se edita con normalidad, esté "enviada" o no.
       const tareaIds = new Set(tareas.map((t) => t.id));
       const todosLosRegistros = tareaIds.size ? await api.list("registros", {}) : [];
-      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
+      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id) && r.enviado !== false);
       if (cancelled) return;
       setReadOnly(hayRegistro);
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
@@ -14093,7 +14210,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         {readOnly && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
             <Lock size={13} style={{ flexShrink: 0 }} />
-            Un jugador ya registró datos de esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
+            Un jugador ya envió esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
         <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
@@ -14761,7 +14878,8 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
       const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
       const tareaIds = new Set(tareas.map((t) => t.id));
       const todosLosRegistros = tareaIds.size ? await api.list("registros", {}) : [];
-      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id));
+      // Igual que en Diseñar sesión: un progreso guardado sin enviar no bloquea.
+      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id) && r.enviado !== false);
       if (cancelled) return;
       setReadOnly(hayRegistro);
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
@@ -14958,7 +15076,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
         {readOnly && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
             <Lock size={13} style={{ flexShrink: 0 }} />
-            Un jugador ya registró datos de esta dinámica — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
+            Un jugador ya envió esta dinámica — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
         <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
