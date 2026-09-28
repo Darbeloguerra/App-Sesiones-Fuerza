@@ -8056,9 +8056,6 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   <DsButton size="sm" onClick={() => disenarParaSolicitud(sol, "sesion")}>
                     Diseñar sesión
                   </DsButton>
-                  <DsButton size="sm" variant="secondary" onClick={() => disenarParaSolicitud(sol, "complementaria")}>
-                    Dinámica
-                  </DsButton>
                   <button
                     onClick={() => descartarSolicitud(sol)}
                     style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "6px 10px", color: ds.inkMuted, fontSize: 11.5, cursor: "pointer" }}
@@ -8822,6 +8819,11 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
   const [notaPeticion, setNotaPeticion] = useState("");
   const [pidiendo, setPidiendo] = useState(false);
   const [errorPeticion, setErrorPeticion] = useState("");
+  // Selección de varios días a la vez — "Seleccionar varios días" pone la
+  // cuadrícula en modo selección (tocar un día lo marca/desmarca en vez de
+  // abrir su detalle) y al pedir se crea una petición por cada día elegido.
+  const [modoMultiple, setModoMultiple] = useState(false);
+  const [diasSeleccionados, setDiasSeleccionados] = useState([]);
 
   const solicitudPendientePara = (fecha) => solicitudes.find((s) => s.fecha === fecha && s.estado === "pendiente");
 
@@ -8845,6 +8847,24 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
     setErrorPeticion("");
     const ok = await saveSolicitudes(solicitudes.filter((s) => s.id !== sol.id));
     if (!ok) setErrorPeticion("No se pudo cancelar la petición. Inténtalo de nuevo.");
+  };
+  const toggleDiaSeleccionado = (fecha) => {
+    setDiasSeleccionados((prev) => (prev.includes(fecha) ? prev.filter((f) => f !== fecha) : [...prev, fecha]));
+  };
+  const pedirVariosDias = async () => {
+    if (!diasSeleccionados.length) return;
+    setErrorPeticion("");
+    setPidiendo(true);
+    const nuevas = diasSeleccionados.map((fecha) => ({ jugador_id: player.id, fecha, nota: notaPeticion.trim(), estado: "pendiente" }));
+    const ok = await saveSolicitudes([...solicitudes, ...nuevas]);
+    setPidiendo(false);
+    if (ok) {
+      setNotaPeticion("");
+      setDiasSeleccionados([]);
+      setModoMultiple(false);
+    } else {
+      setErrorPeticion("No se pudo enviar la petición. Comprueba tu conexión e inténtalo de nuevo.");
+    }
   };
 
   // Estadísticas del mes visible: cuántos días de ESTE mes tenía sesión
@@ -8910,6 +8930,27 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
             </button>
           </div>
 
+          <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 8 }}>
+            <button
+              onClick={() => {
+                setModoMultiple((v) => !v);
+                setDiasSeleccionados([]);
+              }}
+              style={{
+                background: modoMultiple ? ds.accentSubtle : "transparent",
+                border: `1px solid ${modoMultiple ? ds.accentBorderSubtle : ds.border}`,
+                borderRadius: dsR.sm,
+                padding: "5px 10px",
+                color: modoMultiple ? ds.accent : ds.inkSecondary,
+                fontSize: 11.5,
+                fontWeight: 600,
+                cursor: "pointer",
+              }}
+            >
+              {modoMultiple ? "Cancelar selección" : "Pedir varios días a la vez"}
+            </button>
+          </div>
+
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 4 }}>
             {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
               <div key={d} style={{ textAlign: "center", fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, padding: "2px 0" }}>
@@ -8920,12 +8961,15 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
           <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 3, marginBottom: 16 }}>
             {dias.map((d) => {
               const e = estadoDia(d.fecha);
-              const esSel = d.fecha === diaSel;
+              const elegible = !d.fuera && d.fecha >= hoy && e === "sin-sesion";
+              const marcado = modoMultiple && diasSeleccionados.includes(d.fecha);
+              const esSel = !modoMultiple && d.fecha === diaSel;
               const color = colorEstado[e];
               return (
                 <button
                   key={d.fecha}
-                  onClick={() => setDiaSel(d.fecha)}
+                  onClick={() => (modoMultiple ? elegible && toggleDiaSeleccionado(d.fecha) : setDiaSel(d.fecha))}
+                  disabled={modoMultiple && !elegible}
                   style={{
                     aspectRatio: "1",
                     display: "flex",
@@ -8934,85 +8978,121 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
                     justifyContent: "center",
                     gap: 2,
                     borderRadius: dsR.md,
-                    border: esSel ? `1.5px solid ${ds.accent}` : e === "hoy" ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
-                    background: esSel ? ds.accentSubtle : ds.surface,
-                    opacity: d.fuera ? 0.3 : 1,
+                    border: marcado ? `1.5px solid ${ds.accent}` : esSel ? `1.5px solid ${ds.accent}` : e === "hoy" ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
+                    background: marcado ? ds.accentSubtle : esSel ? ds.accentSubtle : ds.surface,
+                    opacity: d.fuera ? 0.3 : modoMultiple && !elegible ? 0.35 : 1,
                     color: ds.ink,
-                    cursor: "pointer",
+                    cursor: modoMultiple && !elegible ? "default" : "pointer",
                     fontSize: 11,
                     fontWeight: e === "hoy" ? 800 : 500,
                   }}
                 >
-                  <span>{d.dayNum}</span>
-                  <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: color || "transparent" }} />
+                  <span>{marcado ? "✓" : d.dayNum}</span>
+                  {!marcado && <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: color || "transparent" }} />}
                 </button>
               );
             })}
           </div>
 
+          {modoMultiple && (
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 16, marginBottom: 16 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 8 }}>
+                {diasSeleccionados.length === 0 ? "Toca los días para los que quieres pedir sesión" : `${diasSeleccionados.length} día${diasSeleccionados.length === 1 ? "" : "s"} seleccionado${diasSeleccionados.length === 1 ? "" : "s"}`}
+              </div>
+              {diasSeleccionados.length > 0 && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
+                  {diasSeleccionados
+                    .slice()
+                    .sort()
+                    .map((f) => (
+                      <span key={f} style={{ display: "flex", alignItems: "center", gap: 5, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.sm, padding: "3px 4px 3px 8px", fontSize: 11, color: ds.accent, fontWeight: 600 }}>
+                        {fmtDateShort(f)}
+                        <button onClick={() => toggleDiaSeleccionado(f)} style={{ background: "transparent", border: "none", color: ds.accent, cursor: "pointer", fontSize: 13, lineHeight: 1, padding: 2 }} aria-label={`Quitar ${f}`}>
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                </div>
+              )}
+              <textarea
+                value={notaPeticion}
+                onChange={(e) => setNotaPeticion(e.target.value)}
+                placeholder="Opcional: cuéntale qué te gustaría trabajar esos días..."
+                style={{ width: "100%", minHeight: 50, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", color: ds.ink, fontFamily: dsF.sans, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+              />
+              {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
+              <DsButton disabled={!diasSeleccionados.length || pidiendo} onClick={pedirVariosDias} style={{ width: "100%", marginTop: 8 }}>
+                {pidiendo ? "Enviando..." : diasSeleccionados.length ? `Pedir sesión para ${diasSeleccionados.length} día${diasSeleccionados.length === 1 ? "" : "s"}` : "Pedir sesión"}
+              </DsButton>
+            </div>
+          )}
+
           {/* Detalle del día seleccionado — SIEMPRE solo marcador, nunca el
               contenido (ejercicios/series/cargas). El único sitio donde se ve
               contenido de verdad es "Ver mi sesión de hoy", y solo el día en
-              que toca. */}
-          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 16 }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
-              <span style={{ fontSize: 13.5, fontWeight: 700, textTransform: "capitalize" }}>{fmtDateLabel(diaSel)}</span>
-              {estadoSel === "hoy" && <DsBadge tone="accent">HOY</DsBadge>}
-              {estadoSel === "cumplido" && <DsBadge tone="success">Completada</DsBadge>}
-              {estadoSel === "pendiente" && <DsBadge tone="danger">No completada</DsBadge>}
-              {estadoSel === "futuro" && <DsBadge>Programada</DsBadge>}
-              {estadoSel === "pedida" && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.warning, border: `1px solid ${ds.warning}55`, borderRadius: 4, padding: "1px 6px" }}>PEDIDA</span>}
+              que toca. Se oculta en modo selección múltiple, que usa su
+              propio panel (arriba). */}
+          {!modoMultiple && (
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: 16 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 700, textTransform: "capitalize" }}>{fmtDateLabel(diaSel)}</span>
+                {estadoSel === "hoy" && <DsBadge tone="accent">HOY</DsBadge>}
+                {estadoSel === "cumplido" && <DsBadge tone="success">Completada</DsBadge>}
+                {estadoSel === "pendiente" && <DsBadge tone="danger">No completada</DsBadge>}
+                {estadoSel === "futuro" && <DsBadge>Programada</DsBadge>}
+                {estadoSel === "pedida" && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.warning, border: `1px solid ${ds.warning}55`, borderRadius: 4, padding: "1px 6px" }}>PEDIDA</span>}
+              </div>
+              {estadoSel === "hoy" && (
+                <>
+                  <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Aquí es donde ves el detalle completo — ejercicios, series y vídeo — igual que en tu Dashboard.</div>
+                  <DsButton onClick={onVerSesionHoy} style={{ width: "100%", marginTop: 10 }}>
+                    Ver mi sesión de hoy →
+                  </DsButton>
+                </>
+              )}
+              {estadoSel === "cumplido" && (
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tuviste una sesión programada ese día y quedó completada. El detalle (ejercicios, series, cargas) ya no se muestra aquí.</div>
+              )}
+              {estadoSel === "pendiente" && (
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tenías sesión programada ese día y no quedó registrada como completada.</div>
+              )}
+              {estadoSel === "futuro" && (
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tienes una sesión programada para ese día. Todavía no puedes ver en qué consiste — se abre el mismo día.</div>
+              )}
+              {estadoSel === "pedida" && solicitudSel && (
+                <div>
+                  <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
+                    Le has pedido a tu entrenador sesión para este día{solicitudSel.nota ? `: "${solicitudSel.nota}"` : "."} En cuanto la prepare, la verás aquí.
+                  </div>
+                  <button
+                    onClick={() => cancelarPeticion(solicitudSel)}
+                    style={{ marginTop: 10, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "7px 12px", color: ds.inkSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Cancelar petición
+                  </button>
+                  {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
+                </div>
+              )}
+              {estadoSel === "sin-sesion" && diaSel < hoy && <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>No tuviste ninguna sesión programada ese día.</div>}
+              {estadoSel === "sin-sesion" && diaSel >= hoy && solicitudesLoaded && (
+                <div>
+                  <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5, marginBottom: 10 }}>
+                    {diaSel === hoy ? "Todavía no tienes ninguna sesión programada para hoy." : "Todavía no tienes ninguna sesión programada para ese día."} ¿Quieres pedirle a tu entrenador que te prepare algo?
+                  </div>
+                  <textarea
+                    value={notaPeticion}
+                    onChange={(e) => setNotaPeticion(e.target.value)}
+                    placeholder="Opcional: cuéntale qué te gustaría trabajar..."
+                    style={{ width: "100%", minHeight: 50, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", color: ds.ink, fontFamily: dsF.sans, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                  />
+                  {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
+                  <DsButton disabled={pidiendo} onClick={pedirSesion} style={{ width: "100%", marginTop: 8 }}>
+                    {pidiendo ? "Enviando..." : `Pedir sesión para ${diaSel === hoy ? "hoy" : "este día"}`}
+                  </DsButton>
+                </div>
+              )}
             </div>
-            {estadoSel === "hoy" && (
-              <>
-                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Aquí es donde ves el detalle completo — ejercicios, series y vídeo — igual que en tu Dashboard.</div>
-                <DsButton onClick={onVerSesionHoy} style={{ width: "100%", marginTop: 10 }}>
-                  Ver mi sesión de hoy →
-                </DsButton>
-              </>
-            )}
-            {estadoSel === "cumplido" && (
-              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tuviste una sesión programada ese día y quedó completada. El detalle (ejercicios, series, cargas) ya no se muestra aquí.</div>
-            )}
-            {estadoSel === "pendiente" && (
-              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tenías sesión programada ese día y no quedó registrada como completada.</div>
-            )}
-            {estadoSel === "futuro" && (
-              <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tienes una sesión programada para ese día. Todavía no puedes ver en qué consiste — se abre el mismo día.</div>
-            )}
-            {estadoSel === "pedida" && solicitudSel && (
-              <div>
-                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
-                  Le has pedido a tu entrenador sesión para este día{solicitudSel.nota ? `: "${solicitudSel.nota}"` : "."} En cuanto la prepare, la verás aquí.
-                </div>
-                <button
-                  onClick={() => cancelarPeticion(solicitudSel)}
-                  style={{ marginTop: 10, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "7px 12px", color: ds.inkSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
-                >
-                  Cancelar petición
-                </button>
-                {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
-              </div>
-            )}
-            {estadoSel === "sin-sesion" && diaSel < hoy && <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>No tuviste ninguna sesión programada ese día.</div>}
-            {estadoSel === "sin-sesion" && diaSel >= hoy && solicitudesLoaded && (
-              <div>
-                <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5, marginBottom: 10 }}>
-                  {diaSel === hoy ? "Todavía no tienes ninguna sesión programada para hoy." : "Todavía no tienes ninguna sesión programada para ese día."} ¿Quieres pedirle a tu entrenador que te prepare algo?
-                </div>
-                <textarea
-                  value={notaPeticion}
-                  onChange={(e) => setNotaPeticion(e.target.value)}
-                  placeholder="Opcional: cuéntale qué te gustaría trabajar..."
-                  style={{ width: "100%", minHeight: 50, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", color: ds.ink, fontFamily: dsF.sans, fontSize: 12, outline: "none", boxSizing: "border-box" }}
-                />
-                {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
-                <DsButton disabled={pidiendo} onClick={pedirSesion} style={{ width: "100%", marginTop: 8 }}>
-                  {pidiendo ? "Enviando..." : `Pedir sesión para ${diaSel === hoy ? "hoy" : "este día"}`}
-                </DsButton>
-              </div>
-            )}
-          </div>
+          )}
           <div style={{ height: 100 }} />
         </div>
       </PantallaBase>
