@@ -5316,6 +5316,14 @@ function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individualizar, p
         if (CMJ_STATUS_ORDER[status] < CMJ_STATUS_ORDER[worst]) worst = status;
       });
       curr.recuperacion = { metrics: recMetrics, status: worst, modo: "inicio_anterior" };
+      // CRÍTICO: el primer día de un microciclo (antes de que haya MD-2/MD+1
+      // esa semana) solo tiene esta comparación (Inicio contra Inicio
+      // anterior) — si no se refleja aquí, curr.status se queda "gray" y
+      // más abajo lastActiveId salta ese microciclo entero, haciendo que el
+      // panel muestre el estado de una semana más VIEJA en su lugar (el
+      // origen de "hoy ha saltado menos pero el panel sale en verde y con
+      // un % de hace semanas").
+      if (CMJ_STATUS_ORDER[worst] < CMJ_STATUS_ORDER[curr.status]) curr.status = worst;
     });
 
     const orderedIds = microList.map((m) => m.id);
