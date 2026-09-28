@@ -6419,11 +6419,35 @@ function CmjMicrociclosReal() {
           </div>
           <div>
             <div style={{ fontSize: 11, color: CMJ_TAG_META.md2.color, marginBottom: 4 }}>MD-2</div>
-            <DsInput type="date" value={form.md2} onChange={(e) => setForm({ ...form, md2: e.target.value })} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <DsInput type="date" value={form.md2} onChange={(e) => setForm({ ...form, md2: e.target.value })} />
+              {form.md2 && (
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, md2: "" })}
+                  title="Borrar fecha"
+                  style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 14, cursor: "pointer", padding: 2, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
           <div>
             <div style={{ fontSize: 11, color: CMJ_TAG_META.md1.color, marginBottom: 4 }}>MD+1</div>
-            <DsInput type="date" value={form.md1} onChange={(e) => setForm({ ...form, md1: e.target.value })} />
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <DsInput type="date" value={form.md1} onChange={(e) => setForm({ ...form, md1: e.target.value })} />
+              {form.md1 && (
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, md1: "" })}
+                  title="Borrar fecha"
+                  style={{ background: "transparent", border: "none", color: ds.inkMuted, fontSize: 14, cursor: "pointer", padding: 2, lineHeight: 1 }}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
         </div>
         {error && <div style={{ marginTop: 10, fontSize: 12, color: ds.danger }}>{error}</div>}
