@@ -347,9 +347,13 @@ const ENTITY_TABLE = {
   // resto (ver sql/add_notas_jugador.sql). Se apoya en la infraestructura
   // genérica de api.list/save/delete, sin nada especial.
   notasJugador: "notas_jugador",
+  // Peticiones del jugador de sesión para un día concreto (Calendario →
+  // "pídesela tú"), ver sql/add_solicitudes_sesion.sql. Mismo patrón
+  // genérico que notasJugador: tabla mínima, sin lógica especial aquí.
+  solicitudesSesion: "solicitudes_sesion",
 };
 
-const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota" };
+const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota", solicitudesSesion: "sol" };
 function genId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
@@ -3462,6 +3466,7 @@ const LISTA_MOVIL_MAX_ALTO = 216;
 
 function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
   const datos = useDatosDashboardEntrenador();
+  const pendientesCount = useSolicitudesPendientesCount();
 
   return (
     <PantallaBase rol="entrenador" maxWidth={520}>
@@ -3511,8 +3516,13 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
             <button
               key={m.id}
               onClick={() => onAbrirModulo(m.id)}
-              style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 10, padding: "9px 4px", cursor: "pointer" }}
+              style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 10, padding: "9px 4px", cursor: "pointer" }}
             >
+              {m.id === "calendario" && pendientesCount > 0 && (
+                <span style={{ position: "absolute", top: 4, right: 4, background: TEMA.alerta, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 8.5, fontWeight: 800, borderRadius: dsR.full, minWidth: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
+                  {pendientesCount}
+                </span>
+              )}
               <div style={{ color: TEMA.textoMuted }}><IconoModulo tipo={m.icono} /></div>
               <div style={{ fontSize: 9, fontWeight: 600, color: TEMA.texto, textAlign: "center", lineHeight: 1.15 }}>{m.nombre}</div>
             </button>
@@ -3627,6 +3637,10 @@ function labelMes(mesRef) {
 
 function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
   const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Dashboard", icono: "grid" }, ...MODULOS_DASHBOARD];
+  // Aviso de peticiones de sesión sin mirar (Calendario → jugador pide un
+  // día) — solo dentro de la app, un badge aquí es lo más parecido a una
+  // notificación que hay sin infraestructura de push/email.
+  const pendientesCount = useSolicitudesPendientesCount();
   return (
     <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
@@ -3639,7 +3653,14 @@ function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
       <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
         {SIDEBAR_ITEMS.map((m) => (
           <DsNavItem key={m.id} active={m.id === activo} onClick={() => onAbrirModulo(m.id)} icon={m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}>
-            {m.nombre}
+            <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
+              {m.nombre}
+              {m.id === "calendario" && pendientesCount > 0 && (
+                <span style={{ marginLeft: "auto", background: ds.warning, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 800, borderRadius: dsR.full, padding: "1px 6px", minWidth: 16, textAlign: "center" }}>
+                  {pendientesCount}
+                </span>
+              )}
+            </span>
           </DsNavItem>
         ))}
       </div>
@@ -7773,6 +7794,18 @@ function estadoDiaCalendario(sesionesDia, fecha, hoy) {
   return "empty";
 }
 
+// Contador ligero para los badges de "Calendario" (menú lateral y accesos
+// directos del Dashboard) — cuenta peticiones con estado='pendiente' tal
+// cual están en la tabla, SIN cruzarlas contra `sesiones` (ese cruce, más
+// caro, es el que hace el propio Calendario para decidir cuáles mostrar
+// como accionables de verdad). Aquí basta con una señal barata de "tienes
+// peticiones sin mirar" — sharedDataCache hace que llamarlo desde varios
+// sitios a la vez no dispare peticiones de red repetidas.
+function useSolicitudesPendientesCount() {
+  const [rows, , loaded] = useEntityList("solicitudesSesion", { estado: "pendiente" });
+  return loaded ? rows.length : 0;
+}
+
 function itemScopeCalendarioStyle(activo) {
   return {
     display: "block",
@@ -7816,6 +7849,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   // sola llamada, cacheada) — Calendario es otra forma de mirar exactamente
   // los mismos datos, no una fuente nueva.
   const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
+  // Peticiones de jugadores ("Pedir sesión para este día", solo dentro de
+  // la app) — se piden todas (sin filtrar por estado) porque aquí también
+  // hace falta poder "Descartar" una ya vista, no solo listar las nuevas.
+  const [solicitudes, saveSolicitudes, solicitudesLoaded] = useEntityList("solicitudesSesion");
 
   const [editingSesion, setEditingSesion] = useState(null);
   const [plantillaSesion, setPlantillaSesion] = useState(null);
@@ -7892,6 +7929,20 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
 
   const dias = generarCuadriculaMes(mesRef);
 
+  // Solicitudes de verdad accionables: 'pendiente' en la tabla Y todavía sin
+  // una sesión real que las resuelva (ese jugador, esa fecha) — en cuanto
+  // diseñas la sesión, desaparecen solas de aquí, sin tener que marcarlas a
+  // mano como "atendidas".
+  const cubiertaPorSesion = new Set();
+  conTareas.forEach((s) => {
+    const destino = destinatariosEfectivosSesion(s, activos);
+    (s.fechas || []).forEach((f) => destino.forEach((jid) => cubiertaPorSesion.add(`${jid}::${f}`)));
+  });
+  const solicitudesPendientes = solicitudes
+    .filter((s) => s.estado === "pendiente" && !cubiertaPorSesion.has(`${s.jugador_id}::${s.fecha}`))
+    .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+  const solicitudesEnFecha = (fecha) => solicitudesPendientes.filter((s) => s.fecha === fecha && (scope.tipo !== "jugador" || s.jugador_id === scope.jugadorId));
+
   const editar = (s) => {
     setEditingSesion(s);
     setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
@@ -7928,6 +7979,23 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     setTipoEditor(tipo);
     setShowEditor(true);
   };
+  // Atender una petición: abre el editor con la fecha y el jugador ya
+  // puestos (igual que "+ Diseñar sesión" del panel del día, pero sin
+  // necesidad de estar mirando ya el ámbito de ese jugador) y de paso te
+  // deja en su calendario, para que veas cómo queda resuelta.
+  const disenarParaSolicitud = (sol, tipo) => {
+    setPlantillaSesion(null);
+    setEditingSesion(null);
+    setFechasParaEditor([sol.fecha]);
+    setDestinatariosParaEditor([sol.jugador_id]);
+    setTipoEditor(tipo);
+    setScopeId(`j:${sol.jugador_id}`);
+    setDiaSel(sol.fecha);
+    setShowEditor(true);
+  };
+  const descartarSolicitud = async (sol) => {
+    await saveSolicitudes(solicitudes.map((s) => (s.id === sol.id ? { ...s, estado: "descartada" } : s)));
+  };
   const eliminarSesion = async (sesionId) => {
     setErrorBorrado("");
     try {
@@ -7947,7 +8015,9 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   };
 
   const sesionesDiaSel = sesionesEnFecha(diaSel);
+  const solicitudesDiaSel = solicitudesEnFecha(diaSel);
   const yaEsIndividualDeEsteJugador = (s) => scope.tipo === "jugador" && s.jugadores_destino && s.jugadores_destino.length === 1 && s.jugadores_destino[0] === scope.jugadorId;
+  const nombreJugadorSolicitud = (sol) => players.find((p) => p.id === sol.jugador_id)?.name || "Un jugador";
 
   return (
     <PantallaEntrenadorAncha activo="calendario" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
@@ -7961,6 +8031,43 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         {errorBorrado && (
           <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
             {errorBorrado}
+          </div>
+        )}
+
+        {/* Solicitudes de jugadores ("Pedir sesión para este día") — el
+            aviso de verdad, no un decorado: en cuanto se diseña la sesión
+            para esa fecha y ese jugador, la petición desaparece sola de
+            aquí. */}
+        {solicitudesLoaded && solicitudesPendientes.length > 0 && (
+          <div style={{ marginBottom: 18, background: `${ds.warning}12`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.lg, padding: 14 }}>
+            <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.warning, marginBottom: 10, textTransform: "uppercase", fontWeight: 700 }}>
+              {solicitudesPendientes.length} {solicitudesPendientes.length === 1 ? "petición" : "peticiones"} de jugadores
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {solicitudesPendientes.map((sol) => (
+                <div key={sol.id} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 180 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{nombreJugadorSolicitud(sol)}</div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>
+                      {fmtDateLabel(sol.fecha)}
+                      {sol.nota ? ` · "${sol.nota}"` : ""}
+                    </div>
+                  </div>
+                  <DsButton size="sm" onClick={() => disenarParaSolicitud(sol, "sesion")}>
+                    Diseñar sesión
+                  </DsButton>
+                  <DsButton size="sm" variant="secondary" onClick={() => disenarParaSolicitud(sol, "complementaria")}>
+                    Dinámica
+                  </DsButton>
+                  <button
+                    onClick={() => descartarSolicitud(sol)}
+                    style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "6px 10px", color: ds.inkMuted, fontSize: 11.5, cursor: "pointer" }}
+                  >
+                    Descartar
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
@@ -8064,12 +8171,14 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             const estado = estadoDiaCalendario(sesionesDia, d.fecha, hoy);
             const esHoy = d.fecha === hoy;
             const esSel = d.fecha === diaSel;
+            const tieneSolicitud = solicitudesEnFecha(d.fecha).length > 0;
             const colorDot = estado === "ok" ? ds.success : estado === "pending" ? ds.accent : "transparent";
             return (
               <button
                 key={d.fecha}
                 onClick={() => setDiaSel(d.fecha)}
                 style={{
+                  position: "relative",
                   aspectRatio: "1",
                   display: "flex",
                   flexDirection: "column",
@@ -8077,7 +8186,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   justifyContent: "center",
                   gap: 3,
                   borderRadius: dsR.md,
-                  border: esSel ? `1.5px solid ${ds.accent}` : esHoy ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
+                  border: esSel ? `1.5px solid ${ds.accent}` : tieneSolicitud ? `1px solid ${ds.warning}` : esHoy ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
                   background: esSel ? ds.accentSubtle : ds.surface,
                   opacity: d.fuera ? 0.35 : 1,
                   color: ds.ink,
@@ -8086,6 +8195,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   fontWeight: esHoy ? 800 : 500,
                 }}
               >
+                {tieneSolicitud && <span style={{ position: "absolute", top: 3, right: 3, width: 6, height: 6, borderRadius: dsR.full, background: ds.warning }} />}
                 <span>{d.dayNum}</span>
                 <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: colorDot }} />
               </button>
@@ -8099,6 +8209,24 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             {fmtDateLabel(diaSel)}
             {diaSel === hoy ? " · hoy" : ""}
           </div>
+          {solicitudesDiaSel.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
+              {solicitudesDiaSel.map((sol) => (
+                <div key={sol.id} style={{ background: `${ds.warning}14`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontSize: 12.5, fontWeight: 700, color: ds.ink }}>{nombreJugadorSolicitud(sol)} pidió sesión</div>
+                    {sol.nota && <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>"{sol.nota}"</div>}
+                  </div>
+                  <DsButton size="sm" onClick={() => disenarParaSolicitud(sol, "sesion")}>
+                    Diseñar
+                  </DsButton>
+                  <button onClick={() => descartarSolicitud(sol)} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "6px 10px", color: ds.inkMuted, fontSize: 11.5, cursor: "pointer" }}>
+                    Descartar
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
           {sesionesDiaSel.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
               {sesionesDiaSel.map((s) => (
@@ -8684,12 +8812,39 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
   const [diaSel, setDiaSel] = useState(hoy);
   const dias = generarCuadriculaMes(mesRef);
 
+  // Peticiones de este jugador ("Pedir sesión para este día") — solo dentro
+  // de la app, sin push ni email (ver sql/add_solicitudes_sesion.sql). En
+  // cuanto ese día pasa a tener sesión de verdad (fechasAsignadasJugador ya
+  // no depende de esta tabla), la petición deja de estar "pendiente" a
+  // efectos prácticos sin que haga falta tocarla — por eso aquí solo se
+  // muestra como "pedida" un día que TODAVÍA no tiene sesión.
+  const [solicitudes, saveSolicitudes, solicitudesLoaded] = useEntityList("solicitudesSesion", { jugador_id: player.id });
+  const [notaPeticion, setNotaPeticion] = useState("");
+  const [pidiendo, setPidiendo] = useState(false);
+  const [errorPeticion, setErrorPeticion] = useState("");
+
+  const solicitudPendientePara = (fecha) => solicitudes.find((s) => s.fecha === fecha && s.estado === "pendiente");
+
   const estadoDia = (fecha) => {
     const pautado = fechasAsignadasJugador(fecha, fecha).length > 0;
-    if (!pautado) return "sin-sesion";
+    if (!pautado) return solicitudPendientePara(fecha) ? "pedida" : "sin-sesion";
     if (fecha === hoy) return "hoy";
     if (fecha > hoy) return "futuro";
     return fechasConRegistro.has(fecha) ? "cumplido" : "pendiente";
+  };
+
+  const pedirSesion = async () => {
+    setErrorPeticion("");
+    setPidiendo(true);
+    const ok = await saveSolicitudes([...solicitudes, { jugador_id: player.id, fecha: diaSel, nota: notaPeticion.trim(), estado: "pendiente" }]);
+    setPidiendo(false);
+    if (ok) setNotaPeticion("");
+    else setErrorPeticion("No se pudo enviar la petición. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+  const cancelarPeticion = async (sol) => {
+    setErrorPeticion("");
+    const ok = await saveSolicitudes(solicitudes.filter((s) => s.id !== sol.id));
+    if (!ok) setErrorPeticion("No se pudo cancelar la petición. Inténtalo de nuevo.");
   };
 
   // Estadísticas del mes visible: cuántos días de ESTE mes tenía sesión
@@ -8706,8 +8861,9 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
     else if (e === "futuro" || e === "hoy") proximas++;
   });
 
-  const colorEstado = { hoy: ds.accent, cumplido: ds.success, pendiente: ds.danger, futuro: ds.inkSecondary, "sin-sesion": null };
+  const colorEstado = { hoy: ds.accent, cumplido: ds.success, pendiente: ds.danger, futuro: ds.inkSecondary, pedida: ds.warning, "sin-sesion": null };
   const estadoSel = estadoDia(diaSel);
+  const solicitudSel = solicitudPendientePara(diaSel);
 
   return (
     <>
@@ -8805,6 +8961,7 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
               {estadoSel === "cumplido" && <DsBadge tone="success">Completada</DsBadge>}
               {estadoSel === "pendiente" && <DsBadge tone="danger">No completada</DsBadge>}
               {estadoSel === "futuro" && <DsBadge>Programada</DsBadge>}
+              {estadoSel === "pedida" && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.warning, border: `1px solid ${ds.warning}55`, borderRadius: 4, padding: "1px 6px" }}>PEDIDA</span>}
             </div>
             {estadoSel === "hoy" && (
               <>
@@ -8823,7 +8980,38 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
             {estadoSel === "futuro" && (
               <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>Tienes una sesión programada para ese día. Todavía no puedes ver en qué consiste — se abre el mismo día.</div>
             )}
-            {estadoSel === "sin-sesion" && <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>{diaSel > hoy ? "Todavía no tienes ninguna sesión programada para ese día." : "No tuviste ninguna sesión programada ese día."}</div>}
+            {estadoSel === "pedida" && solicitudSel && (
+              <div>
+                <div style={{ fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
+                  Le has pedido a tu entrenador sesión para este día{solicitudSel.nota ? `: "${solicitudSel.nota}"` : "."} En cuanto la prepare, la verás aquí.
+                </div>
+                <button
+                  onClick={() => cancelarPeticion(solicitudSel)}
+                  style={{ marginTop: 10, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "7px 12px", color: ds.inkSecondary, fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+                >
+                  Cancelar petición
+                </button>
+                {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
+              </div>
+            )}
+            {estadoSel === "sin-sesion" && diaSel < hoy && <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5 }}>No tuviste ninguna sesión programada ese día.</div>}
+            {estadoSel === "sin-sesion" && diaSel >= hoy && solicitudesLoaded && (
+              <div>
+                <div style={{ fontSize: 12.5, color: ds.inkMuted, lineHeight: 1.5, marginBottom: 10 }}>
+                  {diaSel === hoy ? "Todavía no tienes ninguna sesión programada para hoy." : "Todavía no tienes ninguna sesión programada para ese día."} ¿Quieres pedirle a tu entrenador que te prepare algo?
+                </div>
+                <textarea
+                  value={notaPeticion}
+                  onChange={(e) => setNotaPeticion(e.target.value)}
+                  placeholder="Opcional: cuéntale qué te gustaría trabajar..."
+                  style={{ width: "100%", minHeight: 50, resize: "vertical", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", color: ds.ink, fontFamily: dsF.sans, fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                />
+                {errorPeticion && <div style={{ color: ds.danger, fontSize: 11.5, marginTop: 6 }}>{errorPeticion}</div>}
+                <DsButton disabled={pidiendo} onClick={pedirSesion} style={{ width: "100%", marginTop: 8 }}>
+                  {pidiendo ? "Enviando..." : `Pedir sesión para ${diaSel === hoy ? "hoy" : "este día"}`}
+                </DsButton>
+              </div>
+            )}
           </div>
           <div style={{ height: 100 }} />
         </div>
