@@ -6509,7 +6509,18 @@ function cmjHoyDe(player, todayTag) {
   const m = player.lastMicro;
   if (!todayTag) {
     const dayField = m?.md1 ? "md1" : m?.md2 ? "md2" : null;
-    if (!dayField) return { status: "gray", motivo: "Sin tests registrados en este microciclo todavía.", rows: [], nivel: null };
+    if (!dayField) {
+      // Sin MD-2/MD+1 todavía esta semana: si al menos hay Inicio (con su
+      // comparación de recuperación contra el Inicio anterior), esa es la
+      // "última lectura de la semana" — antes se descartaba aquí y la
+      // tarjeta salía en gris ("sin datos") aunque el Inicio sí se hubiera
+      // hecho, por ejemplo cualquier día después del propio día de Inicio.
+      if (m?.inicio) {
+        const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
+        return { status: r.status, motivo: `Última lectura (Inicio): ${r.motivo}`, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m };
+      }
+      return { status: "gray", motivo: "Sin tests registrados en este microciclo todavía.", rows: [], nivel: null };
+    }
     const d = cmjMotivoDia(m, dayField, player.umbral);
     return { status: d.status, motivo: `Última lectura (${CMJ_TAG_META[dayField].label}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m };
   }
