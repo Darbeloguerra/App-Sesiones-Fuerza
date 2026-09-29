@@ -4072,29 +4072,44 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
   );
 }
 
-// Tile compacto de estadística: icono + etiqueta + valor en línea (en vez
-// del DsStatTile alto, para que quepan 4 en una fila sin robarle altura al
-// resto del Dashboard). "accent" = el tile con más peso visual (Adherencia).
-function MiniStat({ icon, label, value, sub, accent }) {
+// Tile compacto de estadística: icono + etiqueta arriba, valor + sub abajo,
+// cada línea con su propio elipsis — así una etiqueta larga en un tile
+// estrecho se recorta con "…" (con el texto completo en el title, al pasar
+// el ratón) en vez de desbordarse por encima del tile vecino, y la altura
+// del tile no depende de si "sub" cabe o no en una línea (antes, si
+// envolvía, ese tile salía más alto que el resto de la fila). "accent" = el
+// tile con más peso visual (p. ej. Adherencia).
+function MiniStat({ icon, label, value, sub, accent, style }) {
+  const elidido = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 };
   return (
     <div
       style={{
         display: "flex",
-        alignItems: "center",
-        gap: 10,
+        flexDirection: "column",
+        gap: 7,
+        minWidth: 0,
         background: accent ? `linear-gradient(160deg, ${ds.accent}1a, ${ds.surfaceRaised} 60%)` : ds.surfaceRaised,
         border: `1px solid ${accent ? ds.accentBorderSubtle : ds.borderSoft}`,
         borderRadius: dsR.lg,
-        padding: "10px 14px",
+        padding: "11px 13px",
+        ...style,
       }}
     >
-      <div style={{ width: 22, height: 22, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2, whiteSpace: "nowrap" }}>{label}</div>
-        <div style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", display: "flex", alignItems: "baseline", gap: 6 }}>
-          {value}
-          {sub && <span style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, whiteSpace: "nowrap" }}>{sub}</span>}
+      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+        <div style={{ width: 18, height: 18, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</div>
+        <div title={label} style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.04em", ...elidido }}>
+          {label}
         </div>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div title={typeof value === "string" ? value : undefined} style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", color: ds.ink, lineHeight: 1.2, ...elidido }}>
+          {value}
+        </div>
+        {sub && (
+          <div title={sub} style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, marginTop: 2, ...elidido }}>
+            {sub}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -15614,17 +15629,17 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
           era el mismo texto de relleno, sin dato real detrás todavía) se ha
           quitado de aquí; volverá cuando Calendario tenga algo real que
           mostrar. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, margin: "16px 0 18px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(0, 1fr))", gap: 8, margin: "16px 0 18px" }}>
         <MiniStat
           icon={<TrendingUp size={12} />}
-          label="Adherencia · esta semana"
+          label="Adherencia"
           value={adherenciaActual != null ? `${adherenciaActual}%` : "—"}
           sub={deltaAdherencia != null ? `${deltaAdherencia > 0 ? "+" : ""}${deltaAdherencia} vs sem. pasada` : "sin datos aún"}
           accent
         />
         <MiniStat
           icon={<Zap size={12} />}
-          label="Racha actual"
+          label="Racha"
           value={`${rachaSemanas} sem.`}
           sub="cumpliendo el plan"
         />
@@ -15636,13 +15651,13 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
         />
         <MiniStat
           icon={<Activity size={12} />}
-          label="Adherencia vs. equipo"
+          label="vs. equipo"
           value={deltaVsEquipo != null ? `${deltaVsEquipo > 0 ? "+" : ""}${deltaVsEquipo} pts` : "—"}
           sub={adherenciaEquipo != null ? `equipo: ${adherenciaEquipo}%` : "sin datos de equipo"}
         />
         <MiniStat
           icon={<Dumbbell size={12} />}
-          label="Carga · vs. sem. pasada"
+          label="Carga vs. sem."
           value={variacionPct != null ? `${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%` : "—"}
           sub={variacionPct == null ? "sin datos suficientes" : variacionPct <= -10 ? "caída relevante" : "dentro de lo normal"}
         />
