@@ -2484,6 +2484,7 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [selectorGruposAbierto, setSelectorGruposAbierto] = useState(false);
   const [pinVisible, setPinVisible] = useState(false);
+  const [hover, setHover] = useState(false);
   const suspendido = jugador.estado === "suspendido";
   const nombresCategorias = jugador.groupIds
     .map((id) => categorias.find((c) => c.id === id)?.nombre)
@@ -2491,58 +2492,79 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
   const nombresGrupos = (jugador.gruposIds || [])
     .map((id) => grupos.find((g) => g.id === id)?.nombre)
     .filter(Boolean);
+  const colorAvatar = colorAvatarJugador(jugador.id);
+  const revelado = hover || menuAbierto || pinVisible || selectorAbierto || selectorGruposAbierto;
 
   return (
     <div
+      onClick={() => onAccion(jugador.id, "historial")}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter") onAccion(jugador.id, "historial"); }}
+      title={`Ver ficha de ${jugador.name}`}
       style={{
         display: "flex",
         alignItems: "center",
         gap: 12,
-        padding: "13px 15px",
-        background: `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
-        border: `1px solid ${suspendido ? `${ds.warning}40` : ds.borderSoft}`,
+        padding: "11px 14px",
+        background: hover ? ds.surfaceRaised : `linear-gradient(180deg, ${ds.surfaceRaised} 0%, ${ds.surface} 100%)`,
+        border: `1px solid ${suspendido ? `${ds.warning}40` : hover ? ds.borderMuted : ds.borderSoft}`,
         borderRadius: dsR.xl,
         boxShadow: `${dsSh.elevation1}, inset 0 1px 0 rgba(255,255,255,0.03)`,
         opacity: suspendido ? 0.75 : 1,
-        transition: "border-color 140ms ease-out, box-shadow 140ms ease-out",
+        cursor: "pointer",
+        transition: "border-color 120ms ease-out, background 120ms ease-out",
       }}
     >
-      <div
-        style={{
-          width: 34,
-          height: 34,
-          borderRadius: dsR.full,
-          background: suspendido ? `${ds.warning}1E` : `${ds.success}1E`,
-          border: `1.5px solid ${suspendido ? ds.warning : ds.success}55`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success }} />
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <DsAvatar
+          size={38}
+          style={{
+            background: `${colorAvatar}22`,
+            color: colorAvatar,
+            border: `1.5px solid ${colorAvatar}55`,
+            fontWeight: 700,
+            fontFamily: dsF.display,
+          }}
+        >
+          {inicialesNombre(jugador.name)}
+        </DsAvatar>
+        <div
+          title={suspendido ? "Suspendido" : "Activo"}
+          style={{ position: "absolute", right: -1, bottom: -1, width: 10, height: 10, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, border: `2px solid ${ds.surface}` }}
+        />
       </div>
+
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: ds.ink }}>{jugador.name}</span>
+          <span style={{ fontSize: 14, fontWeight: 700, color: ds.ink }}>{jugador.name}</span>
           {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
-          {nombresGrupos.length > 0 ? (
-            nombresGrupos.map((g) => (
-              <ChipReal key={g} tono="azul">
-                {g}
-              </ChipReal>
-            ))
-          ) : (
-            <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente</span>
+        <div style={{ display: "flex", gap: 5, marginTop: 5, flexWrap: "wrap", alignItems: "center", position: "relative" }} onClick={(e) => e.stopPropagation()}>
+          {nombresGrupos.map((g) => (
+            <ChipReal key={`g-${g}`} tono="azul">{g}</ChipReal>
+          ))}
+          {nombresCategorias.map((c) => (
+            <ChipReal key={`c-${c}`} tono="verde">{c}</ChipReal>
+          ))}
+          {nombresGrupos.length === 0 && nombresCategorias.length === 0 && (
+            <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente · sin categoría preventiva</span>
           )}
           <span
             onClick={() => setSelectorGruposAbierto((v) => !v)}
-            style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px" }}
+            style={{ fontSize: 10, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px", opacity: revelado ? 1 : 0.45, transition: "opacity 120ms" }}
             title="Editar grupos"
           >
-            +
+            + grupo
+          </span>
+          <span
+            onClick={() => setSelectorAbierto((v) => !v)}
+            style={{ fontSize: 10, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px", opacity: revelado ? 1 : 0.45, transition: "opacity 120ms" }}
+            title="Editar categoría preventiva"
+          >
+            + categoría
           </span>
           {selectorGruposAbierto && (
             <SelectorGruposReal
@@ -2552,24 +2574,6 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
               onCerrar={() => setSelectorGruposAbierto(false)}
             />
           )}
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap", alignItems: "center", position: "relative" }}>
-          {nombresCategorias.length > 0 ? (
-            nombresCategorias.map((c) => (
-              <ChipReal key={c} tono="verde">
-                {c}
-              </ChipReal>
-            ))
-          ) : (
-            <span style={{ fontSize: 11, color: ds.inkMuted }}>Sin categoría preventiva</span>
-          )}
-          <span
-            onClick={() => setSelectorAbierto((v) => !v)}
-            style={{ fontSize: 11, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px" }}
-            title="Editar categorías preventivas"
-          >
-            +
-          </span>
           {selectorAbierto && (
             <SelectorCategoriasReal
               categorias={categorias}
@@ -2580,58 +2584,63 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           )}
         </div>
       </div>
-      <div
-        title="Adherencia esta semana"
-        style={{ fontFamily: dsF.mono, fontSize: 13, fontWeight: 700, color: adherencia == null ? ds.inkMuted : adherencia >= 80 ? ds.success : adherencia >= 50 ? ds.inkSecondary : ds.danger, width: 40, textAlign: "right", flexShrink: 0 }}
-      >
-        {adherencia != null ? `${adherencia}%` : "—"}
+
+      <div title={adherencia != null ? `${adherencia}% de adherencia esta semana` : "Sin sesiones asignadas esta semana"} style={{ flexShrink: 0, display: "flex", alignItems: "center" }}>
+        {adherencia != null ? (
+          <DsProgressRing value={adherencia} size={34} strokeWidth={3.5} />
+        ) : (
+          <div style={{ width: 34, height: 34, borderRadius: dsR.full, border: `1.5px dashed ${ds.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>—</div>
+        )}
       </div>
-      <button
-        onClick={() => setPinVisible((v) => !v)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          fontFamily: dsF.mono,
-          fontSize: 12.5,
-          fontWeight: 600,
-          color: ds.inkSecondary,
-          cursor: "pointer",
-          minWidth: 68,
-          justifyContent: "center",
-          background: ds.canvas,
-          border: `1px solid ${ds.border}`,
-          borderRadius: dsR.md,
-          padding: "6px 9px",
-        }}
-        title="Mostrar/ocultar PIN"
-        type="button"
-      >
-        {pinVisible ? jugador.pin : "••••"}
-        {pinVisible ? <EyeOff size={12} /> : <Eye size={12} />}
-      </button>
-      <div style={{ position: "relative" }}>
+
+      <div onClick={(e) => e.stopPropagation()} style={{ display: "flex", alignItems: "center", gap: 6, opacity: revelado ? 1 : 0.4, transition: "opacity 120ms" }}>
         <button
-          onClick={() => setMenuAbierto((v) => !v)}
+          onClick={() => setPinVisible((v) => !v)}
           style={{
-            width: 30,
-            height: 30,
             display: "flex",
             alignItems: "center",
-            justifyContent: "center",
-            background: menuAbierto ? ds.surfaceRaised : "transparent",
-            border: `1px solid ${menuAbierto ? ds.borderMuted : "transparent"}`,
-            borderRadius: dsR.md,
-            color: ds.inkMuted,
-            fontSize: 18,
+            gap: 6,
+            fontFamily: dsF.mono,
+            fontSize: 12,
+            fontWeight: 600,
+            color: ds.inkSecondary,
             cursor: "pointer",
-            flexShrink: 0,
+            minWidth: 62,
+            justifyContent: "center",
+            background: ds.canvas,
+            border: `1px solid ${ds.border}`,
+            borderRadius: dsR.md,
+            padding: "6px 8px",
           }}
+          title="Mostrar/ocultar PIN"
           type="button"
         >
-          ⋮
+          {pinVisible ? jugador.pin : "••••"}
+          {pinVisible ? <EyeOff size={11} /> : <Eye size={11} />}
         </button>
-        {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => setMenuAbierto((v) => !v)}
+            style={{
+              width: 28,
+              height: 28,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: menuAbierto ? ds.surfaceRaised : "transparent",
+              border: `1px solid ${menuAbierto ? ds.borderMuted : "transparent"}`,
+              borderRadius: dsR.md,
+              color: ds.inkMuted,
+              fontSize: 18,
+              cursor: "pointer",
+              flexShrink: 0,
+            }}
+            type="button"
+          >
+            ⋮
+          </button>
+          {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
+        </div>
       </div>
     </div>
   );
@@ -3155,6 +3164,16 @@ function inicialesNombre(name) {
 // Paleta decorativa para el avatar-stack — solo variación visual (quién es
 // cada iniciales ya se ve en el título al pasar el ratón), no un dato nuevo.
 const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
+
+// Mismo color de avatar para el mismo jugador en toda la app (fila de
+// Usuarios, cabecera de su ficha...) — determinista a partir de su id, no
+// aleatorio, así "reconoces" a alguien por su color de un vistazo en vez de
+// que cambie cada vez que se vuelve a renderizar.
+function colorAvatarJugador(id) {
+  let hash = 0;
+  for (let i = 0; i < String(id).length; i++) hash = (hash * 31 + String(id).charCodeAt(i)) >>> 0;
+  return AVATAR_STACK_COLORES[hash % AVATAR_STACK_COLORES.length];
+}
 
 // Tarjeta de un equipo (grupo real) en la vista Equipos — nombre, avatar-
 // stack de sus jugadores y las 3 stats agregadas (jugadores / adherencia
@@ -15352,7 +15371,12 @@ function ProgramacionModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
 // permite editar grupos/categorías desde aquí a propósito: eso ya se hace
 // desde la fila en Usuarios, y duplicar esa lógica de guardado en un
 // segundo sitio no aporta nada en este primer paso.
-function CabeceraFichaJugadorReal({ jugador, categorias, grupos }) {
+// Cabecera de la ficha — funciona como la barra de un perfil personal: la
+// identidad (avatar con SU color, nombre, grupo/categoría) a la izquierda,
+// y a la derecha una fila compacta de utilidades (PIN, accesos directos a
+// las otras pestañas) en vez de un bloque de PIN gigante que competía en
+// protagonismo con el propio nombre del jugador.
+function CabeceraFichaJugadorReal({ jugador, categorias, grupos, onNavigateTab }) {
   const [pinVisible, setPinVisible] = useState(false);
   const suspendido = jugador.estado === "suspendido";
   const nombresGrupos = (jugador.gruposIds || [])
@@ -15361,53 +15385,61 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos }) {
   const nombresCategorias = (jugador.groupIds || [])
     .map((id) => categorias.find((c) => c.id === id)?.nombre)
     .filter(Boolean);
-  const iniciales =
-    jugador.name
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((p) => p[0].toUpperCase())
-      .join("") || "?";
+  const colorAvatar = colorAvatarJugador(jugador.id);
+
+  const accionesRapidas = onNavigateTab
+    ? [
+        { id: "cmj", icon: <Activity size={14} />, label: "Control de fatiga" },
+        { id: "notas", icon: <BookOpen size={14} />, label: "Añadir nota" },
+        { id: "datos", icon: <Pencil size={14} />, label: "Editar datos" },
+      ]
+    : [];
 
   return (
-    <div style={{ display: "flex", gap: 14, alignItems: "flex-start", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 18 }}>
-      <DsAvatar size={52} style={{ flexShrink: 0 }}>{iniciales}</DsAvatar>
+    <div style={{ display: "flex", gap: 16, alignItems: "flex-start", background: `linear-gradient(135deg, ${colorAvatar}14, ${ds.surface} 55%)`, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 18 }}>
+      <div style={{ position: "relative", flexShrink: 0 }}>
+        <DsAvatar size={58} style={{ background: `${colorAvatar}26`, color: colorAvatar, border: `2px solid ${colorAvatar}55`, fontWeight: 700, fontFamily: dsF.display }}>
+          {inicialesNombre(jugador.name)}
+        </DsAvatar>
+        <div style={{ position: "absolute", right: -1, bottom: -1, width: 13, height: 13, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, border: `2.5px solid ${ds.surface}` }} />
+      </div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-          <div style={{ width: 8, height: 8, borderRadius: dsR.full, background: suspendido ? ds.warning : ds.success, flexShrink: 0 }} />
           <h1 style={{ fontFamily: dsF.display, fontSize: 21, fontWeight: 700, margin: 0, color: ds.ink }}>{jugador.name}</h1>
           {suspendido && <ChipReal tono="ambar">SUSPENDIDO</ChipReal>}
         </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 6, marginTop: 9, flexWrap: "wrap", alignItems: "center" }}>
           {nombresGrupos.length > 0 ? (
             nombresGrupos.map((g) => (
-              <ChipReal key={g} tono="azul">
-                {g}
-              </ChipReal>
+              <ChipReal key={g} tono="azul">{g}</ChipReal>
             ))
           ) : (
             <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente</span>
           )}
-        </div>
-        <div style={{ display: "flex", gap: 6, marginTop: 6, flexWrap: "wrap" }}>
-          {nombresCategorias.length > 0 ? (
-            nombresCategorias.map((c) => (
-              <ChipReal key={c} tono="verde">
-                {c}
-              </ChipReal>
-            ))
-          ) : (
-            <span style={{ fontSize: 11, color: ds.inkMuted }}>Sin categoría preventiva</span>
-          )}
+          {nombresCategorias.length > 0 && <span style={{ color: ds.inkMuted, fontSize: 10 }}>·</span>}
+          {nombresCategorias.map((c) => (
+            <ChipReal key={c} tono="verde">{c}</ChipReal>
+          ))}
         </div>
       </div>
-      <div
-        onClick={() => setPinVisible((v) => !v)}
-        style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.inkMuted, cursor: "pointer", textAlign: "center", flexShrink: 0 }}
-        title="Mostrar/ocultar PIN"
-      >
-        <div style={{ fontSize: 9, letterSpacing: "0.08em", marginBottom: 3 }}>PIN</div>
-        {pinVisible ? jugador.pin : "••••"}
+      <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+        {accionesRapidas.map((a) => (
+          <button
+            key={a.id}
+            onClick={() => onNavigateTab(a.id)}
+            title={a.label}
+            style={{ width: 30, height: 30, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, color: ds.inkSecondary, cursor: "pointer" }}
+          >
+            {a.icon}
+          </button>
+        ))}
+        <button
+          onClick={() => setPinVisible((v) => !v)}
+          title="Mostrar/ocultar PIN"
+          style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "7px 9px" }}
+        >
+          {pinVisible ? jugador.pin : "PIN ••••"}
+        </button>
       </div>
     </div>
   );
@@ -15573,19 +15605,16 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 18 }}>
-        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "13px 14px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, fontWeight: 700, color: ds.ink, marginBottom: 6 }}>
-            <Calendar size={13} color={ds.accent} /> Próxima sesión
-          </div>
-          <p style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.5, margin: 0 }}>
-            Todavía no hay una sesión asignada en su calendario — se completará cuando Calendario esté disponible.
-          </p>
-        </div>
-        <ObjetivoActualCardReal jugador={jugador} onGuardar={onGuardarObjetivo} />
-      </div>
+      <ObjetivoActualCardReal jugador={jugador} onGuardar={onGuardarObjetivo} />
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 14 }}>
+      {/* Una sola tira de 5 indicadores, todos con el mismo lenguaje visual
+          (antes eran dos componentes distintos — 4 MiniStat + 1 DsStatTile
+          suelto — que hacían parecer la pantalla más desordenada de lo que
+          en realidad eran sus propios datos). "Próxima sesión" (que siempre
+          era el mismo texto de relleno, sin dato real detrás todavía) se ha
+          quitado de aquí; volverá cuando Calendario tenga algo real que
+          mostrar. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10, margin: "16px 0 18px" }}>
         <MiniStat
           icon={<TrendingUp size={12} />}
           label="Adherencia · esta semana"
@@ -15611,18 +15640,12 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
           value={deltaVsEquipo != null ? `${deltaVsEquipo > 0 ? "+" : ""}${deltaVsEquipo} pts` : "—"}
           sub={adherenciaEquipo != null ? `equipo: ${adherenciaEquipo}%` : "sin datos de equipo"}
         />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0,1fr))", gap: 10, marginBottom: 18 }}>
-        {variacionPct != null ? (
-          <DsStatTile
-            label="Carga media vs. semana pasada"
-            value={`${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%`}
-            delta={{ direction: variacionPct <= -10 ? "down" : "neutral", label: variacionPct <= -10 ? "caída relevante" : "dentro de lo normal" }}
-          />
-        ) : (
-          <DsStatTile label="Carga media vs. semana pasada" value="—" delta={{ direction: "neutral", label: "sin datos suficientes" }} />
-        )}
+        <MiniStat
+          icon={<Dumbbell size={12} />}
+          label="Carga · vs. sem. pasada"
+          value={variacionPct != null ? `${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%` : "—"}
+          sub={variacionPct == null ? "sin datos suficientes" : variacionPct <= -10 ? "caída relevante" : "dentro de lo normal"}
+        />
       </div>
 
       <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 10 }}>Últimos registros</div>
@@ -15650,32 +15673,6 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
             </div>
           ))}
         </div>
-      )}
-
-      {onNavigateTab && (
-        <>
-          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, margin: "18px 0 10px" }}>Accesos rápidos</div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button
-              onClick={() => onNavigateTab("cmj")}
-              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
-            >
-              <Activity size={13} /> Control de fatiga
-            </button>
-            <button
-              onClick={() => onNavigateTab("notas")}
-              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
-            >
-              <BookOpen size={13} /> Añadir nota
-            </button>
-            <button
-              onClick={() => onNavigateTab("datos")}
-              style={{ display: "flex", alignItems: "center", gap: 7, font: `600 11.5px ${dsF.sans}`, padding: "8px 12px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.inkSecondary, cursor: "pointer" }}
-            >
-              <Pencil size={13} /> Editar datos
-            </button>
-          </div>
-        </>
       )}
     </div>
   );
@@ -16809,7 +16806,7 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
         >
           ← Volver a Usuarios
         </button>
-        <CabeceraFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} />
+        <CabeceraFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onNavigateTab={setPestana} />
         {errorAccion && (
           <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", margin: "12px 0 0" }}>
             {errorAccion}
