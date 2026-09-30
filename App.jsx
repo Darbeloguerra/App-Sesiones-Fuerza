@@ -465,6 +465,8 @@ function throwIfError(error) {
   if (error) throw new Error(error.message);
 }
 
+const MAX_IDS_POR_PETICION = 100;
+
 function applyFilters(query, filters) {
   Object.keys(filters || {}).forEach((key) => {
     const value = filters[key];
@@ -487,6 +489,22 @@ const api = {
   // entera, sea del tamaño que sea, para cualquier entidad.
   list: async (entity, filters) => {
     const PAGE = 1000;
+    // Un filtro con muchísimos ids (p. ej. las tareas de miles de registros)
+    // acabaría en una URL demasiado larga y la petición fallaría sin avisar.
+    // Se trocea en lotes de MAX_IDS_POR_PETICION y se juntan los resultados.
+    const clavesLargas = Object.keys(filters || {}).filter((k) => String(filters[k] ?? "").split(",").filter(Boolean).length > MAX_IDS_POR_PETICION);
+    if (clavesLargas.length) {
+      const clave = clavesLargas[0];
+      const ids = [...new Set(String(filters[clave]).split(",").map((x) => x.trim()).filter(Boolean))];
+      const lotes = [];
+      for (let i = 0; i < ids.length; i += MAX_IDS_POR_PETICION) lotes.push(ids.slice(i, i + MAX_IDS_POR_PETICION));
+      const resultados = [];
+      for (let i = 0; i < lotes.length; i += 4) {
+        const tandas = await Promise.all(lotes.slice(i, i + 4).map((lote) => api.list(entity, { ...filters, [clave]: lote.join(",") })));
+        tandas.forEach((t) => resultados.push(...t));
+      }
+      return resultados;
+    }
     let from = 0;
     let all = [];
     while (true) {
@@ -516,6 +534,14 @@ const api = {
     if (error && entity === "registros" && "series_hechas" in toSave && /series_hechas/.test(`${error.message || ""} ${error.details || ""}`)) {
       const { series_hechas: _omitido, ...sinSeries } = toSave;
       ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: "id" }).select().maybeSingle());
+    }
+    // Preventivo por jugador: tareas.para_jugadores. Si la columna aún no existe
+    // y el valor está vacío, se guarda sin ella; si tiene valor NO se puede
+    // ignorar (todos los jugadores verían la tarea) y se avisa del SQL.
+    if (error && entity === "tareas" && "para_jugadores" in toSave && /para_jugadores/.test(`${error.message || ""} ${error.details || ""}`)) {
+      if (toSave.para_jugadores) throw new Error("FALTA_SQL_PARA_JUGADORES");
+      const { para_jugadores: _omitido, ...sinPara } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinPara, { onConflict: "id" }).select().maybeSingle());
     }
     throwIfError(error);
     return transformFromDb(entity, data);
@@ -610,9 +636,8 @@ const api = {
     const sesionIds = sesionesHoy.map((s) => s.id);
     let tareas = [];
     if (sesionIds.length) {
-      const { data, error } = await supabase.from("tareas").select("*").in("sesion_id", sesionIds);
-      throwIfError(error);
-      tareas = (data || []).map((row) => transformFromDb("tareas", row));
+      const filas = await api.list("tareas", { sesion_id: sesionIds.join(",") });
+      tareas = filas.filter((t) => tareaEsParaJugador(t, jugadorId));
     }
     const ejercicioIds = [...new Set(tareas.map((t) => t.ejercicio_id).filter(Boolean))];
     const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
@@ -636,9 +661,8 @@ const api = {
     const sesionIds = (sesiones || []).map((s) => s.id);
     let tareas = [];
     if (sesionIds.length) {
-      const { data, error } = await supabase.from("tareas").select("*").in("sesion_id", sesionIds);
-      throwIfError(error);
-      tareas = (data || []).map((row) => transformFromDb("tareas", row));
+      // En lotes: con cientos de sesiones, un solo .in() desbordaría la URL.
+      tareas = await api.list("tareas", { sesion_id: sesionIds.join(",") });
     }
     const { data: ejercicios, error: e3 } = await supabase.from("ejercicios").select("*");
     throwIfError(e3);
@@ -801,6 +825,100 @@ class CacheConCaducidad extends Map {
   }
 }
 const sharedDataCache = new CacheConCaducidad();
+
+// Microciclos del CMJ con caché compartida (para etiquetar sesiones por fecha
+// sin pedirlos en cada pantalla). Se invalida al guardar/borrar un microciclo.
+function useCmjMicrociclos() {
+  const cacheKey = "cmj_microciclos";
+  const [items, setItems] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
+  useEffect(() => {
+    if (sharedDataCache.has(cacheKey)) {
+      setItems(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase.from("cmj_microciclos").select("*");
+        if (cancelled) return;
+        if (!error) {
+          sharedDataCache.set(cacheKey, data || []);
+          setItems(data || []);
+        }
+      } catch {
+        /* sin microciclos: las etiquetas simplemente no aparecen */
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return [items, loaded];
+}
+
+
+
+// ---------- Adherencia ponderada por tareas (ENT-07) ----------
+// Antes una sesión contaba como cumplida si el jugador registraba CUALQUIER
+// cosa ese día (con hacer la activación ya salía 100 %). Ahora cada sesión-día
+// vale la fracción de su trabajo que se hizo, ponderando por bloque: lo que
+// más pesa para el rendimiento (Fuerza) cuenta más que lo accesorio. CMJ no
+// pesa (es una medición, no trabajo). Si la sesión no tiene tareas con peso
+// (o no se cargaron), se cae a la regla antigua: algo registrado = cumplida.
+const PESO_BLOQUE_ADHERENCIA = { Fuerza: 3, Resistencia: 2, Core: 1, Preventivo: 1, Movilidad: 0.5, "Activación": 0.5, CMJ: 0 };
+function crearFraccionCumplida(tareas) {
+  const porSesion = new Map();
+  (tareas || []).forEach((t) => {
+    if (!porSesion.has(t.sesion_id)) porSesion.set(t.sesion_id, []);
+    porSesion.get(t.sesion_id).push(t);
+  });
+  // idsHechos: Set con los ids de las tareas que el jugador tiene hechas ese día.
+  return (sesionId, fecha, idsHechos, jugadorId) => {
+    const hechos = idsHechos || new Set();
+    const relevantes = (porSesion.get(sesionId) || []).filter((t) => (!t.fecha || normalizarFecha(t.fecha) === fecha) && (jugadorId == null || tareaEsParaJugador(t, jugadorId)));
+    const pesoDe = (t) => PESO_BLOQUE_ADHERENCIA[t.bloque_sesion] ?? 1;
+    const total = relevantes.reduce((sum, t) => sum + pesoDe(t), 0);
+    if (total <= 0) return hechos.size > 0 ? 1 : 0;
+    const hecho = relevantes.reduce((sum, t) => sum + (hechos.has(t.id) ? pesoDe(t) : 0), 0);
+    return Math.min(1, hecho / total);
+  };
+}
+// jugador::fecha -> Set de ids de tarea hechas, a partir de los items del historial.
+function tareasHechasPorJugadorFecha(items) {
+  const mapa = new Map();
+  items.forEach((it) => {
+    if (!it.done || !it.tareaId) return;
+    const clave = `${it.jugadorId ?? ""}::${it.date}`;
+    if (!mapa.has(clave)) mapa.set(clave, new Set());
+    mapa.get(clave).add(it.tareaId);
+  });
+  return mapa;
+}
+
+// ---------- Guardado de sesión tolerante a fallos ----------
+// Guardar una sesión son muchas escrituras seguidas (sesión, tareas,
+// circuitos, borrados). Si la conexión se corta a mitad, antes quedaba una
+// sesión ya publicada con tareas a medias, y al reintentar se duplicaban las
+// que se habían creado. Ahora: (1) la sesión nueva se crea como borrador y solo
+// se publica cuando todo lo demás se ha guardado; (2) las filas nuevas llevan un
+// id generado ANTES de escribir y anotado en `parcial`, así un reintento
+// reutiliza la sesión y borra las filas huérfanas del intento fallido.
+// No es una transacción de base de datos real, pero deja el estado recuperable.
+function nuevoEstadoParcial() {
+  return { sesionId: null, tareas: [], circuitos: [] };
+}
+async function guardarFilaConParcial(parcial, tabla, rec) {
+  const id = rec.id || genId(ID_PREFIX[tabla] || "id");
+  if (!rec.id) {
+    if (tabla === "tareas") parcial.tareas.push(id);
+    else if (tabla === "circuitos") parcial.circuitos.push(id);
+  }
+  return api.save(tabla, { ...rec, id });
+}
 
 // ---------- Borrador local del jugador (DEV-06) ----------
 // Lo que el jugador va marcando/tecleando en su sesión vivía solo en estado
@@ -1276,8 +1394,13 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     resistencia = { ...resistencia, tipo: "hiit", intervalos: t.series ?? "", tiempo: t.cantidad ?? "", recuperacion: t.rir ?? "" };
   }
   const e = ejerciciosById.get(t.ejercicio_id) || {};
+  // Progresión al duplicar: solo tareas de Fuerza pautadas por %1RM. Se guarda
+  // el % de origen para poder anular la subida (por tarea o de golpe).
+  const pctOrigen = Number(t.pct1rm);
+  const progresa = nuevo && Number(opts.pasoProgresion) > 0 && t.bloque_sesion === "Fuerza" && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && Number.isFinite(pctOrigen);
   return {
     key: nuevo ? Date.now() + Math.random() : t.id,
+    pct1rmOrigen: progresa ? String(pctOrigen) : undefined,
     tareaId: nuevo ? undefined : t.id,
     nombre: e.nombre || "(ejercicio eliminado)",
     ejercicioId: t.ejercicio_id,
@@ -1287,7 +1410,7 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     cantidad: t.cantidad ?? "",
     rir: t.rir ?? "",
     modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
-    pct1rm: t.pct1rm ?? "",
+    pct1rm: progresa ? String(Math.min(100, pctOrigen + Number(opts.pasoProgresion))) : t.pct1rm ?? "",
     tipoResistencia: t.tipo_resistencia || "Peso libre",
     materiales,
     lateralidad: t.lateralidad || "bilateral",
@@ -1965,6 +2088,8 @@ function usePlayerHistory(playerId) {
     const s = sesionesById.get(t.sesion_id) || {};
     return {
       id: r.id,
+      tareaId: r.tarea_id,
+      jugadorId: r.jugador_id,
       date: normalizarFecha(r.fecha),
       sesionId: t.sesion_id || "",
       md: s.md || "",
@@ -2023,6 +2148,7 @@ function useEquipoHistory() {
     const e = ejerciciosById.get(t.ejercicio_id) || {};
     return {
       id: r.id,
+      tareaId: r.tarea_id,
       jugadorId: r.jugador_id,
       date: normalizarFecha(r.fecha),
       name: e.nombre || "",
@@ -2036,6 +2162,8 @@ function useEquipoHistory() {
       rirReal: r.rir ?? "",
       materiales: parseMateriales(t.material),
       subtipoCorporal: r.subtipo_corporal || "",
+      sets: t.series,
+      seriesHechas: r.series_hechas ?? "",
     };
   });
   return { loaded: true, items };
@@ -2962,7 +3090,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, saveGrupos, gruposLoaded] = useEntityList("grupos");
   const [coachPin, , coachPinLoaded] = useConfigValue("coach_pin");
-  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
@@ -2992,7 +3120,8 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const hoyRoster = todayStr();
   const lunesRoster = inicioSemanaCalendario(hoyRoster);
   const domingoRoster = sumarDiasFecha(lunesRoster, 6);
-  const registroPorJugadorFechaRoster = new Set(equipoHistory.filter((it) => it.done).map((it) => `${it.jugadorId}::${it.date}`));
+  const hechasRoster = tareasHechasPorJugadorFecha(equipoHistory);
+  const fraccionCumplidaRoster = crearFraccionCumplida(tareasProg);
   const asignadasPorJugador = new Map();
   const cumplidasPorJugador = new Map();
   sesiones
@@ -3003,9 +3132,8 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
         if (f < lunesRoster || f > domingoRoster || f > hoyRoster) return;
         destino.forEach((jugadorId) => {
           asignadasPorJugador.set(jugadorId, (asignadasPorJugador.get(jugadorId) || 0) + 1);
-          if (registroPorJugadorFechaRoster.has(`${jugadorId}::${f}`)) {
-            cumplidasPorJugador.set(jugadorId, (cumplidasPorJugador.get(jugadorId) || 0) + 1);
-          }
+          const fraccion = fraccionCumplidaRoster(s.id, f, hechasRoster.get(`${jugadorId}::${f}`), jugadorId);
+          if (fraccion > 0) cumplidasPorJugador.set(jugadorId, (cumplidasPorJugador.get(jugadorId) || 0) + fraccion);
         });
       });
     });
@@ -3916,7 +4044,7 @@ function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWid
 function useDatosDashboardEntrenador() {
   const [players, , playersLoaded] = usePlayers();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
-  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { items: equipoHistory, loaded: historyLoaded } = useEquipoHistory();
   const loaded = playersLoaded && gruposLoaded && progLoaded && historyLoaded;
 
@@ -3975,7 +4103,7 @@ function useDatosDashboardEntrenador() {
         fechasConEnviada.add(f);
         if (f <= hoy) {
           ocurrenciasRealizadas++;
-          destino.forEach((jugadorId) => asignacionesSemana.push({ jugadorId, date: f }));
+          destino.forEach((jugadorId) => asignacionesSemana.push({ jugadorId, date: f, sesionId: s.id }));
         }
       }
       fechasConCualquiera.add(f);
@@ -4016,8 +4144,9 @@ function useDatosDashboardEntrenador() {
   // calendario (una semana con menos sesiones planificadas no es "peor
   // adherencia"). Ver la corrección documentada en Fase 6 → Dashboard del
   // entrenador.
-  const registroPorJugadorFecha = new Set(equipoHistory.map((it) => `${it.jugadorId}::${it.date}`));
-  const cumplidasSemana = asignacionesSemana.filter(({ jugadorId, date }) => registroPorJugadorFecha.has(`${jugadorId}::${date}`)).length;
+  const hechasSemana = tareasHechasPorJugadorFecha(equipoHistory);
+  const fraccionCumplidaSemana = crearFraccionCumplida(tareasProg);
+  const cumplidasSemana = asignacionesSemana.reduce((sum, { jugadorId, date, sesionId }) => sum + fraccionCumplidaSemana(sesionId, date, hechasSemana.get(`${jugadorId}::${date}`), jugadorId), 0);
   const adherenciaActual = asignacionesSemana.length ? Math.round((cumplidasSemana / asignacionesSemana.length) * 100) : null;
 
   // "Quién necesita atención" (ENT-01): cómo está cada jugador ESTA semana
@@ -4547,6 +4676,9 @@ function FilaPendienteReal({ jugador, gruposById, onOpenHistory, compact }) {
 // quién en concreto está en rojo — mismo principio que "Quién necesita
 // atención".
 function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById }) {
+  // Fase 2: registros de todo el equipo para etiquetar la carga de fuerza de
+  // la semana junto a los jugadores en rojo (ya está en caché por el Dashboard).
+  const { loaded: equipoFuerzaLoaded, items: equipoFuerza } = useEquipoHistory();
   const [saltos, setSaltos] = useState([]);
   const [microciclos, setMicrociclos] = useState([]);
   const [umbral, setUmbral] = useState(null);
@@ -4607,6 +4739,20 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
     .map((p) => playersById.get(p.jugadorId))
     .filter(Boolean);
   const pctVerde = Math.round((enVerde / total) * 100);
+
+  // Carga de fuerza de la semana en curso de cada jugador en rojo: el
+  // microciclo que contiene hoy o, si hoy cae entre dos, el último ya empezado.
+  const ventanasPanel = cmjVentanasMicrociclo(microciclos);
+  const hoyPanel = todayStr();
+  const microActualPanel = cmjMicroDeFecha(hoyPanel, ventanasPanel) || [...ventanasPanel].reverse().find((v) => v.desde <= hoyPanel) || null;
+  const etiquetaFuerzaJugador = (jugadorId) => {
+    if (!equipoFuerzaLoaded || !microActualPanel) return null;
+    const cargas = calcularCargaFuerzaPorMicro(
+      equipoFuerza.filter((it) => it.jugadorId === jugadorId),
+      ventanasPanel
+    );
+    return etiquetaCargaFuerza(cargas.find((c) => c.microId === microActualPanel.id));
+  };
 
   // "Testados hoy" y "Última prueba" — igual que el resto del panel, salen
   // del mismo array de saltos ya cargado (no hace falta ninguna consulta
@@ -4686,6 +4832,7 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
                 ) : (
                   <span style={{ color: ds.accent, fontWeight: 700 }}>{j.name}</span>
                 )}
+                {etiquetaFuerzaJugador(j.id) && <span style={{ color: ds.inkMuted }}> ({etiquetaFuerzaJugador(j.id)})</span>}
                 {i < jugadoresRojo.length - 1 ? ", " : ""}
               </React.Fragment>
             ))}{" "}
@@ -5811,6 +5958,8 @@ function construirItemsHistorial(registros, tareasById, ejerciciosById, sesiones
     const s = sesionesById.get(t.sesion_id) || {};
     return {
       id: r.id,
+      tareaId: r.tarea_id,
+      jugadorId: r.jugador_id,
       date: normalizarFecha(r.fecha),
       sesionId: t.sesion_id || "",
       md: s.md || "",
@@ -6583,6 +6732,7 @@ function CmjMicrociclosReal() {
     if (error) {
       setError(error.message);
     } else {
+      sharedDataCache.delete("cmj_microciclos");
       await cargar();
       empezarNuevo();
     }
@@ -6592,6 +6742,7 @@ function CmjMicrociclosReal() {
   async function eliminar(id) {
     const { error } = await supabase.from("cmj_microciclos").delete().eq("id", id);
     if (!error) {
+      sharedDataCache.delete("cmj_microciclos");
       await cargar();
       if (form.id === id) empezarNuevo();
     }
@@ -8749,7 +8900,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               tarea.modoCarga === "pct1rm" &&
               tarea.pct1rmObjetivo != null &&
               (!tarea.eligeEquipo || subtipoEquipoValido) && (
-                <div style={{ color: ds.inkMuted }}>Sin datos suficientes para estimar tu 1RM todavía{sufijoEquipo}</div>
+                <div style={{ color: ds.accent }}>Aún no tengo datos para calcular tu carga{sufijoEquipo}: elige una con la que hagas las repeticiones pautadas y anota reps y RIR.</div>
               )
             )}
           </div>
@@ -8879,11 +9030,11 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 />
               </label>
             )}
-              {tarea.pideRir !== false && (
+              {(tarea.pideRir !== false || necesitaCalibrarE1rm(tarea, registro)) && (
                 <>
                   <div style={{ width: 1, background: ds.border, margin: "0 12px" }} />
                   <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
-                    <EtiquetaCampoReal>RIR</EtiquetaCampoReal>
+                    <EtiquetaCampoReal>{necesitaCalibrarE1rm(tarea, registro) ? "RIR *" : "RIR"}</EtiquetaCampoReal>
                     <input
                       value={registro.rir}
                       onChange={(e) => onCambiarRegistro({ ...registro, rir: e.target.value })}
@@ -8913,7 +9064,12 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 </div>
               );
             })()}
-            {tarea.pideRir === false && (
+            {necesitaCalibrarE1rm(tarea, registro) && (
+              <div style={{ fontSize: 11, color: ds.accent, lineHeight: 1.4 }}>
+                * Es la primera vez con este ejercicio: anota reps y RIR (cuántas repeticiones te quedaban antes del fallo). Con eso la app calcula tu 1RM estimado y, la próxima vez, te recomienda la carga.
+              </div>
+            )}
+            {tarea.pideRir === false && !necesitaCalibrarE1rm(tarea, registro) && (
               // Carga ligera (<65% 1RM): a esa intensidad el RIR autopercibido
               // pierde fiabilidad, así que no se le pide al jugador. La carga
               // sugerida ya viene calculada a partir de su 1RM estimado.
@@ -9374,6 +9530,26 @@ function seriesHechasDeRegistro(tarea, draft) {
   return { series_hechas: Number.isFinite(elegidas) && elegidas >= 0 ? Math.round(elegidas) : pautadas };
 }
 
+// Calibración del 1RM: ¿la app todavía no tiene datos para calcular el 1RM
+// estimado de este jugador en ESTE ejercicio+equipo? Sin reps Y RIR
+// registrados no hay e1RM, y sin e1RM no se puede sugerir carga ni pautar
+// por % del 1RM. Antes, además, las tareas por %1RM por debajo del 65 % no
+// pedían el RIR, así que un jugador que solo hiciera trabajo ligero de un
+// ejercicio no generaba nunca ese dato. Ahora, mientras falten datos, la app
+// pide reps y RIR y lo explica. Solo aplica a tareas con carga en kg y
+// repeticiones (no Resistencia, CMJ, core, ni peso corporal sin lastre).
+function necesitaCalibrarE1rm(tarea, registro) {
+  if (!tarea || tarea.esResistencia || tarea.esCmj || tarea.esCore) return false;
+  if (tarea.unidad && tarea.unidad !== "reps") return false;
+  if (tarea.esCorporal && registro?.subtipo !== "lastre") return false;
+  if (tarea.eligeEquipo) {
+    const eq = registro?.subtipo;
+    if (!eq || !tarea.equiposElegibles?.includes(eq)) return false; // aún no ha elegido material
+    return tarea.tieneE1rmPorEquipo?.[eq] === false;
+  }
+  return tarea.tieneE1rm === false;
+}
+
 function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [players, , playersLoaded] = usePlayers();
   const player = players.find((p) => p.id === presetPlayerId) || null;
@@ -9415,7 +9591,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // (calcularAdherencia sobre fechasAsignadas), no una métrica nueva. Hace
   // falta el programa completo (no solo el bootstrap de hoy) para saber qué
   // fechas de la semana tenían sesión asignada.
-  const { sesiones: sesionesProgramacion } = useBootstrapProgramacion();
+  const { sesiones: sesionesProgramacion, tareas: tareasProgramacion } = useBootstrapProgramacion();
 
   // Datos reales de salto (altura/potencia/fuerza/velocidad), vinculados por
   // jugador_id — el mismo pipeline que ya usa el entrenador en la ficha de
@@ -9725,15 +9901,18 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         const incluyeAJugador = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino.includes(player.id) : player.estado === "activo";
         if (!incluyeAJugador) return;
         (s.fechas || []).forEach((f) => {
-          if (f >= desde && f <= hasta) fechas.push(f);
+          if (f >= desde && f <= hasta) fechas.push({ fecha: f, sesionId: s.id });
         });
       });
     return fechas;
   };
-  const calcularAdherenciaJugador = (fechas) => {
-    if (!fechas.length) return null;
-    const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
-    return Math.round((cumplidas / fechas.length) * 100);
+  // Misma adherencia ponderada por tareas que ve el entrenador (ENT-07).
+  const hechasPropias = tareasHechasPorJugadorFecha(historyItems.map((it) => ({ ...it, jugadorId: player?.id })));
+  const fraccionCumplidaPropia = crearFraccionCumplida(tareasProgramacion);
+  const calcularAdherenciaJugador = (asignaciones) => {
+    if (!asignaciones.length) return null;
+    const cumplidas = asignaciones.reduce((sum, a) => sum + fraccionCumplidaPropia(a.sesionId, a.fecha, hechasPropias.get(`${player?.id}::${a.fecha}`), player?.id), 0);
+    return Math.round((cumplidas / asignaciones.length) * 100);
   };
   // OJO: el límite superior es HOY, no el domingo de la semana — igual
   // criterio que ResumenFichaJugadorReal (fechasAsignadas(lunes, hoy)). Si se
@@ -10037,7 +10216,12 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // que la referencia/carga sugerida en modo RIR.
       modoCarga: !esResistencia && t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
       pct1rmObjetivo: !esResistencia && t.pct1rm !== "" && t.pct1rm != null ? Number(t.pct1rm) : null,
-      cargaSugeridaPct1rm: !eligeEquipo ? calcularSugeridaPct1rm(nombre, equipoUnico || "std", t, esResistencia) : null,
+      cargaSugeridaPct1rm: !eligeEquipo ? calcularSugeridaPct1rm(nombre, materialEfectivo({ materiales }), t, esResistencia) : null,
+      // ¿Hay ya un e1RM de este jugador para este ejercicio+equipo? (misma
+      // clave que usa mejorE1rmPorClave, ver necesitaCalibrarE1rm).
+      tieneE1rm: !eligeEquipo && !esResistencia ? mejorE1rmPorClave.has(`${nombre}::${materialEfectivo({ materiales })}`) : null,
+      tieneE1rmPorEquipo:
+        eligeEquipo && !esResistencia ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, mejorE1rmPorClave.has(`${nombre}::${eq}`)])) : null,
       cargasSugeridasPct1rmPorEquipo: eligeEquipo
         ? Object.fromEntries(equiposEnTarea.map((eq) => [eq, calcularSugeridaPct1rm(nombre, eq, t, esResistencia)]))
         : null,
@@ -10177,6 +10361,14 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return !r.carga || !r.reps;
   };
   const tareasSinRegistroCompleto = todasLasTareas.filter((t) => hechoDraft[t.id] && registroIncompleto(t));
+  // Tareas hechas y con carga y reps pero sin RIR, en un ejercicio del que la
+  // app aún no puede calcular el 1RM: sin RIR seguirá sin poder (ver
+  // necesitaCalibrarE1rm). Aviso aparte y más suave: no bloquea el envío.
+  const tareasSinRirParaCalibrar = todasLasTareas.filter((t) => {
+    if (!hechoDraft[t.id] || registroIncompleto(t)) return false;
+    const r = getRegistro(t.id);
+    return necesitaCalibrarE1rm(t, r) && (r.rir === "" || r.rir == null);
+  });
 
   // Aviso "el entrenador cambió la sesión desde tu último guardado": se
   // detectan dos cosas sobre los borradores (enviado: false) que el jugador
@@ -10978,6 +11170,14 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
                     </span>
                   </div>
                 )}
+                {tareasSinRirParaCalibrar.length > 0 && (
+                  <div style={{ display: "flex", gap: 8, background: `${ds.accent}14`, border: `1px solid ${ds.accent}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
+                    <span style={{ color: ds.accent, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={14} /></span>
+                    <span style={{ fontSize: 12.5, color: ds.ink, lineHeight: 1.45 }}>
+                      Falta el RIR en {tareasSinRirParaCalibrar.map((t) => t.nombre).join(", ")}. Es la primera vez y sin él la app no puede calcular tu 1RM ni recomendarte carga la próxima vez.
+                    </span>
+                  </div>
+                )}
                 <div style={{ display: "flex", gap: 8 }}>
                   <DsButton variant="secondary" onClick={() => setPidiendoConfirmacion(false)} disabled={enviando} style={{ flex: 1 }}>
                     Cancelar
@@ -11210,6 +11410,172 @@ function calcularCambiosE1rm(items, inicio, fin) {
     });
   });
   return cambios;
+}
+
+// Cumplimiento de la pauta (ejecutado frente a prescrito): compara lo que el
+// jugador registró con lo que la tarea pedía, sin necesitar más datos que los
+// que ya se recogen. Tres lecturas independientes, cada una solo con las
+// tareas donde tiene sentido (nunca se rellena con supuestos):
+// - series: series hechas / series pautadas (solo registros con series_hechas).
+// - reps: en cuántas tareas la serie top llegó al objetivo de repeticiones.
+// - RIR: diferencia media entre el RIR real y el objetivo (negativa = fue
+//   más cerca del fallo de lo pautado; positiva = se guardó más de lo pautado).
+// Excluye Resistencia y CMJ. Devuelve null en cada lectura sin datos.
+function calcularCumplimientoPauta(items, desde, hasta) {
+  const regs = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= desde && it.date <= hasta);
+  let seriesHechas = 0;
+  let seriesPautadas = 0;
+  let repsOk = 0;
+  let repsTotal = 0;
+  let rirDifSuma = 0;
+  let rirN = 0;
+  regs.forEach((it) => {
+    const pautadas = Number(it.sets);
+    if (it.seriesHechas !== "" && it.seriesHechas != null && Number.isFinite(pautadas) && pautadas > 0) {
+      seriesHechas += Number(it.seriesHechas) || 0;
+      seriesPautadas += pautadas;
+    }
+    const repsObj = Number(it.reps);
+    const repsReal = Number(it.repsReal);
+    if (it.unidad === "reps" && it.repsReal !== "" && Number.isFinite(repsObj) && repsObj > 0 && Number.isFinite(repsReal)) {
+      repsTotal++;
+      if (repsReal >= repsObj) repsOk++;
+    }
+    const rirObj = it.rir !== "" && it.rir != null ? Number(it.rir) : NaN;
+    const rirReal = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : NaN;
+    if (Number.isFinite(rirObj) && Number.isFinite(rirReal)) {
+      rirDifSuma += rirReal - rirObj;
+      rirN++;
+    }
+  });
+  return {
+    tareas: regs.length,
+    series: seriesPautadas ? { hechas: seriesHechas, pautadas: seriesPautadas, pct: Math.round((seriesHechas / seriesPautadas) * 100) } : null,
+    reps: repsTotal ? { ok: repsOk, total: repsTotal, pct: Math.round((repsOk / repsTotal) * 100) } : null,
+    rirDif: rirN ? { media: rirDifSuma / rirN, n: rirN } : null,
+  };
+}
+
+// ---------- Fase 2 · carga de fuerza por microciclo ----------
+// Vincula las sesiones de fuerza con los microciclos del CMJ SOLO por fecha
+// (sin columnas nuevas): un microciclo abarca desde su día de Inicio hasta la
+// víspera del siguiente Inicio, sea cual sea su duración. El último (sin
+// siguiente que lo cierre) se acota a 14 días. Un microciclo sin fecha de
+// Inicio no genera ventana.
+const MICRO_DIAS_ULTIMO = 14;
+function cmjVentanasMicrociclo(microciclos) {
+  const lista = (microciclos || [])
+    .filter((m) => m.inicio)
+    .map((m) => ({ m, desde: String(m.inicio).slice(0, 10) }))
+    .sort((a, b) => (a.desde < b.desde ? -1 : a.desde > b.desde ? 1 : 0));
+  return lista.map((x, i) => {
+    // Un microciclo dura lo que tú decidas: hasta el día anterior al Inicio del
+    // siguiente, sin límite. Solo el último (sin siguiente que lo cierre) se
+    // acota a MICRO_DIAS_ULTIMO días para no etiquetar fechas lejanas.
+    const vispera = lista[i + 1] ? sumarDiasFecha(lista[i + 1].desde, -1) : sumarDiasFecha(x.desde, MICRO_DIAS_ULTIMO - 1);
+    return { id: x.m.id, numero: x.m.numero, desde: x.desde, hasta: vispera };
+  });
+}
+function cmjMicroDeFecha(fecha, ventanas) {
+  return ventanas.find((v) => fecha >= v.desde && fecha <= v.hasta) || null;
+}
+
+// e1RM de un registro (mismo cálculo que el resto de la app: carga dividida
+// por el %1RM del RTF = reps + RIR; sin RIR o con más de 12 reps no hay dato).
+function e1rmDeItem(it) {
+  const reps = Number(it.repsReal);
+  const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+  const carga = Number(it.cargaReal);
+  if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+  if (reps > REPS_MAX_RIR_FIABLE) return null;
+  const pct = pct1RMporRTF(reps + rir);
+  return pct ? carga / pct : null;
+}
+
+// Carga de fuerza de un jugador en cada microciclo, con los datos que ya se
+// recogen (solo el bloque Fuerza): series hechas (o pautadas si el registro es
+// anterior a series_hechas), intensidad media (kg de la serie top / mejor e1RM
+// que llevaba hasta ese día en el mismo ejercicio+equipo), nº de sesiones y
+// fechas de sesiones pesadas (>= 85 % del 1RM). "Relativa" compara las series
+// con la media de sus hasta 4 microciclos anteriores con datos (necesita al
+// menos 2): baja < 75 %, alta > 125 %.
+function calcularCargaFuerzaPorMicro(items, ventanas) {
+  const fuerza = items.filter((it) => it.done && !it.esResistencia && it.bloque === "Fuerza");
+  const porClave = new Map();
+  fuerza.forEach((it) => {
+    const clave = `${it.name}::${materialEfectivo(it)}`;
+    if (!porClave.has(clave)) porClave.set(clave, []);
+    porClave.get(clave).push(it);
+  });
+  const pctPorItem = new Map();
+  porClave.forEach((regs) => {
+    let mejor = 0;
+    [...regs]
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .forEach((it) => {
+        const e = e1rmDeItem(it);
+        if (e == null) return;
+        mejor = Math.max(mejor, e);
+        pctPorItem.set(it.id, Number(it.cargaReal) / mejor);
+      });
+  });
+  const cargas = ventanas.map((v) => {
+    const enMicro = fuerza.filter((it) => it.date >= v.desde && it.date <= v.hasta);
+    const series = enMicro.reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0);
+    const pcts = enMicro.map((it) => pctPorItem.get(it.id)).filter((x) => x != null && Number.isFinite(x));
+    const fechasPesadas = [...new Set(enMicro.filter((it) => (pctPorItem.get(it.id) ?? 0) >= 0.85).map((it) => it.date))].sort();
+    return {
+      microId: v.id,
+      numero: v.numero,
+      desde: v.desde,
+      hasta: v.hasta,
+      hayDatos: enMicro.length > 0,
+      series,
+      sesiones: new Set(enMicro.map((it) => it.date)).size,
+      intensidad: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
+      fechasPesadas,
+      relativa: null,
+      nivel: null,
+    };
+  });
+  cargas.forEach((c, i) => {
+    if (c.series <= 0) return;
+    const previos = cargas.slice(Math.max(0, i - 4), i).filter((x) => x.series > 0);
+    if (previos.length < 2) return;
+    const media = previos.reduce((sum, x) => sum + x.series, 0) / previos.length;
+    c.relativa = c.series / media;
+    c.nivel = c.relativa > 1.25 ? "alta" : c.relativa < 0.75 ? "baja" : "normal";
+  });
+  return cargas;
+}
+const NIVEL_CARGA_FUERZA_META = {
+  alta: { label: "Alta", color: () => ds.warning },
+  normal: { label: "Normal", color: () => ds.inkSecondary },
+  baja: { label: "Baja", color: () => ds.inkMuted },
+};
+// "fuerza alta +35 %" / "fuerza normal" / "N series" / "sin fuerza registrada"
+function etiquetaCargaFuerza(c) {
+  if (!c || !c.hayDatos) return "sin fuerza registrada esta semana";
+  if (!c.nivel) return `${c.series} series de fuerza`;
+  const pct = Math.round((c.relativa - 1) * 100);
+  return `fuerza ${NIVEL_CARGA_FUERZA_META[c.nivel].label.toLowerCase()}${c.nivel === "normal" ? "" : ` ${pct > 0 ? "+" : ""}${pct} %`}`;
+}
+// ¿Coincide el salto peor de la semana con la carga de fuerza? Cada fila
+// necesita nivel de carga y al menos una caída medible de altura. Con menos de
+// 6 semanas comparables (o menos de 2 en cada grupo) no se dice nada: solo
+// cuántas faltan. Es asociación, no causa (no entra la carga de partido).
+function resumenFuerzaSalto(filas) {
+  const validas = filas
+    .map((f) => {
+      const ds_ = [f.altura?.md2Delta, f.altura?.md1Delta].filter((x) => x != null);
+      return f.carga?.nivel && ds_.length ? { alta: f.carga.nivel === "alta", peor: Math.min(...ds_) } : null;
+    })
+    .filter(Boolean);
+  const altas = validas.filter((x) => x.alta);
+  const resto = validas.filter((x) => !x.alta);
+  if (validas.length < 6 || altas.length < 2 || resto.length < 2) return { suficiente: false, n: validas.length, altas: altas.length, resto: resto.length };
+  const media = (arr) => arr.reduce((sum, x) => sum + x.peor, 0) / arr.length;
+  return { suficiente: true, n: validas.length, alta: { n: altas.length, media: media(altas) }, resto: { n: resto.length, media: media(resto) } };
 }
 
 // A partir de una marca previa con OTRO diseño (reps/RIR distinto al de
@@ -12817,10 +13183,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
               </select>
             </CampoEtiquetadoDiseno>
             {tarea.modoCarga === "pct1rm" ? (
+              <>
               <CampoEtiquetadoDiseno etiqueta="% 1RM" w={48}>
                 <input
                   value={tarea.pct1rm ?? ""}
-                  onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value })}
+                  onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value, pct1rmOrigen: undefined })}
                   onBlur={(e) => {
                     const n = Number(e.target.value);
                     if (e.target.value !== "" && !Number.isNaN(n)) onCambiar({ ...tarea, pct1rm: String(Math.min(100, Math.max(1, Math.round(n)))) });
@@ -12829,6 +13196,17 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
                   style={campoStyleDiseno("100%")}
                 />
               </CampoEtiquetadoDiseno>
+              {tarea.pct1rmOrigen != null && !tarea.mantenerCarga && String(tarea.pct1rm) !== String(tarea.pct1rmOrigen) && (
+                <button
+                  type="button"
+                  onClick={() => onCambiar({ ...tarea, pct1rm: tarea.pct1rmOrigen, mantenerCarga: true })}
+                  title="Esta carga se ha subido respecto a la sesión original. Pulsa para dejarla como estaba."
+                  style={{ alignSelf: "flex-end", fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 5, padding: "5px 6px", cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  ↑ desde {tarea.pct1rmOrigen} % · mantener
+                </button>
+              )}
+              </>
             ) : (
               // El RIR se pauta en una escala corta (0 = al fallo, rara vez
               // más de 5-6 en trabajo de fuerza) — si aquí aparece un número
@@ -13604,6 +13982,38 @@ function categoriaComunEntreJugadores(targetPlayerIds, allPlayers) {
   return interseccion.length === 1 ? interseccion[0] : null;
 }
 
+// Preventivo por jugador: cuando los destinatarios no comparten una única
+// categoría, en vez de omitir el bloque se reparte por categoría — cada
+// jugador con UNA categoría recibe los ejercicios de la suya. Los jugadores
+// con 0 o varias categorías no reciben Preventivo automático (no hay forma de
+// saber cuál toca) y se avisan en el diseño.
+function repartoPreventivoPorCategoria(targetPlayerIds, allPlayers) {
+  const objetivo = targetPlayerIds === null ? allPlayers.filter((p) => p.estado === "activo") : allPlayers.filter((p) => targetPlayerIds.includes(p.id));
+  const porCategoria = new Map();
+  const sinCategoriaUnica = [];
+  objetivo.forEach((p) => {
+    const cats = p.groupIds || [];
+    if (cats.length !== 1) {
+      sinCategoriaUnica.push(p);
+      return;
+    }
+    if (!porCategoria.has(cats[0])) porCategoria.set(cats[0], []);
+    porCategoria.get(cats[0]).push(p.id);
+  });
+  return { porCategoria, sinCategoriaUnica };
+}
+// Una tarea con `para_jugadores` (JSON de ids) solo es para esos jugadores;
+// vacía = para todos los destinatarios de la sesión.
+function tareaEsParaJugador(t, jugadorId) {
+  if (!t || !t.para_jugadores) return true;
+  try {
+    const ids = JSON.parse(t.para_jugadores);
+    return !Array.isArray(ids) || !ids.length || ids.includes(jugadorId);
+  } catch {
+    return true;
+  }
+}
+
 function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
   const alternar = (id) => {
     onCambiar(seleccionados.includes(id) ? seleccionados.filter((x) => x !== id) : [...seleccionados, id]);
@@ -13667,6 +14077,7 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
 // elegidos allí — ningún otro punto de entrada (Diseñar sesión, Reutilizar)
 // los pasa nunca, así que su comportamiento de siempre no cambia en nada.
 function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
+  const parcialRef = useRef(nuevoEstadoParcial());
   const isEditing = !!sesionExistente;
   // Reutilizar: misma configuración base que editar (destinatarios, objetivo,
   // activación, preventivo...), pero SIN heredar id ni fechas — es una sesión
@@ -13711,6 +14122,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   // editar una ya guardada arranca plegada — casi siempre solo se quiere
   // tocar el contenido de los bloques, no volver a repasar fechas/PARA/MD.
   const [detallesAbiertos, setDetallesAbiertos] = useState(!isEditing);
+  const [microciclosDiseno, microsCargados] = useCmjMicrociclos();
+  const ventanasDiseno = useMemo(() => cmjVentanasMicrociclo(microciclosDiseno), [microciclosDiseno]);
   const [fechas, setFechas] = useState(
     sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
   );
@@ -13786,6 +14199,16 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   const [tareasResistencia, setTareasResistencia] = useState([]);
   const [circuitosResistencia, setCircuitosResistencia] = useState([]);
   const [tareasFuerza, setTareasFuerza] = useState([]);
+  // Progresión de carga al reutilizar una sesión: puntos de %1RM que se suben
+  // a las tareas de Fuerza pautadas por %1RM. "0" = mantener todas.
+  const [pasoProgresion, setPasoProgresion] = useState("2");
+  const cambiarPasoProgresion = (nuevo) => {
+    setPasoProgresion(nuevo);
+    const paso = Number(nuevo) || 0;
+    const aplicar = (t) => (t.pct1rmOrigen == null || t.mantenerCarga ? t : { ...t, pct1rm: String(Math.min(100, Number(t.pct1rmOrigen) + paso)) });
+    setTareasFuerza((prev) => prev.map(aplicar));
+    setCircuitosFuerza((prev) => prev.map((c) => ({ ...c, tareas: (c.tareas || []).map(aplicar) })));
+  };
   const [circuitosFuerza, setCircuitosFuerza] = useState([]);
 
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
@@ -13822,13 +14245,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     borradorCargadoRef.current = true;
     const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
     const tareas = plantilla.tareas || [];
-    const porBloque = (nombreBloque) => tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true }));
+    const porBloque = (nombreBloque, extra = {}) => tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true, ...extra }));
+    const progresion = { pasoProgresion: Number(pasoProgresion) || 0 };
     setTareasCore(porBloque("Core"));
     setCircuitosCore(agruparCircuitosDeTareas(tareas, ejerciciosById, "Core", { nuevo: true }));
     setTareasResistencia(porBloque("Resistencia"));
     setCircuitosResistencia(agruparCircuitosDeTareas(tareas, ejerciciosById, "Resistencia", { nuevo: true }));
-    setTareasFuerza(porBloque("Fuerza"));
-    setCircuitosFuerza(agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true }));
+    setTareasFuerza(porBloque("Fuerza", progresion));
+    setCircuitosFuerza(agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true, ...progresion }));
     const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
     if (activacionTarea) {
       setDuracionActivacion(String(activacionTarea.cantidad || "8"));
@@ -14025,7 +14449,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         const catComun = categoriaComunEntreJugadores(sesionExistente.jugadores_destino ?? null, players);
         const poolPrevIds = new Set(ejercicios.filter((e) => e.bloque === "Preventivo" && catComun && e.categoria_preventiva_id === catComun).map((e) => e.id));
         const todasEnPoolPrev = tareasPorFechaPrev.every((ts) => ts.every((t) => poolPrevIds.has(t.ejercicio_id)));
-        if (!todasEnPoolPrev && todasIguales) {
+        const hayPreventivoPorJugador = tareas.some((t) => t.bloque_sesion === "Preventivo" && t.para_jugadores);
+        if (!todasEnPoolPrev && todasIguales && !hayPreventivoPorJugador) {
           // El automático solo genera tareas con una categoría común y del
           // pool de esa categoría; si no cumplen, fueron elegidas a mano.
           setModoPreventivo("manual");
@@ -14143,6 +14568,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         // nueva o que ya era borrador— se guarda sin publicar.
         enviada: comoBorrador ? isEditing && !!sesionExistente?.enviada : true,
       };
+      // Sesión nueva: se crea como borrador y se publica al final, cuando todas
+      // las tareas ya están guardadas (ver guardarFilaConParcial).
+      const enviadaFinal = sesionRecord.enviada;
+      const enviadaInicial = isEditing ? !!sesionExistente?.enviada : false;
+      if (!sesionRecord.id) {
+        if (!parcialRef.current.sesionId) parcialRef.current.sesionId = genId(ID_PREFIX.sesiones);
+        sesionRecord.id = parcialRef.current.sesionId;
+      }
+      sesionRecord.enviada = enviadaInicial;
       const savedSesion = await api.save("sesiones", sesionRecord);
 
       const keepTareaIds = new Set();
@@ -14173,7 +14607,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       const guardarTareaSuelta = async (t, bloqueNombre, mostrarCarga) => {
         const ejercicioId = t.ejercicioId;
         const esResistencia = bloqueNombre === "Resistencia";
-        const saved = await api.save("tareas", {
+        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
           id: t.tareaId,
           sesion_id: savedSesion.id,
           bloque_sesion: bloqueNombre,
@@ -14201,11 +14635,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
 
       const guardarCircuito = async (c, bloqueNombre, mostrarCarga) => {
         const esResistencia = bloqueNombre === "Resistencia";
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
+        const savedCircuito = await guardarFilaConParcial(parcialRef.current, "circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: bloqueNombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
-            const saved = await api.save("tareas", {
+            const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
               id: t.tareaId,
               sesion_id: savedSesion.id,
               bloque_sesion: bloqueNombre,
@@ -14250,7 +14684,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         }
       }
       if (activacionActiva && activacionEjercicioIdFinal) {
-        const saved = await api.save("tareas", {
+        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
           id: activacionTareaId || undefined,
           sesion_id: savedSesion.id,
           bloque_sesion: "Activación",
@@ -14275,7 +14709,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       // de que hoy toca test de salto.
       if (cmjActiva) {
         const ejercicioCmj = await resolveEjercicio(ejercicios, { nombre: "CMJ", bloque: "", sin_lateralidad: "si" });
-        const saved = await api.save("tareas", {
+        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
           id: cmjTareaId || undefined,
           sesion_id: savedSesion.id,
           bloque_sesion: "CMJ",
@@ -14302,7 +14736,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       // pueden tocar ejercicios distintos.
       if (modoMovilidad === "manual" && tareaMovilidadManual) {
         for (const fecha of fechas) {
-          const saved = await api.save("tareas", {
+          const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
             id: movilidadTareaIdsPorFecha[fecha] || undefined,
             sesion_id: savedSesion.id,
             bloque_sesion: "Movilidad",
@@ -14339,7 +14773,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           for (const fecha of fechasASortear) {
             const elegido = await elegirSiguienteRotacion("movilidad", poolMovilidad);
             if (!elegido) continue;
-            const saved = await api.save("tareas", {
+            const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
               id: movilidadTareaIdsPorFecha[fecha] || undefined,
               sesion_id: savedSesion.id,
               bloque_sesion: "Movilidad",
@@ -14376,7 +14810,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
           for (let i = 0; i < tareasPreventivoManual.length; i++) {
             const t = tareasPreventivoManual[i];
-            const saved = await api.save("tareas", {
+            const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
               id: idsExistentes[i] || undefined,
               sesion_id: savedSesion.id,
               bloque_sesion: "Preventivo",
@@ -14404,35 +14838,46 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           if (conservarPreventivo && idsExistentes.length) idsExistentes.forEach((id) => keepTareaIds.add(id));
           else fechasPreventivoASortear.push(fecha);
         }
-        const catId = fechasPreventivoASortear.length ? categoriaComunEntreJugadores(targetPlayerIds, players) : null;
-        if (catId) {
-          const poolPreventivo = ejercicios
-            .filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId)
-            .slice()
-            .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
-          if (poolPreventivo.length) {
-            for (const fecha of fechasPreventivoASortear) {
-              const elegidos = await elegirVariosRotacion(catId, poolPreventivo, preventivoCantidad);
-              const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
-              for (let i = 0; i < elegidos.length; i++) {
-                const saved = await api.save("tareas", {
-                  id: idsExistentes[i] || undefined,
-                  sesion_id: savedSesion.id,
-                  bloque_sesion: "Preventivo",
-                  ejercicio_id: elegidos[i].id,
-                  fecha,
-                  modo: "",
-                  series: "",
-                  cantidad: "",
-                  rir: "",
-                  tipo_resistencia: "",
-                  material: "",
-                  nota: "",
-                  circuito_id: "",
-                  orden_en_circuito: "",
-                });
-                keepTareaIds.add(saved.id);
-              }
+        // Categoría común a todos → como siempre (tarea para todos). Si no la
+        // hay, se reparte por categoría: cada grupo de jugadores recibe los
+        // ejercicios de la suya (tarea con para_jugadores).
+        const catComun = fechasPreventivoASortear.length ? categoriaComunEntreJugadores(targetPlayerIds, players) : null;
+        let gruposPreventivo = [];
+        if (catComun) gruposPreventivo = [{ catId: catComun, jugadores: null }];
+        else if (fechasPreventivoASortear.length) {
+          const { porCategoria } = repartoPreventivoPorCategoria(targetPlayerIds, players);
+          gruposPreventivo = [...porCategoria.entries()].map(([catId, jugadores]) => ({ catId, jugadores }));
+        }
+        for (const fecha of fechasPreventivoASortear) {
+          const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
+          let indice = 0;
+          for (const grupo of gruposPreventivo) {
+            const poolPreventivo = ejercicios
+              .filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === grupo.catId)
+              .slice()
+              .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
+            if (!poolPreventivo.length) continue;
+            const elegidos = await elegirVariosRotacion(grupo.catId, poolPreventivo, preventivoCantidad);
+            for (let k = 0; k < elegidos.length; k++) {
+              const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
+                id: idsExistentes[indice] || undefined,
+                sesion_id: savedSesion.id,
+                bloque_sesion: "Preventivo",
+                ejercicio_id: elegidos[k].id,
+                fecha,
+                modo: "",
+                series: "",
+                cantidad: "",
+                rir: "",
+                tipo_resistencia: "",
+                material: "",
+                nota: "",
+                para_jugadores: grupo.jugadores ? JSON.stringify(grupo.jugadores) : "",
+                circuito_id: "",
+                orden_en_circuito: "",
+              });
+              keepTareaIds.add(saved.id);
+              indice++;
             }
           }
         }
@@ -14445,10 +14890,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       await Promise.all(tareasFuerza.map((t) => guardarTareaSuelta(t, "Fuerza", true)));
       await Promise.all(circuitosFuerza.map((c) => guardarCircuito(c, "Fuerza", true)));
 
-      const tareasABorrar = previousTareaIds.filter((id) => !keepTareaIds.has(id));
-      const circuitosABorrar = previousCircuitoIds.filter((id) => !keepCircuitoIds.has(id));
+      const tareasABorrar = [...new Set([...previousTareaIds, ...parcialRef.current.tareas])].filter((id) => !keepTareaIds.has(id));
+      const circuitosABorrar = [...new Set([...previousCircuitoIds, ...parcialRef.current.circuitos])].filter((id) => !keepCircuitoIds.has(id));
       await Promise.all(tareasABorrar.map((id) => api.delete("tareas", id)));
       await Promise.all(circuitosABorrar.map((id) => api.delete("circuitos", id)));
+
+      // Todo guardado: ahora sí se publica la sesión si tocaba.
+      if (enviadaFinal !== enviadaInicial) await api.save("sesiones", { ...sesionRecord, id: savedSesion.id, enviada: enviadaFinal });
+      parcialRef.current = nuevoEstadoParcial();
 
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
@@ -14458,7 +14907,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       setOk(comoBorrador ? "borrador" : true);
       onGuardado?.();
     } catch (e) {
-      setError("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+      setError(
+        e?.message === "FALTA_SQL_PARA_JUGADORES"
+          ? "Para dar Preventivo distinto a cada categoría hay que ejecutar antes sql/add_para_jugadores.sql en Supabase. No se ha publicado la sesión."
+          : "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo."
+      );
     } finally {
       setGuardando(false);
     }
@@ -14676,6 +15129,25 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             Un jugador ya envió esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
+        {esReutilizacion && !isEditing && (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.inkSecondary }}>
+            <span style={{ fontWeight: 700, color: ds.ink }}>Progresión de carga</span>
+            <span>Subir tareas de Fuerza pautadas por %1RM:</span>
+            <select
+              value={pasoProgresion}
+              onChange={(e) => cambiarPasoProgresion(e.target.value)}
+              style={{ fontFamily: dsF.mono, fontSize: 12, padding: "5px 8px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
+            >
+              <option value="0">No subir (mantener)</option>
+              {["1", "2", "3", "5"].map((n) => (
+                <option key={n} value={n}>+{n} % 1RM</option>
+              ))}
+            </select>
+            <span style={{ fontSize: 11.5, color: ds.inkMuted }}>
+              Las tareas pautadas por RIR no cambian. Puedes mantener la carga de una tarea concreta con el botón que aparece junto a su %1RM.
+            </span>
+          </div>
+        )}
         <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
         <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
         {/* Barra de configuración plegable — mismo patrón que .details-bar
@@ -14746,6 +15218,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                   {fechas.map((f) => (
                     <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
                       {f}
+                      {microsCargados && ventanasDiseno.length > 0 && (() => {
+                        const m = cmjMicroDeFecha(f, ventanasDiseno);
+                        return m ? <span style={{ color: ds.inkMuted, fontSize: 10 }}>· Micro {m.numero}</span> : <span title="Esta fecha no cae en ningún microciclo del CMJ" style={{ color: ds.inkMuted, fontSize: 10 }}>· sin microciclo</span>;
+                      })()}
                       <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
                         ×
                       </span>
@@ -14956,7 +15432,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                               +
                             </button>
                           </div>
-                          <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
+                          <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría de cada jugador"}</span>
                         </div>
                         {conservarPreventivo && Object.keys(preventivoTareaIdsPorFecha).length > 0 && (
                           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
@@ -14968,9 +15444,31 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                             const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
                             const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
                             if (!cat) {
+                              const { porCategoria, sinCategoriaUnica } = repartoPreventivoPorCategoria(targetPlayerIds, players);
+                              if (!porCategoria.size) {
+                                return (
+                                  <div style={{ fontSize: 11.5, color: ds.warning }}>
+                                    Ningún destinatario tiene una única categoría preventiva — este bloque se omitirá al guardar. Asigna una categoría a los jugadores para que se aplique.
+                                  </div>
+                                );
+                              }
                               return (
-                                <div style={{ fontSize: 11.5, color: ds.warning }}>
-                                  No hay una única categoría preventiva común a todos los jugadores destinatarios — este bloque se omitirá al guardar. Dirige la sesión a jugadores que compartan una sola categoría para que se aplique.
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: ds.inkSecondary }}>
+                                  <div>Los destinatarios no comparten categoría: cada uno recibirá los ejercicios de la suya.</div>
+                                  {[...porCategoria.entries()].map(([catId, ids]) => {
+                                    const c = categoriasPreventivas.find((x) => x.id === catId);
+                                    const pool = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId).length;
+                                    return (
+                                      <div key={catId} style={{ color: pool ? ds.inkMuted : ds.warning }}>
+                                        · {c?.nombre || "Categoría"}: {ids.length} jugador(es){pool ? ` · ${pool} ejercicio(s) en el pool` : " · sin ejercicios en el pool, se omitirá"}
+                                      </div>
+                                    );
+                                  })}
+                                  {sinCategoriaUnica.length > 0 && (
+                                    <div style={{ color: ds.warning }}>
+                                      Sin Preventivo (0 o varias categorías): {sinCategoriaUnica.map((p) => p.name).join(", ")}.
+                                    </div>
+                                  )}
                                 </div>
                               );
                             }
@@ -15287,6 +15785,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
 // más), sin ningún cambio en PantallaJugadorReal — ya agrupa por bloque_sesion
 // cualquier sesión que coincida con la fecha y el jugador.
 function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
+  const parcialRef = useRef(nuevoEstadoParcial());
   const isEditing = !!sesionExistente;
   const esReutilizacion = !!plantilla;
   const base = sesionExistente || plantilla;
@@ -15461,6 +15960,13 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
         lote_origen_id: "",
         enviada: true,
       };
+      const enviadaFinal = sesionRecord.enviada;
+      const enviadaInicial = isEditing ? !!sesionExistente?.enviada : false;
+      if (!sesionRecord.id) {
+        if (!parcialRef.current.sesionId) parcialRef.current.sesionId = genId(ID_PREFIX.sesiones);
+        sesionRecord.id = parcialRef.current.sesionId;
+      }
+      sesionRecord.enviada = enviadaInicial;
       const savedSesion = await api.save("sesiones", sesionRecord);
 
       const keepTareaIds = new Set();
@@ -15468,7 +15974,7 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
       const nombre = nombreBloque.trim();
 
       const guardarTareaSuelta = async (t) => {
-        const saved = await api.save("tareas", {
+        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
           id: t.tareaId,
           sesion_id: savedSesion.id,
           bloque_sesion: nombre,
@@ -15488,11 +15994,11 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
       };
 
       const guardarCircuito = async (c) => {
-        const savedCircuito = await api.save("circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
+        const savedCircuito = await guardarFilaConParcial(parcialRef.current, "circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
         keepCircuitoIds.add(savedCircuito.id);
         await Promise.all(
           c.tareas.map(async (t, i) => {
-            const saved = await api.save("tareas", {
+            const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
               id: t.tareaId,
               sesion_id: savedSesion.id,
               bloque_sesion: nombre,
@@ -15516,10 +16022,14 @@ function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugerida
       await Promise.all(tareasBloque.map(guardarTareaSuelta));
       await Promise.all(circuitosBloque.map(guardarCircuito));
 
-      const tareasABorrar = previousTareaIds.filter((id) => !keepTareaIds.has(id));
-      const circuitosABorrar = previousCircuitoIds.filter((id) => !keepCircuitoIds.has(id));
+      const tareasABorrar = [...new Set([...previousTareaIds, ...parcialRef.current.tareas])].filter((id) => !keepTareaIds.has(id));
+      const circuitosABorrar = [...new Set([...previousCircuitoIds, ...parcialRef.current.circuitos])].filter((id) => !keepCircuitoIds.has(id));
       await Promise.all(tareasABorrar.map((id) => api.delete("tareas", id)));
       await Promise.all(circuitosABorrar.map((id) => api.delete("circuitos", id)));
+
+      // Todo guardado: ahora sí se publica la sesión si tocaba.
+      if (enviadaFinal !== enviadaInicial) await api.save("sesiones", { ...sesionRecord, id: savedSesion.id, enviada: enviadaFinal });
+      parcialRef.current = nuevoEstadoParcial();
 
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
@@ -15895,7 +16405,7 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos, onNavigateTab }
 // activo — reutiliza useEquipoHistory, no trae registros nuevos.
 function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) {
   const [players, , playersLoaded] = usePlayers();
-  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { loaded: historyLoaded, items } = usePlayerHistory(jugador.id);
   const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
 
@@ -15924,11 +16434,14 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
     });
   asignacionesJugador.sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
 
-  const fechasAsignadas = (desde, hasta) => asignacionesJugador.filter((a) => a.fecha >= desde && a.fecha <= hasta).map((a) => a.fecha);
-  const calcularAdherencia = (fechas) => {
-    if (!fechas.length) return null;
-    const cumplidas = fechas.filter((f) => fechasConRegistro.has(f)).length;
-    return Math.round((cumplidas / fechas.length) * 100);
+  const hechasJugador = tareasHechasPorJugadorFecha(items);
+  const fraccionCumplidaFicha = crearFraccionCumplida(tareasProg);
+  const fraccionDeAsignacion = (a) => fraccionCumplidaFicha(a.sesion.id, a.fecha, hechasJugador.get(`${jugador.id}::${a.fecha}`), jugador.id);
+  const fechasAsignadas = (desde, hasta) => asignacionesJugador.filter((a) => a.fecha >= desde && a.fecha <= hasta);
+  const calcularAdherencia = (asignaciones) => {
+    if (!asignaciones.length) return null;
+    const cumplidas = asignaciones.reduce((sum, a) => sum + fraccionDeAsignacion(a), 0);
+    return Math.round((cumplidas / asignaciones.length) * 100);
   };
   const adherenciaActual = calcularAdherencia(fechasAsignadas(lunes, hoy));
   const adherenciaAnterior = calcularAdherencia(fechasAsignadas(lunesAnterior, domingoAnterior));
@@ -15968,7 +16481,7 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
   // useDatosDashboardEntrenador.adherenciaActual, para poder comparar a
   // este jugador contra su equipo.
   const activos = players.filter((p) => p.estado === "activo");
-  const registroPorJugadorFecha = new Set(equipoHistory.filter((it) => it.done).map((it) => `${it.jugadorId}::${it.date}`));
+  const hechasEquipo = tareasHechasPorJugadorFecha(equipoHistory);
   let ocurrenciasEquipo = 0;
   let cumplidasEquipo = 0;
   sesiones
@@ -15979,7 +16492,7 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
         if (f < lunes || f > domingo || f > hoy) return;
         destino.forEach((jugadorId) => {
           ocurrenciasEquipo++;
-          if (registroPorJugadorFecha.has(`${jugadorId}::${f}`)) cumplidasEquipo++;
+          cumplidasEquipo += fraccionCumplidaFicha(s.id, f, hechasEquipo.get(`${jugadorId}::${f}`), jugadorId);
         });
       });
     });
@@ -15992,10 +16505,10 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
   // que ya calcula este componente (asignadas/cumplidas de esta semana +
   // racha de semanas) — mismo patrón que el mockup, sin ninguna cifra nueva.
   const fechasSemanaActual = fechasAsignadas(lunes, hoy);
-  const cumplidasSemanaActual = fechasSemanaActual.filter((f) => fechasConRegistro.has(f)).length;
+  const cumplidasSemanaActual = Math.round(fechasSemanaActual.reduce((sum, a) => sum + fraccionDeAsignacion(a), 0) * 10) / 10;
   let insightTexto = null;
   if (fechasSemanaActual.length > 0) {
-    insightTexto = `${cumplidasSemanaActual} de las ${fechasSemanaActual.length} sesiones que ya le tocaban esta semana registradas`;
+    insightTexto = `${cumplidasSemanaActual} de las ${fechasSemanaActual.length} sesiones que ya le tocaban esta semana hechas (según el trabajo completado)`;
     insightTexto += rachaSemanas > 0 ? `, dentro de una racha de ${rachaSemanas} ${rachaSemanas === 1 ? "semana cumpliendo" : "semanas cumpliendo"} el plan.` : ".";
   } else if (rachaSemanas > 0) {
     insightTexto = `Sin sesiones asignadas todavía esta semana. Lleva una racha de ${rachaSemanas} ${rachaSemanas === 1 ? "semana cumpliendo" : "semanas cumpliendo"} el plan.`;
@@ -16102,7 +16615,10 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
               <span style={{ flex: 1, minWidth: 0, color: ds.ink, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {a.sesion.nombre || a.sesion.objetivo || "Sesión"}
               </span>
-              <DsBadge tone={fechasConRegistro.has(a.fecha) ? "success" : "danger"}>{fechasConRegistro.has(a.fecha) ? "Realizada" : "No realizada"}</DsBadge>
+              {(() => {
+                const f = fraccionDeAsignacion(a);
+                return <DsBadge tone={f >= 0.8 ? "success" : f > 0 ? "neutral" : "danger"}>{f >= 0.8 ? "Realizada" : f > 0 ? `Parcial · ${Math.round(f * 100)} %` : "No realizada"}</DsBadge>;
+              })()}
             </div>
           ))}
         </div>
@@ -16332,6 +16848,84 @@ function CmjMiniMultiploReal({ metric, puntos, umbral, color }) {
 // el panel original. A diferencia de Ranking (que compara jugadores entre
 // sí), aquí solo se cargan los saltos de ESTE jugador, ya vinculados a su
 // jugadorId.
+// Sección "Fuerza y salto por microciclo" de la ficha CMJ (Fase 2). Cada fila
+// junta lo que el jugador levantó esa semana con lo que le pasó al salto en
+// MD-2 y MD-1 frente a su Inicio. Solo lectura, sin conclusiones fuertes: con
+// pocas semanas dice cuántas faltan en vez de inventar una tendencia.
+function FuerzaSaltoMicrociclosReal({ filas, resumen, cargando, jugadorNombre }) {
+  const colorDelta = (status) => ({ red: ds.danger, amber: ds.warning, green: ds.success, gray: ds.inkMuted }[status || "gray"]);
+  const celdaDelta = (delta, status) => (
+    <div style={{ textAlign: "right", fontFamily: dsF.mono, fontSize: 12, fontWeight: 700, color: delta == null ? ds.inkMuted : colorDelta(status) }}>{delta == null ? "—" : cmjSigned(delta, 1)}</div>
+  );
+  const cabecera = { fontSize: 10, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" };
+  const columnas = "48px minmax(150px, 1.6fr) 62px 70px 70px";
+  return (
+    <div style={{ marginBottom: 18 }}>
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 3 }}>Fuerza y salto por microciclo</div>
+      <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 9, lineHeight: 1.45 }}>
+        La carga de fuerza de cada semana (solo bloque Fuerza) junto a la variación de la altura de salto en MD-2 y MD-1 frente al Inicio.
+      </div>
+      {cargando ? (
+        <div style={{ fontSize: 12, color: ds.inkMuted }}>Cargando historial de fuerza…</div>
+      ) : filas.length === 0 ? (
+        <DsCard style={{ padding: 16, textAlign: "center", color: ds.inkMuted, fontSize: 12 }}>
+          Aún no hay microciclos con fecha de Inicio que cruzar con sesiones de fuerza o tests de salto.
+        </DsCard>
+      ) : (
+        <>
+          {resumen.suficiente ? (
+            <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10, fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
+              En las <b style={{ color: ds.ink }}>{resumen.alta.n}</b> semanas de carga de fuerza alta de {jugadorNombre}, el peor test de altura de la semana quedó de media en <b style={{ color: ds.ink }}>{cmjSigned(resumen.alta.media, 1)}</b> frente al Inicio; en las <b style={{ color: ds.ink }}>{resumen.resto.n}</b> semanas normales o bajas, en <b style={{ color: ds.ink }}>{cmjSigned(resumen.resto.media, 1)}</b>.
+              <div style={{ marginTop: 4, color: ds.inkMuted, fontSize: 10.5 }}>Es una coincidencia, no una causa: aquí no entra la carga de partido ni ningún otro factor.</div>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 10 }}>
+              Para comparar hacen falta al menos 6 semanas con carga relativa y test de salto (y 2 en cada grupo). Ahora hay {resumen.n}.
+            </div>
+          )}
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ minWidth: 420 }}>
+              <div style={{ display: "grid", gridTemplateColumns: columnas, gap: 8, padding: "0 6px 6px", borderBottom: `1px solid ${ds.border}` }}>
+                <div style={cabecera}>Micro</div>
+                <div style={cabecera}>Fuerza de la semana</div>
+                <div style={{ ...cabecera, textAlign: "right" }}>Carga</div>
+                <div style={{ ...cabecera, textAlign: "right" }}>Altura MD-2</div>
+                <div style={{ ...cabecera, textAlign: "right" }}>Altura MD-1</div>
+              </div>
+              {filas.slice(0, 12).map((f, i) => {
+                const c = f.carga;
+                const meta = c.nivel ? NIVEL_CARGA_FUERZA_META[c.nivel] : null;
+                return (
+                  <div key={c.microId} style={{ display: "grid", gridTemplateColumns: columnas, gap: 8, alignItems: "center", padding: "8px 6px", borderBottom: `1px solid ${ds.borderSoft}`, background: i % 2 === 0 ? "transparent" : `${ds.bgElevated}55` }}>
+                    <div style={{ fontFamily: dsF.mono, fontSize: 12, color: ds.ink }}>Nº {c.numero}</div>
+                    <div style={{ fontSize: 11.5, color: c.hayDatos ? ds.ink : ds.inkMuted, lineHeight: 1.35 }}>
+                      {c.hayDatos ? (
+                        <>
+                          {c.sesiones} sesión{c.sesiones === 1 ? "" : "es"} · {c.series} series
+                          {c.intensidad != null && ` · ${Math.round(c.intensidad * 100)} % del 1RM`}
+                          {c.fechasPesadas.length > 0 && <span style={{ color: ds.warning }}> · {c.fechasPesadas.length} pesada{c.fechasPesadas.length === 1 ? "" : "s"}</span>}
+                        </>
+                      ) : (
+                        "sin fuerza registrada"
+                      )}
+                    </div>
+                    <div style={{ textAlign: "right", fontSize: 11.5, fontWeight: 700, color: meta ? meta.color() : ds.inkMuted }}>{meta ? meta.label : "—"}</div>
+                    {celdaDelta(f.altura?.md2Delta, f.altura?.md2Status)}
+                    {celdaDelta(f.altura?.md1Delta, f.altura?.md1Status)}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 6, lineHeight: 1.45 }}>
+            Carga = series de la semana frente a la media de sus hasta 4 microciclos anteriores (baja &lt; 75 %, alta &gt; 125 %). Las sesiones se asignan al microciclo por fecha: desde el día de Inicio hasta la víspera del siguiente Inicio (el último, máx. 14 días).
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   const [saltos, setSaltos] = useState([]);
   const [microciclos, setMicrociclos] = useState([]);
@@ -16367,6 +16961,8 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   }, [jugadorId]);
 
   useEffect(() => { cargar(); }, [cargar]);
+  // Fase 2: historial de fuerza del jugador para cruzarlo con sus microciclos.
+  const { loaded: histFuerzaLoaded, items: histFuerza } = usePlayerHistory(jugadorId);
 
   function toggleTag(k) {
     setFiltroTags((prev) => {
@@ -16512,6 +17108,18 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   // Últimos 4 tests con valor en cada variable, para los pequeños múltiplos.
   const ultimos4 = player.sorted.slice(-4);
 
+  // Fase 2 · fuerza y salto por microciclo (ver calcularCargaFuerzaPorMicro).
+  const ventanasFS = cmjVentanasMicrociclo(microciclos);
+  const cargasFS = histFuerzaLoaded ? calcularCargaFuerzaPorMicro(histFuerza, ventanasFS) : [];
+  const filasFS = cargasFS
+    .map((c) => {
+      const r = player.microResults.get(c.microId);
+      return { carga: c, numero: c.numero, r, altura: r?.metrics?.altura || null };
+    })
+    .filter((f) => f.carga.hayDatos || f.r)
+    .reverse();
+  const resumenFS = resumenFuerzaSalto(filasFS);
+
   return (
     <div>
       <div
@@ -16575,6 +17183,8 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
           );
         })}
       </div>
+
+      <FuerzaSaltoMicrociclosReal filas={filasFS} resumen={resumenFS} cargando={!histFuerzaLoaded} jugadorNombre={jugadorNombre} />
 
       <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Evolución por variable — últimos {ultimos4.length} tests</div>
       <div style={{ display: "flex", gap: 14, flexWrap: "wrap", margin: "2px 0 12px" }}>
@@ -16823,7 +17433,8 @@ function MiniGraficaSemanalReal({ puntos, refValor, refLabel, resaltarMejor }) {
 // reales de usePlayerHistory, nada inventado.
 function ProgresoFichaJugadorReal({ jugador }) {
   const { loaded, items } = usePlayerHistory(jugador.id);
-  if (!loaded) return <LoadingBlock />;
+  const { sesiones: sesionesProg, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
+  if (!loaded || !progLoaded) return <LoadingBlock />;
 
   const hoy = todayStr();
   const lunes = inicioSemanaCalendario(hoy);
@@ -16847,14 +17458,26 @@ function ProgresoFichaJugadorReal({ jugador }) {
   // Volumen: nº de series completadas de fuerza (mismo filtro que cargaMedia
   // en ResumenFichaJugadorReal: done, sin Resistencia, sin CMJ) por semana —
   // reutiliza el campo `sets` ya presente en cada item de usePlayerHistory.
+  // Adherencia semanal: la misma ponderada por tareas (ENT-07) que el resto
+  // de la app — sesiones asignadas a este jugador en la semana (hasta hoy) y
+  // qué fracción de su trabajo se hizo.
+  const hechasProgreso = tareasHechasPorJugadorFecha(items.map((it) => ({ ...it, jugadorId: jugador.id })));
+  const fraccionProgreso = crearFraccionCumplida(tareasProg);
   const puntosAdherencia = semanas.map((s) => {
-    const enSemana = items.filter((it) => it.date >= s.inicio && it.date <= s.fin);
-    const hechos = enSemana.filter((it) => it.done).length;
-    // Aproximación honesta: sin "asignadas" reales por semana en este hook,
-    // se usa el nº de tareas con registro (hecho o no) como universo de esa
-    // semana — igual que hace HistorialPorJugador para pintar la semana.
-    const total = new Set(enSemana.map((it) => it.id)).size;
-    return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: total ? Math.round((hechos / total) * 100) : 0 };
+    let asignadas = 0;
+    let cumplidas = 0;
+    sesionesProg
+      .filter((se) => se.enviada)
+      .forEach((se) => {
+        const incluye = se.jugadores_destino && se.jugadores_destino.length ? se.jugadores_destino.includes(jugador.id) : jugador.estado === "activo";
+        if (!incluye) return;
+        (se.fechas || []).forEach((f) => {
+          if (f < s.inicio || f > s.fin) return;
+          asignadas++;
+          cumplidas += fraccionProgreso(se.id, f, hechasProgreso.get(`${jugador.id}::${f}`), jugador.id);
+        });
+      });
+    return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: asignadas ? Math.round((cumplidas / asignadas) * 100) : 0 };
   });
   const puntosVolumen = semanas.map((s) => {
     const series = items
@@ -16873,6 +17496,11 @@ function ProgresoFichaJugadorReal({ jugador }) {
   const recordsRecientes = calcularRecordsCargaJugador(items)
     .filter((r) => r.fecha >= hace30Dias)
     .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+
+  // Cumplimiento de la pauta de las últimas 4 semanas (ejecutado vs prescrito).
+  const cumplimiento = calcularCumplimientoPauta(items, sumarDiasFecha(hoy, -27), hoy);
+  const hayCumplimiento = cumplimiento.series || cumplimiento.reps || cumplimiento.rirDif;
+  const textoRir = (d) => (Math.abs(d) < 0.25 ? "como pautado" : d < 0 ? `${Math.abs(d).toFixed(1)} más cerca del fallo de lo pautado` : `${d.toFixed(1)} más lejos del fallo de lo pautado`);
 
   return (
     <div>
@@ -16899,6 +17527,25 @@ function ProgresoFichaJugadorReal({ jugador }) {
       <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 18 }}>
         Cada cajón lleva su línea de referencia (umbral real de "semana cumplida" en Adherencia; su propia mejor semana en Volumen) y destaca el punto que la alcanza.
       </div>
+
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Cumplimiento de la pauta · últimas 4 semanas</div>
+      {!hayCumplimiento ? (
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "20px 16px", textAlign: "center", color: ds.inkMuted, fontSize: 12, marginBottom: 18 }}>
+          Aún no hay registros con series, repeticiones o RIR para comparar con lo pautado.
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12, marginBottom: 18 }}>
+          {cumplimiento.series && (
+            <MiniStat icon={<Dumbbell size={12} />} label="Series hechas" value={`${cumplimiento.series.pct}%`} sub={`${cumplimiento.series.hechas} de ${cumplimiento.series.pautadas} pautadas`} />
+          )}
+          {cumplimiento.reps && (
+            <MiniStat icon={<Target size={12} />} label="Reps objetivo" value={`${cumplimiento.reps.pct}%`} sub={`${cumplimiento.reps.ok} de ${cumplimiento.reps.total} tareas alcanzadas`} />
+          )}
+          {cumplimiento.rirDif && (
+            <MiniStat icon={<Activity size={12} />} label="RIR real vs. pauta" value={`${cumplimiento.rirDif.media > 0 ? "+" : ""}${cumplimiento.rirDif.media.toFixed(1)}`} sub={textoRir(cumplimiento.rirDif.media)} />
+          )}
+        </div>
+      )}
 
       <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Récords personales · últimos 30 días</div>
       {recordsRecientes.length === 0 ? (
