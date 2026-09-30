@@ -383,7 +383,7 @@ const NUMERIC_DEFAULTS = {
   sesiones: { preventivo_activo: 0 },
   circuitos: { rondas: null },
   tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null },
-  registros: { reps_hechas: null, carga_kg: null, rir: null },
+  registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null },
 };
 function sanitizeNumericos(entity, out) {
   const cols = NUMERIC_DEFAULTS[entity];
@@ -508,7 +508,15 @@ const api = {
   save: async (entity, record) => {
     const toSave = transformToDb(entity, record);
     if (!toSave.id) toSave.id = genId(ID_PREFIX[entity] || "id");
-    const { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle();
+    let { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle();
+    // Red de seguridad: si la columna nueva registros.series_hechas todavía
+    // no existe en la base de datos (falta ejecutar sql/add_series_hechas.sql),
+    // PostgREST rechaza el guardado entero. En vez de que el jugador pierda
+    // su registro, se reintenta sin ese campo.
+    if (error && entity === "registros" && "series_hechas" in toSave && /series_hechas/.test(`${error.message || ""} ${error.details || ""}`)) {
+      const { series_hechas: _omitido, ...sinSeries } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: "id" }).select().maybeSingle());
+    }
     throwIfError(error);
     return transformFromDb(entity, data);
   },
@@ -748,7 +756,129 @@ function genUniquePin(existingPins) {
 // cambias de pantalla se vuelve a pedir todo desde cero a Apps Script, que
 // es lento por naturaleza — con la caché, la segunda vez que hace falta un
 // dato ya está en memoria y no hay que esperar a la red.
-const sharedDataCache = new Map();
+//
+// Caducidad (DEV-05): las entradas caducan a los 45 s. Antes no caducaban
+// nunca, y como los registros los crea el JUGADOR desde su móvil, el
+// Dashboard del entrenador podía enseñar "Pendientes de hoy" obsoleto hasta
+// recargar la app. Una entrada caducada se comporta como si no estuviera
+// (has/get devuelven "no hay"), así que la siguiente pantalla que la
+// necesite la pide fresca. Las listas realmente fijas quedan exentas.
+const CACHE_TTL_MS = 45000;
+const CLAVES_CACHE_PERMANENTES = new Set(["categoriasPreventivas", "materiales"]);
+class CacheConCaducidad extends Map {
+  constructor() {
+    super();
+    this._t = new Map();
+  }
+  set(k, v) {
+    this._t.set(k, Date.now());
+    return super.set(k, v);
+  }
+  _vigente(k) {
+    if (!super.has(k)) return false;
+    if (CLAVES_CACHE_PERMANENTES.has(k)) return true;
+    const t = this._t.get(k);
+    if (t != null && Date.now() - t > CACHE_TTL_MS) {
+      super.delete(k);
+      this._t.delete(k);
+      return false;
+    }
+    return true;
+  }
+  has(k) {
+    return this._vigente(k);
+  }
+  get(k) {
+    return this._vigente(k) ? super.get(k) : undefined;
+  }
+  delete(k) {
+    this._t.delete(k);
+    return super.delete(k);
+  }
+  clear() {
+    this._t.clear();
+    return super.clear();
+  }
+}
+const sharedDataCache = new CacheConCaducidad();
+
+// ---------- Borrador local del jugador (DEV-06) ----------
+// Lo que el jugador va marcando/tecleando en su sesión vivía solo en estado
+// de React hasta pulsar "Guardar sin enviar" o "Enviar": con mala cobertura
+// en el gimnasio, o si el navegador se cerraba/recargaba, se perdía. Ahora
+// se copia a localStorage en cada cambio (una clave por jugador + sesión +
+// día) y se restaura al volver a abrir la sesión. Todo va envuelto en
+// try/catch porque localStorage puede no estar disponible (modo privado,
+// datos bloqueados...): en ese caso la app funciona igual que antes.
+const PREFIJO_BORRADOR_LOCAL = "fuerza:borrador:";
+function claveBorradorLocal(jugadorId, sesionId, fecha) {
+  return `${PREFIJO_BORRADOR_LOCAL}${jugadorId}:${sesionId}:${fecha}`;
+}
+function leerBorradorLocal(clave) {
+  try {
+    const raw = window.localStorage.getItem(clave);
+    if (!raw) return null;
+    const datos = JSON.parse(raw);
+    return datos && typeof datos === "object" ? datos : null;
+  } catch {
+    return null;
+  }
+}
+function guardarBorradorLocal(clave, datos) {
+  try {
+    window.localStorage.setItem(clave, JSON.stringify(datos));
+  } catch {
+    /* sin almacenamiento local: se sigue sin copia de seguridad */
+  }
+}
+function borrarBorradorLocal(clave) {
+  try {
+    window.localStorage.removeItem(clave);
+  } catch {
+    /* nada que hacer */
+  }
+}
+// Borra los borradores locales de días anteriores (esa sesión ya no se
+// puede abrir: la pantalla del jugador solo muestra las sesiones de hoy).
+function limpiarBorradoresLocalesAntiguos(fechaHoy) {
+  try {
+    const ls = window.localStorage;
+    const aBorrar = [];
+    for (let i = 0; i < ls.length; i++) {
+      const k = ls.key(i);
+      if (k && k.startsWith(PREFIJO_BORRADOR_LOCAL) && !k.endsWith(`:${fechaHoy}`)) aBorrar.push(k);
+    }
+    aBorrar.forEach((k) => ls.removeItem(k));
+  } catch {
+    /* nada que hacer */
+  }
+}
+
+// Pide un refresco silencioso cuando la pestaña vuelve a estar visible (o
+// la ventana recupera el foco) tras más de `minMs` — p. ej. el entrenador
+// deja el Dashboard abierto, el jugador envía su sesión desde el móvil y al
+// volver el entrenador ve el dato nuevo sin recargar. `refrescar` NO debe
+// mostrar el estado de carga (ver refrescarSilencioso en los hooks).
+function useRefrescarAlVolver(refrescar, minMs = CACHE_TTL_MS) {
+  const ref = useRef(refrescar);
+  ref.current = refrescar;
+  useEffect(() => {
+    if (typeof document === "undefined") return undefined;
+    let ultimo = Date.now();
+    const alVolver = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - ultimo < minMs) return;
+      ultimo = Date.now();
+      ref.current?.();
+    };
+    document.addEventListener("visibilitychange", alVolver);
+    window.addEventListener("focus", alVolver);
+    return () => {
+      document.removeEventListener("visibilitychange", alVolver);
+      window.removeEventListener("focus", alVolver);
+    };
+  }, [minMs]);
+}
 
 // Para los sitios que guardan directamente con api.save/api.delete sin pasar
 // por useEntityList (p. ej. el guardado de Diseñar sesión, que escribe
@@ -788,6 +918,9 @@ function useEntityList(entity, filters) {
   const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
   const [error, setError] = useState(null);
   const [tick, setTick] = useState(0);
+  // true = el próximo refetch (tick > 0) es silencioso: no pone loaded a
+  // false (sin parpadeo) y, si falla, conserva los datos que ya había.
+  const silencioRef = useRef(false);
   // Se mantiene siempre al día, de forma síncrona, independientemente de
   // cuándo React decida re-renderizar. save() compara contra esta referencia
   // en vez de contra el "items" cerrado en el momento en que se creó la
@@ -799,6 +932,8 @@ function useEntityList(entity, filters) {
 
   useEffect(() => {
     let cancelled = false;
+    const silencioso = silencioRef.current;
+    silencioRef.current = false;
     // filters === false es la señal explícita de "todavía no hay nada que pedir"
     // (p. ej. ningún jugador seleccionado aún) — evita traer la pestaña entera sin filtrar.
     if (filters === false) {
@@ -814,7 +949,7 @@ function useEntityList(entity, filters) {
       setLoaded(true);
       return;
     }
-    setLoaded(false);
+    if (!silencioso) setLoaded(false);
     (async () => {
       try {
         const res = await api.list(entity, filters);
@@ -824,6 +959,7 @@ function useEntityList(entity, filters) {
         setError(null);
       } catch (e) {
         if (cancelled) return;
+        if (silencioso) return; // refresco en segundo plano fallido: se dejan los datos que ya había
         setItems([]);
         setError(e?.message || "No se pudo cargar. Comprueba tu conexión.");
       } finally {
@@ -889,6 +1025,11 @@ function useEntityList(entity, filters) {
   );
 
   const retry = useCallback(() => setTick((t) => t + 1), []);
+  // Igual que retry pero sin parpadeo de carga — para refrescos automáticos.
+  const refrescarSilencioso = useCallback(() => {
+    silencioRef.current = true;
+    setTick((t) => t + 1);
+  }, []);
 
   // Añade un registro ya guardado (con id real) directamente al estado local
   // y a la caché compartida, sin pasar por la red ni tocar `loaded` — a
@@ -904,7 +1045,7 @@ function useEntityList(entity, filters) {
     [cacheKey]
   );
 
-  return [items, save, loaded, error, retry, addLocal];
+  return [items, save, loaded, error, retry, addLocal, refrescarSilencioso];
 }
 
 // Sustituye a usePersistentValue, para la pestaña Config (clave/valor).
@@ -1836,6 +1977,7 @@ function usePlayerHistory(playerId) {
       cargaReal: r.carga_kg ?? "",
       rirReal: r.rir ?? "",
       repsReal: r.reps_hechas ?? "",
+      seriesHechas: r.series_hechas ?? "",
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
@@ -1858,7 +2000,10 @@ function usePlayerHistory(playerId) {
 // registro, cuándo fue y cuánta carga llevaba, no todo el detalle que
 // necesita la ficha completa de un jugador.
 function useEquipoHistory() {
-  const [registrosTraidos, , registrosLoaded] = useEntityList("registros");
+  const [registrosTraidos, , registrosLoaded, , , , refrescarRegistros] = useEntityList("registros");
+  // Los registros los crean los jugadores desde su dispositivo: al volver a
+  // la pestaña se refrescan solos (DEV-05).
+  useRefrescarAlVolver(refrescarRegistros);
   // Igual que en usePlayerHistory: un registro "enviado: false" es solo un
   // progreso guardado sin confirmar todavía, no cuenta como hecho aquí.
   const registros = registrosTraidos.filter((r) => r.enviado !== false);
@@ -1885,6 +2030,12 @@ function useEquipoHistory() {
       cargaReal: r.carga_kg ?? "",
       esResistencia: t.bloque_sesion === "Resistencia",
       bloque: t.bloque_sesion || "General",
+      // Necesarios para calcular el e1RM por ejercicio+equipo (ENT-01, ver
+      // calcularCambiosE1rm): reps y RIR realmente hechos, y el material.
+      repsReal: r.reps_hechas ?? "",
+      rirReal: r.rir ?? "",
+      materiales: parseMateriales(t.material),
+      subtipoCorporal: r.subtipo_corporal || "",
     };
   });
   return { loaded: true, items };
@@ -1952,14 +2103,17 @@ function useBootstrapProgramacion() {
   const [data, setData] = useState(() => sharedDataCache.get(cacheKey) || null);
   const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
   const [tick, setTick] = useState(0);
+  const silencioRef = useRef(false);
   useEffect(() => {
     let cancelled = false;
+    const silencioso = silencioRef.current;
+    silencioRef.current = false;
     if (tick === 0 && sharedDataCache.has(cacheKey)) {
       setData(sharedDataCache.get(cacheKey));
       setLoaded(true);
       return;
     }
-    setLoaded(false);
+    if (!silencioso) setLoaded(false);
     api
       .bootstrapProgramacion()
       .then((res) => {
@@ -1969,7 +2123,8 @@ function useBootstrapProgramacion() {
         }
       })
       .catch(() => {
-        if (!cancelled) setData({ sesiones: [], tareas: [], ejercicios: [] });
+        if (cancelled || silencioso) return; // refresco en segundo plano fallido: se conservan los datos
+        setData({ sesiones: [], tareas: [], ejercicios: [] });
       })
       .finally(() => {
         if (!cancelled) setLoaded(true);
@@ -1980,6 +2135,11 @@ function useBootstrapProgramacion() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick]);
   const retry = useCallback(() => setTick((t) => t + 1), []);
+  const refrescarSilencioso = useCallback(() => {
+    silencioRef.current = true;
+    setTick((t) => t + 1);
+  }, []);
+  useRefrescarAlVolver(refrescarSilencioso);
   return {
     loaded,
     sesiones: data?.sesiones || [],
@@ -3573,7 +3733,7 @@ function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpen
                 <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Historial →</button>
               </div>
               {datos.variaciones.length === 0 ? (
-                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>Sin datos suficientes esta semana y la anterior.</div>
+                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>Aún no hay ejercicios repetidos esta semana con historial previo.</div>
               ) : (
                 <div style={{ maxHeight: LISTA_MOVIL_MAX_ALTO, overflowY: "auto", marginTop: 2 }}>
                   {datos.variaciones.map((v) => (
@@ -3860,57 +4020,55 @@ function useDatosDashboardEntrenador() {
   const cumplidasSemana = asignacionesSemana.filter(({ jugadorId, date }) => registroPorJugadorFecha.has(`${jugadorId}::${date}`)).length;
   const adherenciaActual = asignacionesSemana.length ? Math.round((cumplidasSemana / asignacionesSemana.length) * 100) : null;
 
-  // "Quién necesita atención": variación de la carga media de cada jugador
-  // esta semana vs. la anterior. INTERINO: pendiente de sustituir por el
-  // motor previsto/real (carga real vs. cargaSugerida de cada tarea, ±5%)
-  // documentado en Fase 6 — eso requiere extraer calcularSugeridaPct1rm /
-  // mejorE1rmPorClave de Diseño de sesiones a una utilidad compartida, que
-  // no se ha hecho todavía. Bloque CMJ y tareas de Resistencia quedan fuera
-  // por no ser carga comparable de la misma forma.
-  const lunesAnterior = sumarDiasFecha(lunes, -7);
-  const domingoAnterior = sumarDiasFecha(lunes, -1);
-  const cargaMedia = (jugadorId, desde, hasta) => {
-    const regs = equipoHistory.filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= desde && it.date <= hasta);
-    if (!regs.length) return null;
-    return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
-  };
-  // Serie reciente para el sparkline de cada fila: los últimos registros
-  // REALES de carga de ese jugador (mismo filtro que cargaMedia — sin CMJ
-  // ni Resistencia, con cargaReal numérico), ordenados por fecha y
-  // recortados a los últimos 5. Sin límite de "esta semana": si la
-  // trayectoria reciente cae parcialmente en la semana anterior no pasa
-  // nada, sigue siendo dato real del jugador. Con menos de 2 puntos no hay
-  // trayectoria que dibujar (un punto no es una línea) — se deja vacía y el
-  // sparkline simplemente no se pinta para esa fila, en vez de rellenar con
-  // valores inventados.
-  const serieRecienteJugador = (jugadorId) => {
-    const regs = equipoHistory
-      .filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null)
-      .slice()
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    return regs.slice(-5).map((it) => Number(it.cargaReal));
-  };
-  // Nombres de ejercicio + nº de tareas reales de esta semana para la línea
-  // de detalle bajo cada jugador en "Quién necesita atención" (mockup:
-  // "Sentadilla, press banca · 6 tareas") — mismo filtro que cargaMedia
-  // (real, con carga registrada, sin CMJ ni Resistencia) para que la
-  // metadata cuadre exactamente con el % mostrado al lado.
-  const detalleTareasSemanaJugador = (jugadorId) => {
-    const regs = equipoHistory.filter((it) => it.jugadorId === jugadorId && it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= lunes && it.date <= hoy);
-    const nombres = [...new Set(regs.map((it) => it.name).filter(Boolean))];
-    return { nombresEjercicios: nombres, tareasCount: regs.length };
-  };
+  // "Quién necesita atención" (ENT-01): cómo está cada jugador ESTA semana
+  // frente a su nivel habitual, ejercicio a ejercicio. Antes era la media de
+  // kg de todos los ejercicios mezclados (sentadilla con curl), que no
+  // significaba nada. Ahora, por cada ejercicio+equipo con dato esta semana
+  // y antes, se compara el e1RM estimado (o las reps al fallo si no lleva
+  // carga) — ver calcularCambiosE1rm, la misma lógica que ve el jugador en
+  // su pantalla — y el resultado del jugador es la media de esas variaciones
+  // (cada ejercicio pesa igual). Una media puede esconder una caída fuerte
+  // en un solo básico (sentadilla -10 % con dominadas +10 % da 0 %), así
+  // que si el ejercicio que más ha bajado cae 12 % o más, ESE es el titular
+  // de la fila y del semáforo, y el detalle explica la media.
+  // Tareas de Resistencia y bloque CMJ quedan fuera por no ser carga
+  // comparable de la misma forma.
+  const itemsPorJugador = new Map();
+  equipoHistory.forEach((it) => {
+    if (!itemsPorJugador.has(it.jugadorId)) itemsPorJugador.set(it.jugadorId, []);
+    itemsPorJugador.get(it.jugadorId).push(it);
+  });
   const variaciones = activos
     .map((p) => {
-      const actual = cargaMedia(p.id, lunes, hoy);
-      const anterior = cargaMedia(p.id, lunesAnterior, domingoAnterior);
-      if (actual == null || anterior == null || anterior === 0) return null;
-      const pct = ((actual - anterior) / anterior) * 100;
-      return { jugador: p, pct, serieReciente: serieRecienteJugador(p.id), ...detalleTareasSemanaJugador(p.id) };
+      const cambios = calcularCambiosE1rm(itemsPorJugador.get(p.id) || [], lunes, hoy);
+      if (!cambios.length) return null;
+      const pctMedia = cambios.reduce((sum, c) => sum + c.pct, 0) / cambios.length;
+      const ordenados = [...cambios].sort((a, b) => a.pct - b.pct);
+      const peor = ordenados[0];
+      const mejor = ordenados[ordenados.length - 1];
+      const usaPeor = cambios.length > 1 && peor.pct <= -12 && peor.pct < pctMedia;
+      const pct = usaPeor ? peor.pct : pctMedia;
+      // El sparkline enseña el ejercicio que explica el semáforo: el que
+      // más ha bajado si el jugador va a la baja, el que más ha subido si no.
+      const guia = usaPeor || pct < 0 ? peor : mejor;
+      return {
+        jugador: p,
+        pct,
+        pctMedia,
+        usaPeor,
+        serieReciente: guia.serie,
+        nombresEjercicios: ordenados.map((c) => c.nombre),
+        tareasCount: cambios.reduce((sum, c) => sum + c.nRegistros, 0),
+        nEjercicios: cambios.length,
+        peor,
+      };
     })
     .filter(Boolean)
     .sort((a, b) => a.pct - b.pct);
-  const atencionSemaforo = (pct) => (pct <= -8 ? "red" : pct < 0 ? "amber" : "green");
+  // Umbrales sobre la media de variaciones de e1RM: el e1RM sale de un RIR
+  // reportado por el jugador, así que oscila unos puntos de una semana a
+  // otra sin que haya pasado nada. Hasta -3 % se considera ruido (verde).
+  const atencionSemaforo = (pct) => (pct <= -8 ? "red" : pct < -3 ? "amber" : "green");
 
   // "Pendientes de hoy" (antes "Usuarios"): solo jugadores activos que
   // todavía no han registrado la sesión de hoy — si hoy no hay sesión
@@ -4036,9 +4194,9 @@ function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenH
               <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Quién necesita atención</div>
               <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
             </div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>Variación de carga media vs. la semana pasada</div>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>Fuerza estimada (e1RM) esta semana vs. su nivel habitual</div>
             {variaciones.length === 0 ? (
-              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay suficiente carga registrada esta semana y la anterior para comparar.</div>
+              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay ejercicios repetidos esta semana con historial previo para comparar.</div>
             ) : (
               <ListaExpandibleDashboardReal
                 items={variaciones}
@@ -4257,7 +4415,7 @@ function sparklinePuntos(valores) {
 // muchos jugadores sin que cada uno ocupe tanto alto — el % ya dice lo
 // esencial, el detalle no aporta tanto como para pagar ese espacio en móvil.
 function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
-  const { jugador, pct, serieReciente, nombresEjercicios, tareasCount } = variacion;
+  const { jugador, pct, pctMedia, usaPeor, serieReciente, nombresEjercicios, tareasCount, nEjercicios, peor } = variacion;
   const metaTareas = tareasCount ? `${(nombresEjercicios || []).slice(0, 2).join(", ")}${(nombresEjercicios || []).length > 2 ? "…" : ""} · ${tareasCount} tarea${tareasCount === 1 ? "" : "s"}` : "";
   const positivo = pct >= 0;
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
@@ -4312,8 +4470,22 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
       {fila}
       <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
         {metaTareas && <div style={{ marginBottom: 2 }}>{metaTareas}</div>}
-        Carga media {positivo ? "por encima" : "por debajo"} de la semana pasada ({positivo ? "+" : ""}
-        {pct.toFixed(0)}%).
+        {usaPeor ? (
+          <>
+            {peor.nombre} ha bajado un {Math.abs(peor.pct).toFixed(0)}% respecto a su nivel habitual (fuerza estimada, e1RM). La media de sus {nEjercicios} ejercicios es {pctMedia > 0 ? "+" : ""}
+            {pctMedia.toFixed(0)}%.
+          </>
+        ) : (
+          <>
+            Fuerza estimada (e1RM) {positivo ? "por encima" : "por debajo"} de su nivel habitual en {nEjercicios} ejercicio{nEjercicios === 1 ? "" : "s"} ({positivo ? "+" : ""}
+            {pct.toFixed(0)}%).
+            {peor && nEjercicios > 1 && peor.pct < -3 && (
+              <div style={{ marginTop: 2 }}>
+                Mayor descenso: {peor.nombre} ({peor.pct.toFixed(0)}%)
+              </div>
+            )}
+          </>
+        )}
       </div>
     </details>
   );
@@ -4591,6 +4763,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
               ? ` (${(t.materiales || []).find((m) => EQUIPOS_AMBIGUOS.includes(m))})`
               : ""}
             {t.rirReal !== "" && t.rirReal != null ? ` · RIR${t.rirReal}` : ""}
+            {t.seriesHechas !== "" && t.seriesHechas != null ? ` · ${t.seriesHechas}${t.sets ? `/${t.sets}` : ""} series` : ""}
             {t.cambioPct != null && (
               <span style={{ color: t.cambioPct > 0 ? ds.success : t.cambioPct < 0 ? ds.warning : ds.inkMuted, fontWeight: 700 }}>
                 {" "}
@@ -5650,6 +5823,7 @@ function construirItemsHistorial(registros, tareasById, ejerciciosById, sesiones
       cargaReal: r.carga_kg ?? "",
       rirReal: r.rir ?? "",
       repsReal: r.reps_hechas ?? "",
+      seriesHechas: r.series_hechas ?? "",
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
@@ -8720,6 +8894,25 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 </>
               )}
             </div>
+            {(() => {
+              const pautadas = Number(tarea.series);
+              if (!Number.isFinite(pautadas) || pautadas < 1 || pautadas > 8) return null;
+              const elegidas = registro.series !== "" && registro.series != null ? Number(registro.series) : pautadas;
+              const opciones = Array.from({ length: Math.min(pautadas + 2, 10) }, (_, i) => i + 1);
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <EtiquetaCampoReal>SERIES HECHAS (PAUTADAS: {pautadas})</EtiquetaCampoReal>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {opciones.map((n) => (
+                      <ChipSeleccionableReal key={n} activo={elegidas === n} onClick={() => onCambiarRegistro({ ...registro, series: n })}>
+                        {n}
+                      </ChipSeleccionableReal>
+                    ))}
+                  </div>
+                  <div style={{ fontSize: 11, color: ds.inkMuted }}>Solo toca un número si hiciste más o menos series de las pautadas.</div>
+                </div>
+              );
+            })()}
             {tarea.pideRir === false && (
               // Carga ligera (<65% 1RM): a esa intensidad el RIR autopercibido
               // pierde fiabilidad, así que no se le pide al jugador. La carga
@@ -9168,6 +9361,19 @@ function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConR
   );
 }
 
+// Series completadas de una tarea de fuerza/core (solo un número, no el
+// detalle serie a serie — registrar cada serie es demasiado tedioso en el
+// gimnasio). Devuelve {series_hechas} o {} si no aplica. Sin tocar nada, se
+// asume "como pautado". Junto a la serie top (kg x reps x RIR) permite
+// estimar el volumen: series x reps x kg.
+function seriesHechasDeRegistro(tarea, draft) {
+  if (tarea.esResistencia || tarea.esCmj) return {};
+  const pautadas = Number(tarea.series);
+  if (!Number.isFinite(pautadas) || pautadas < 1) return {};
+  const elegidas = draft?.series !== "" && draft?.series != null ? Number(draft.series) : pautadas;
+  return { series_hechas: Number.isFinite(elegidas) && elegidas >= 0 ? Math.round(elegidas) : pautadas };
+}
+
 function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [players, , playersLoaded] = usePlayers();
   const player = players.find((p) => p.id === presetPlayerId) || null;
@@ -9285,7 +9491,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       const r = registrosByTarea.get(id);
       if (r && r.enviado === false) {
         hechoInicial[id] = true;
-        registroInicial[id] = { reps: r.reps_hechas ?? "", carga: r.carga_kg ?? "", rir: r.rir ?? "", subtipo: r.subtipo_corporal || "" };
+        registroInicial[id] = { reps: r.reps_hechas ?? "", carga: r.carga_kg ?? "", rir: r.rir ?? "", subtipo: r.subtipo_corporal || "", series: r.series_hechas ?? "" };
       }
     });
     if (Object.keys(hechoInicial).length) {
@@ -9294,6 +9500,60 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       setRegistrosDraft((prev) => ({ ...registroInicial, ...prev }));
     }
   }, [sesionActual, yaEnviadaAntes, tareaIdsSesionActual, registrosByTarea]);
+
+  // DEV-06: copia local del borrador (ver claveBorradorLocal). Se restaura
+  // una sola vez por sesión, una vez cargados los registros del servidor, y
+  // GANA sobre el borrador del servidor: es siempre igual o más reciente
+  // (se escribe en cada cambio; el del servidor, solo al guardar sin enviar).
+  const claveBorradorActual = player && sesionActual ? claveBorradorLocal(player.id, sesionActual.id, date) : null;
+  const localRestauradoRef = useRef(null);
+  const omitirEscrituraLocalRef = useRef(false);
+  useEffect(() => {
+    if (!claveBorradorActual || !registrosLoaded || tareaIdsSesionActual.length === 0) return;
+    if (yaEnviadaAntes) {
+      borrarBorradorLocal(claveBorradorActual); // ya enviada (quizá desde otro dispositivo): la copia local sobra
+      return;
+    }
+    if (localRestauradoRef.current === claveBorradorActual) return;
+    localRestauradoRef.current = claveBorradorActual;
+    limpiarBorradoresLocalesAntiguos(date);
+    const local = leerBorradorLocal(claveBorradorActual);
+    if (!local) return;
+    const idsValidos = new Set(tareaIdsSesionActual.map(String)); // por si el entrenador cambió la sesión desde entonces
+    const hecho = {};
+    Object.entries(local.hecho || {}).forEach(([id, v]) => {
+      if (v && idsValidos.has(id)) hecho[id] = true;
+    });
+    const registrosLocales = {};
+    Object.entries(local.registros || {}).forEach(([id, v]) => {
+      if (idsValidos.has(id) && v && typeof v === "object") registrosLocales[id] = v;
+    });
+    if (!Object.keys(hecho).length && !Object.keys(registrosLocales).length) return;
+    omitirEscrituraLocalRef.current = true; // el siguiente render trae justo lo que acabamos de leer: no hace falta reescribirlo
+    setHechoDraft((prev) => ({ ...prev, ...hecho }));
+    setRegistrosDraft((prev) => ({ ...prev, ...registrosLocales }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [claveBorradorActual, registrosLoaded, yaEnviadaAntes, tareaIdsSesionActual.length]);
+  useEffect(() => {
+    if (!claveBorradorActual || localRestauradoRef.current !== claveBorradorActual) return; // aún sin restaurar: no pisar la copia guardada con un estado vacío
+    if (omitirEscrituraLocalRef.current) {
+      omitirEscrituraLocalRef.current = false;
+      return;
+    }
+    if (yaEnviadaAntes || enviado) return;
+    const idsValidos = new Set(tareaIdsSesionActual.map(String)); // el estado puede contener tareas de OTRA sesión de hoy
+    const hecho = {};
+    Object.entries(hechoDraft).forEach(([id, v]) => {
+      if (v && idsValidos.has(id)) hecho[id] = true;
+    });
+    const registrosLocales = {};
+    Object.entries(registrosDraft).forEach(([id, v]) => {
+      if (idsValidos.has(id)) registrosLocales[id] = v;
+    });
+    if (!Object.keys(hecho).length && !Object.keys(registrosLocales).length) borrarBorradorLocal(claveBorradorActual);
+    else guardarBorradorLocal(claveBorradorActual, { hecho, registros: registrosLocales, ts: Date.now() });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hechoDraft, registrosDraft, claveBorradorActual]);
 
   if (!playersLoaded) return <LoadingBlock />;
   if (!player) {
@@ -9897,7 +10157,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const getRegistro = (id) => {
     if (registrosDraft[id]) return registrosDraft[id];
     const t = tareasVisualesById.get(id);
-    return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "" };
+    return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "", series: "" };
   };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
@@ -9967,6 +10227,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           carga_kg: draft.carga,
           rir: draft.rir,
           subtipo_corporal: draft.subtipo || "",
+          // Series completadas (un toque en la tarea): lo que marcó el
+          // jugador, o las pautadas si no tocó nada. Solo si la tarea tiene
+          // un nº de series numérico y no es Resistencia ni CMJ.
+          ...seriesHechasDeRegistro(t, draft),
           enviado: enviadoFinal,
           // Solo hace falta guardar el "recordatorio" de con qué parámetros
           // se hizo mientras el registro sigue siendo un borrador — una vez
@@ -9989,6 +10253,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // haya confirmado éxito antes de dar el envío por bueno.
       const ok = nuevos.length ? await saveRegistrosJugador([...resto, ...nuevos]) : true;
       if (ok) {
+        borrarBorradorLocal(claveBorradorActual); // enviado de verdad: la copia local ya no hace falta
         setEnviado(true);
       } else {
         setErrorEnvio("No se pudo enviar. Sigues aquí con tu progreso guardado en pantalla — comprueba tu conexión y vuelve a intentarlo.");
@@ -10880,6 +11145,71 @@ function calcularRecordsCargaJugador(items) {
     });
   });
   return records;
+}
+
+// Variación de fuerza por ejercicio+equipo (ENT-01), compartida por el
+// Dashboard del entrenador ("Quién necesita atención") y la ficha del
+// jugador. Es la MISMA lógica que "Cambios esta semana" de la pantalla del
+// jugador: por cada ejercicio+equipo compara el valor estimado de lo último
+// hecho dentro de la ventana [inicio, fin] con la media de todo lo hecho
+// ANTES de la ventana. El valor es el e1RM (carga / %1RM del RTF = reps +
+// RIR) si ese ejercicio maneja carga, o las reps al fallo (reps + RIR) si
+// nunca la lleva (p. ej. dominadas). Sustituye a la media de kg de todos los
+// ejercicios mezclados, que no significaba nada (una semana con más
+// ejercicios ligeros parecía un "descenso" sin serlo). Solo entran
+// ejercicios con dato dentro de la ventana Y antes de ella; sin eso no hay
+// nada que comparar. `serie` son los últimos valores del ejercicio (para el
+// sparkline).
+function calcularCambiosE1rm(items, inicio, fin) {
+  const validos = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ");
+  const equiposPorNombre = new Map();
+  const porClave = new Map();
+  const claveConCarga = new Set();
+  validos.forEach((it) => {
+    const equipo = materialEfectivo(it);
+    if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
+    equiposPorNombre.get(it.name).add(equipo);
+    const clave = `${it.name}::${equipo}`;
+    if (!porClave.has(clave)) porClave.set(clave, { nombre: it.name, equipo, regs: [] });
+    porClave.get(clave).regs.push(it);
+    if (it.cargaReal !== "" && it.cargaReal != null) claveConCarga.add(clave);
+  });
+  const etiqueta = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
+  const cambios = [];
+  porClave.forEach(({ nombre, equipo, regs }, clave) => {
+    const conCarga = claveConCarga.has(clave);
+    const valorEstimado = (it) => {
+      const reps = Number(it.repsReal);
+      const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
+      if (Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
+      if (conCarga) {
+        const carga = Number(it.cargaReal);
+        if (!carga || Number.isNaN(carga) || reps > REPS_MAX_RIR_FIABLE) return null;
+        const pct = pct1RMporRTF(reps + rir);
+        return pct ? carga / pct : null;
+      }
+      return reps + rir;
+    };
+    const conValor = regs
+      .map((it) => ({ it, v: valorEstimado(it) }))
+      .filter((x) => x.v != null)
+      .sort((a, b) => (a.it.date < b.it.date ? -1 : a.it.date > b.it.date ? 1 : 0));
+    const dentro = conValor.filter((x) => x.it.date >= inicio && x.it.date <= fin);
+    const antes = conValor.filter((x) => x.it.date < inicio);
+    if (!dentro.length || !antes.length) return;
+    const mediaAntes = antes.reduce((sum, x) => sum + x.v, 0) / antes.length;
+    if (mediaAntes <= 0) return;
+    const ultimo = dentro[dentro.length - 1];
+    cambios.push({
+      clave,
+      nombre: etiqueta(nombre, equipo),
+      pct: ((ultimo.v - mediaAntes) / mediaAntes) * 100,
+      conCarga,
+      nRegistros: dentro.length,
+      serie: conValor.slice(-5).map((x) => x.v),
+    });
+  });
+  return cambios;
 }
 
 // A partir de una marca previa con OTRO diseño (reps/RIR distinto al de
@@ -13438,6 +13768,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     return cantidadInicial > 0 ? "automatico" : "no_incluir";
   });
   const [tareasPreventivoManual, setTareasPreventivoManual] = useState([]);
+  // Al editar una sesión ya guardada, los ejercicios de Movilidad y
+  // Preventivo que ya tiene asignados se CONSERVAN tal cual: no se vuelve a
+  // sortear ni se avanza el puntero de rotación (antes cada guardado
+  // cambiaba los ejercicios que veían los jugadores sin avisar). Solo se
+  // vuelven a sortear si el entrenador toca a propósito ese bloque (cambia
+  // el modo o la cantidad), o para fechas nuevas que aún no tienen tarea.
+  const [conservarMovilidad, setConservarMovilidad] = useState(isEditing);
+  const [conservarPreventivo, setConservarPreventivo] = useState(isEditing);
 
   // Paso activo en el nav de la izquierda — el constructor (columna central)
   // solo renderiza el contenido de este bloque, en vez de los 7 apilados.
@@ -13510,7 +13848,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
 
   // Carga de sesión existente (edición): reparte tareas/circuitos en su bloque real.
   useEffect(() => {
-    if (!isEditing || !ejerciciosLoaded || borradorCargadoRef.current) return;
+    if (!isEditing || !ejerciciosLoaded || !playersLoaded || borradorCargadoRef.current) return;
     borradorCargadoRef.current = true;
     let cancelled = false;
     (async () => {
@@ -13644,8 +13982,59 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         });
         return mapa;
       };
-      setMovilidadTareaIdsPorFecha(mapaPorFecha("Movilidad"));
-      setPreventivoTareaIdsPorFecha(mapaPorFechaArray("Preventivo"));
+      const movilidadPorFecha = mapaPorFecha("Movilidad");
+      const preventivoPorFecha = mapaPorFechaArray("Preventivo");
+      setMovilidadTareaIdsPorFecha(movilidadPorFecha);
+      setPreventivoTareaIdsPorFecha(preventivoPorFecha);
+
+      // ---- Inferir el modo real de Movilidad y Preventivo a partir de lo
+      // que ya está guardado (el modo no se persiste como columna).
+      const tareasMovilidad = tareas.filter((t) => t.bloque_sesion === "Movilidad").sort((a, b) => String(a.fecha || "").localeCompare(String(b.fecha || "")));
+      if (tareasMovilidad.length === 0) {
+        // Nada guardado: la sesión se diseñó sin Movilidad. Antes se abría
+        // como "automático" y el siguiente guardado le añadía una.
+        setModoMovilidad("no_incluir");
+        setConservarMovilidad(false);
+      } else {
+        const poolMovIds = new Set(ejercicios.filter((e) => e.bloque === "Movilidad").map((e) => e.id));
+        const todasEnPool = tareasMovilidad.every((t) => poolMovIds.has(t.ejercicio_id));
+        const mismoEjercicio = tareasMovilidad.every((t) => t.ejercicio_id === tareasMovilidad[0].ejercicio_id);
+        if (!todasEnPool && mismoEjercicio) {
+          // Un ejercicio que no sale del pool rotativo solo puede venir de
+          // una elección manual — se recupera como tal.
+          setModoMovilidad("manual");
+          setTareaMovilidadManual(toDraft(tareasMovilidad[0]));
+          setConservarMovilidad(false);
+        } else {
+          setModoMovilidad("automatico"); // se conservan los ya asignados (conservarMovilidad)
+        }
+      }
+
+      const fechasPrev = Object.keys(preventivoPorFecha);
+      if (fechasPrev.length === 0) {
+        // Sin tareas de Preventivo guardadas: el bloque no se aplicó al
+        // guardar (desactivado, o sin categoría común). Se abre como "no
+        // incluir" para que editar no le añada un Preventivo por sorpresa;
+        // basta cambiar el modo si se quiere activar.
+        setModoPreventivo("no_incluir");
+        setConservarPreventivo(false);
+      } else {
+        const tareasPorFechaPrev = fechasPrev.sort().map((f) => tareas.filter((t) => t.bloque_sesion === "Preventivo" && (t.fecha || "") === f));
+        const firmas = tareasPorFechaPrev.map((ts) => ts.map((t) => t.ejercicio_id).join("|"));
+        const todasIguales = firmas.every((f) => f === firmas[0]);
+        const catComun = categoriaComunEntreJugadores(sesionExistente.jugadores_destino ?? null, players);
+        const poolPrevIds = new Set(ejercicios.filter((e) => e.bloque === "Preventivo" && catComun && e.categoria_preventiva_id === catComun).map((e) => e.id));
+        const todasEnPoolPrev = tareasPorFechaPrev.every((ts) => ts.every((t) => poolPrevIds.has(t.ejercicio_id)));
+        if (!todasEnPoolPrev && todasIguales) {
+          // El automático solo genera tareas con una categoría común y del
+          // pool de esa categoría; si no cumplen, fueron elegidas a mano.
+          setModoPreventivo("manual");
+          setTareasPreventivoManual(tareasPorFechaPrev[0].map(toDraft));
+          setConservarPreventivo(false);
+        } else {
+          setModoPreventivo("automatico");
+        }
+      }
       setPreviousTareaIds(tareas.map((t) => t.id));
       setPreviousCircuitoIds(circuitos.map((c) => c.id));
       setCargandoExistente(false);
@@ -13654,7 +14043,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, ejerciciosLoaded]);
+  }, [isEditing, ejerciciosLoaded, playersLoaded]);
 
   const addFecha = () => {
     if (!nuevaFecha) return;
@@ -13747,7 +14136,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         // esto en false, así que bootstrapJugador_ (que filtra por
         // s.enviada) sigue sin mostrárselo, y en Programación se distingue
         // con la etiqueta "BORRADOR" mezclada entre las próximas.
-        enviada: !comoBorrador,
+        //
+        // Una sesión que YA estaba publicada nunca se despublica al guardar
+        // (antes, "Guardar borrador" sobre una sesión publicada la quitaba
+        // del móvil de los jugadores). Solo un borrador de verdad —sesión
+        // nueva o que ya era borrador— se guarda sin publicar.
+        enviada: comoBorrador ? isEditing && !!sesionExistente?.enviada : true,
       };
       const savedSesion = await api.save("sesiones", sesionRecord);
 
@@ -13932,8 +14326,17 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           .filter((e) => e.bloque === "Movilidad")
           .slice()
           .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
+        // Conservar lo ya asignado: la tarea de esa fecha se deja intacta
+        // (ni se sortea ni se avanza el puntero) y se marca para que el
+        // borrado final no la elimine. Solo se sortea para fechas nuevas.
+        const fechasASortear = [];
+        for (const fecha of fechas) {
+          const idExistente = movilidadTareaIdsPorFecha[fecha];
+          if (conservarMovilidad && idExistente) keepTareaIds.add(idExistente);
+          else fechasASortear.push(fecha);
+        }
         if (poolMovilidad.length) {
-          for (const fecha of fechas) {
+          for (const fecha of fechasASortear) {
             const elegido = await elegirSiguienteRotacion("movilidad", poolMovilidad);
             if (!elegido) continue;
             const saved = await api.save("tareas", {
@@ -13994,14 +14397,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           }
         }
       } else if (modoPreventivo === "automatico" && preventivoCantidad > 0) {
-        const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
+        // Conservar lo ya asignado en las fechas que ya tienen Preventivo.
+        const fechasPreventivoASortear = [];
+        for (const fecha of fechas) {
+          const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
+          if (conservarPreventivo && idsExistentes.length) idsExistentes.forEach((id) => keepTareaIds.add(id));
+          else fechasPreventivoASortear.push(fecha);
+        }
+        const catId = fechasPreventivoASortear.length ? categoriaComunEntreJugadores(targetPlayerIds, players) : null;
         if (catId) {
           const poolPreventivo = ejercicios
             .filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId)
             .slice()
             .sort((a, b) => (Number(a.orden_rotacion) || 999) - (Number(b.orden_rotacion) || 999));
           if (poolPreventivo.length) {
-            for (const fecha of fechas) {
+            for (const fecha of fechasPreventivoASortear) {
               const elegidos = await elegirVariosRotacion(catId, poolPreventivo, preventivoCantidad);
               const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
               for (let i = 0; i < elegidos.length; i++) {
@@ -14478,7 +14888,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 )}
                 {bloqueActivo === "movilidad" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={modoMovilidad} onChange={(e) => setModoMovilidad(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+                    <select value={modoMovilidad} onChange={(e) => { setModoMovilidad(e.target.value); setConservarMovilidad(false); }} style={campoSelectReal({ maxWidth: 220 })}>
                       <option value="automatico">Automático (pool rotativo)</option>
                       <option value="manual">Manual (elegir ejercicio)</option>
                       <option value="no_incluir">No incluir</option>
@@ -14486,9 +14896,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     {modoMovilidad === "automatico" &&
                       (() => {
                         const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
+                        const nAsignadas = Object.keys(movilidadTareaIdsPorFecha).length;
                         return (
                           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                            {poolMov.length
+                            {conservarMovilidad && nAsignadas
+                              ? "Se conservan los ejercicios de Movilidad ya asignados a esta sesión. Cambia el modo si quieres volver a sortearlos."
+                              : poolMov.length
                               ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
                               : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
                           </div>
@@ -14515,7 +14928,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 )}
                 {bloqueActivo === "preventivo" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={modoPreventivo} onChange={(e) => setModoPreventivo(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
+                    <select value={modoPreventivo} onChange={(e) => { setModoPreventivo(e.target.value); setConservarPreventivo(false); }} style={campoSelectReal({ maxWidth: 220 })}>
                       <option value="automatico">Automático (pool por categoría)</option>
                       <option value="manual">Manual (elegir ejercicios)</option>
                       <option value="no_incluir">No incluir</option>
@@ -14527,7 +14940,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                             <button
                               type="button"
-                              onClick={() => setPreventivoCantidad((v) => Math.max(0, v - 1))}
+                              onClick={() => { setPreventivoCantidad((v) => Math.max(0, v - 1)); setConservarPreventivo(false); }}
                               style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
                             >
                               −
@@ -14537,7 +14950,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                             </span>
                             <button
                               type="button"
-                              onClick={() => setPreventivoCantidad((v) => v + 1)}
+                              onClick={() => { setPreventivoCantidad((v) => v + 1); setConservarPreventivo(false); }}
                               style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
                             >
                               +
@@ -14545,6 +14958,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                           </div>
                           <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría común detectada"}</span>
                         </div>
+                        {conservarPreventivo && Object.keys(preventivoTareaIdsPorFecha).length > 0 && (
+                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                            Se conservan los ejercicios de Preventivo ya asignados a esta sesión. Cambia la cantidad o el modo si quieres volver a sortearlos.
+                          </div>
+                        )}
                         {preventivoCantidad > 0 &&
                           (() => {
                             const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
@@ -14812,7 +15230,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         </div>
 
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? "Guardado como borrador." : "Guardado y enviado."}</div>}
+        {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
           <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
@@ -14822,10 +15240,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               <button
                 onClick={() => guardar(true)}
                 disabled={guardando}
-                title="Se guarda tal cual está, sin fecha obligatoria, y no se envía al jugador hasta que la publiques"
+                title={isEditing && sesionExistente?.enviada ? "Guarda los cambios sin cambiar el estado: la sesión sigue publicada para los jugadores" : "Se guarda tal cual está, sin fecha obligatoria, y no se envía al jugador hasta que la publiques"}
                 style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
-                {guardando ? "Guardando..." : "Guardar borrador"}
+                {guardando ? "Guardando..." : isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar borrador"}
               </button>
               <button
                 onClick={() => guardar(false)}
@@ -15516,16 +15934,16 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
   const adherenciaAnterior = calcularAdherencia(fechasAsignadas(lunesAnterior, domingoAnterior));
   const deltaAdherencia = adherenciaActual != null && adherenciaAnterior != null ? adherenciaActual - adherenciaAnterior : null;
 
-  const cargaMedia = (desde, hasta) => {
-    const regs = items.filter(
-      (it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null && it.date >= desde && it.date <= hasta
-    );
-    if (!regs.length) return null;
-    return regs.reduce((s, it) => s + Number(it.cargaReal), 0) / regs.length;
-  };
-  const cargaActual = cargaMedia(lunes, hoy);
-  const cargaAnterior = cargaMedia(lunesAnterior, domingoAnterior);
-  const variacionPct = cargaActual != null && cargaAnterior != null && cargaAnterior !== 0 ? ((cargaActual - cargaAnterior) / cargaAnterior) * 100 : null;
+  // ENT-01: misma lógica que "Quién necesita atención" del Dashboard (media
+  // de las variaciones de e1RM por ejercicio+equipo, ver calcularCambiosE1rm).
+  const cambiosE1rmSemana = calcularCambiosE1rm(items, lunes, hoy);
+  const variacionPct = (() => {
+    if (!cambiosE1rmSemana.length) return null;
+    const media = cambiosE1rmSemana.reduce((sum, c) => sum + c.pct, 0) / cambiosE1rmSemana.length;
+    const peor = Math.min(...cambiosE1rmSemana.map((c) => c.pct));
+    // Igual que en el Dashboard: si un solo ejercicio cae 12 % o más, no se esconde tras la media.
+    return cambiosE1rmSemana.length > 1 && peor <= -12 && peor < media ? peor : media;
+  })();
 
   // Racha (semanas cumpliendo el plan) — últimas 8 semanas de calendario,
   // igual límite superior "hoy" en la semana en curso que adherenciaActual.
@@ -15657,9 +16075,9 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
         />
         <MiniStat
           icon={<Dumbbell size={12} />}
-          label="Carga vs. sem."
+          label="Fuerza vs. habitual"
           value={variacionPct != null ? `${variacionPct > 0 ? "+" : ""}${Math.round(variacionPct)}%` : "—"}
-          sub={variacionPct == null ? "sin datos suficientes" : variacionPct <= -10 ? "caída relevante" : "dentro de lo normal"}
+          sub={variacionPct == null ? "sin datos suficientes" : variacionPct <= -8 ? "caída relevante" : variacionPct < -3 ? "algo por debajo" : "dentro de lo normal"}
         />
       </div>
 
@@ -16441,7 +16859,7 @@ function ProgresoFichaJugadorReal({ jugador }) {
   const puntosVolumen = semanas.map((s) => {
     const series = items
       .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= s.inicio && it.date <= s.fin)
-      .reduce((sum, it) => sum + (Number(it.sets) || 0), 0);
+      .reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0);
     return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: series };
   });
   const adherenciaActualVal = puntosAdherencia[puntosAdherencia.length - 1]?.valor;
