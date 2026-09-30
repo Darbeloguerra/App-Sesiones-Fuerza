@@ -3469,7 +3469,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
     jugadoresGrupo.forEach((p) => {
       asignadas += asignadasPorJugador.get(p.id) || 0;
       cumplidas += cumplidasPorJugador.get(p.id) || 0;
-      if (registroPorJugadorFechaRoster.has(`${p.id}::${hoyRoster}`)) activosHoy++;
+      if (hechasRoster.has(`${p.id}::${hoyRoster}`)) activosHoy++;
     });
     return {
       jugadores: jugadoresGrupo,
@@ -4512,6 +4512,7 @@ function useDatosDashboardEntrenador() {
   // "Pendientes de hoy" (antes "Usuarios"): solo jugadores activos que
   // todavía no han registrado la sesión de hoy — si hoy no hay sesión
   // publicada, no hay nadie "pendiente" que mostrar.
+  const registroPorJugadorFecha = new Set(equipoHistory.map((it) => `${it.jugadorId}::${it.date}`));
   const pendientesHoy = sesionHoy ? activos.filter((p) => !registroPorJugadorFecha.has(`${p.id}::${hoy}`)) : [];
 
   return {
