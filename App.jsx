@@ -351,9 +351,12 @@ const ENTITY_TABLE = {
   // "pídesela tú"), ver sql/add_solicitudes_sesion.sql. Mismo patrón
   // genérico que notasJugador: tabla mínima, sin lógica especial aquí.
   solicitudesSesion: "solicitudes_sesion",
+  // Marcas de referencia de fuerza que introduce el entrenador (tops de serie
+  // históricos o tests), ver sql/add_referencias_fuerza.sql.
+  referenciasFuerza: "referencias_fuerza",
 };
 
-const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota", solicitudesSesion: "sol" };
+const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota", solicitudesSesion: "sol", referenciasFuerza: "ref" };
 function genId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
@@ -384,6 +387,7 @@ const NUMERIC_DEFAULTS = {
   circuitos: { rondas: null },
   tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null },
   registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null },
+  referenciasFuerza: { carga_kg: null, reps: null, rir: null },
 };
 function sanitizeNumericos(entity, out) {
   const cols = NUMERIC_DEFAULTS[entity];
@@ -861,6 +865,301 @@ function useCmjMicrociclos() {
 }
 
 
+
+
+
+// ---------- Datos por revisar (calidad de datos) ----------
+// Todo el análisis se apoya en lo que teclea el jugador (fuerza) y en el CSV
+// (CMJ). Un 1000 en vez de 100 kg distorsiona e1RM, semáforos y carga durante
+// semanas. Estas funciones marcan lo que se sale de lo habitual DE ESE JUGADOR
+// y ese ejercicio; nunca corrigen ni borran nada solas: decide el entrenador.
+function medianaNum(arr) {
+  if (!arr.length) return null;
+  const o = [...arr].sort((a, b) => a - b);
+  const m = Math.floor(o.length / 2);
+  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
+}
+function e1rmDeValores(carga, reps, rir) {
+  const c = Number(carga);
+  const r = Number(reps);
+  const ri = rir !== "" && rir != null ? Number(rir) : null;
+  if (!c || Number.isNaN(c) || Number.isNaN(r) || ri == null || Number.isNaN(ri) || r > REPS_MAX_RIR_FIABLE) return null;
+  const pct = pct1RMporRTF(r + ri);
+  return pct ? c / pct : null;
+}
+const MIN_REGISTROS_PARA_REVISAR = 4;
+function detectarRegistrosAtipicos(items) {
+  const candidatos = items.filter((it) => it.done && !it.esReferencia && !it.esResistencia && it.bloque !== "CMJ" && it.cargaOriginal !== "" && it.cargaOriginal != null);
+  const grupos = new Map();
+  candidatos.forEach((it) => {
+    const k = `${it.jugadorId ?? ""}::${it.name}::${materialEfectivo(it)}`;
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(it);
+  });
+  const res = [];
+  grupos.forEach((regs) => {
+    regs.forEach((it) => {
+      if (it.revisado || it.ignorar) return;
+      const motivos = [];
+      const carga = Number(it.cargaOriginal);
+      const reps = Number(it.repsOriginal);
+      const rir = it.rirOriginal !== "" && it.rirOriginal != null ? Number(it.rirOriginal) : null;
+      if (it.repsOriginal !== "" && Number.isFinite(reps) && reps > 50) motivos.push(`${reps} repeticiones es poco creíble`);
+      if (rir != null && Number.isFinite(rir) && (rir < 0 || rir > 10)) motivos.push(`RIR ${rir} fuera de rango (0-10)`);
+      const otros = regs.filter((o) => o !== it && !o.ignorar);
+      if (otros.length >= MIN_REGISTROS_PARA_REVISAR) {
+        const e1 = e1rmDeValores(it.cargaOriginal, it.repsOriginal, it.rirOriginal);
+        const e1Otros = otros.map((o) => e1rmDeValores(o.cargaOriginal, o.repsOriginal, o.rirOriginal)).filter((x) => x != null);
+        if (e1 != null && e1Otros.length >= MIN_REGISTROS_PARA_REVISAR) {
+          const med = medianaNum(e1Otros);
+          const ratio = e1 / med;
+          if (ratio > 1.35) motivos.push(`e1RM ${Math.round(e1)} kg: un ${Math.round((ratio - 1) * 100)} % por encima de su habitual (${Math.round(med)} kg)`);
+          else if (ratio < 0.6) motivos.push(`e1RM ${Math.round(e1)} kg: un ${Math.round((1 - ratio) * 100)} % por debajo de su habitual (${Math.round(med)} kg)`);
+        } else {
+          const cargas = otros.map((o) => Number(o.cargaOriginal)).filter((x) => x > 0);
+          if (cargas.length >= MIN_REGISTROS_PARA_REVISAR) {
+            const med = medianaNum(cargas);
+            if (carga > med * 2.2) motivos.push(`${carga} kg es más del doble de su carga habitual (${Math.round(med)} kg)`);
+            else if (carga < med * 0.35) motivos.push(`${carga} kg es mucho menos que su carga habitual (${Math.round(med)} kg)`);
+          }
+        }
+      }
+      if (motivos.length) res.push({ item: it, motivos });
+    });
+  });
+  return res.sort((a, b) => (a.item.date < b.item.date ? 1 : -1));
+}
+// CMJ: saltos (uno por jugador y día) cuya altura se aleja de su habitual.
+function detectarCmjAtipicos(saltos) {
+  const validos = saltos.filter((s) => s.altura != null && Number.isFinite(Number(s.altura)));
+  const res = [];
+  validos.forEach((s) => {
+    if (s.revisado) return;
+    const motivos = [];
+    const h = Number(s.altura);
+    if (h <= 5 || h > 90) motivos.push(`altura de ${h.toFixed(1)} cm no es plausible`);
+    const otros = validos.filter((o) => o !== s && !o.excluido).map((o) => Number(o.altura));
+    if (otros.length >= 5 && !s.excluido) {
+      const med = medianaNum(otros);
+      const ratio = h / med;
+      if (ratio > 1.25) motivos.push(`${h.toFixed(1)} cm: un ${Math.round((ratio - 1) * 100)} % por encima de su mediana (${med.toFixed(1)} cm)`);
+      else if (ratio < 0.75) motivos.push(`${h.toFixed(1)} cm: un ${Math.round((1 - ratio) * 100)} % por debajo de su mediana (${med.toFixed(1)} cm)`);
+    }
+    if (motivos.length) res.push({ salto: s, motivos });
+  });
+  return res.sort((a, b) => (String(a.salto.fecha) < String(b.salto.fecha) ? 1 : -1));
+}
+
+
+// ---------- Estado CMJ del equipo (para decidir al programar) ----------
+// El CSV del CMJ llega DESPUÉS de que los jugadores ya hayan hecho la fuerza
+// del día, así que no se puede intervenir antes de esa sesión. Lo útil es
+// saber, con el último test disponible, quién está en rojo/ámbar y de cuándo
+// es el dato, para ajustar la sesión de campo, la del día siguiente o lo que
+// se está programando. Devuelve Map jugadorId -> { status, fechaTest, altura }.
+function useEstadoCmjEquipo(players) {
+  const [estado, setEstado] = useState(() => sharedDataCache.get("estado_cmj_equipo") || null);
+  useEffect(() => {
+    if (!players.length) return undefined; // aún no hay jugadores: no se calcula ni se cachea vacío
+    if (sharedDataCache.has("estado_cmj_equipo")) {
+      setEstado(sharedDataCache.get("estado_cmj_equipo"));
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [saltosRes, microRes, umbralGuardado] = await Promise.all([
+          supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null),
+          supabase.from("cmj_microciclos").select("*"),
+          api.config("cmj_umbral"),
+        ]);
+        if (saltosRes.error || microRes.error) throw new Error("cmj");
+        const umbral = umbralGuardado || CMJ_UMBRAL_DEFECTO;
+        const porId = new Map(players.map((p) => [p.id, p]));
+        const filas = (saltosRes.data || [])
+          .filter((r) => !r.excluido && porId.has(r.jugador_id))
+          .map((r) => ({
+            jugadorId: r.jugador_id,
+            nombre: porId.get(r.jugador_id).name,
+            dateKey: r.fecha,
+            date: r.fecha_hora,
+            peso: r.peso,
+            hp0: r.hp0,
+            altura: r.altura,
+            fuerza: r.fuerza,
+            potencia: r.potencia,
+            velocidad: r.velocidad,
+            kineticsValid: r.kinetics_valid,
+            pesoValid: r.peso_valid,
+            hp0Valid: r.hp0_valid,
+          }));
+        const { players: construidos } = cmjBuildPlayers(filas, microRes.data || [], umbral.ambarPct, umbral.rojoPct, umbral.individualizar, umbral.protocoloDesde);
+        const mapa = new Map();
+        construidos.forEach((c) => {
+          const ultimo = c.sorted[c.sorted.length - 1];
+          mapa.set(c.jugadorId, { status: c.combinedStatus, fechaTest: String(ultimo?.dateKey || "").slice(0, 10), nombre: c.nombre });
+        });
+        sharedDataCache.set("estado_cmj_equipo", mapa);
+        if (!cancelled) setEstado(mapa);
+      } catch {
+        if (!cancelled) setEstado(new Map());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [players.length]);
+  return estado; // null mientras carga
+}
+function diasEntreFechas(desde, hasta) {
+  return Math.round((new Date(hasta + "T00:00:00") - new Date(desde + "T00:00:00")) / 86400000);
+}
+// Aviso para el entrenador: jugadores destinatarios en rojo/ámbar según el
+// último CMJ. Solo informa, no cambia nada.
+function AvisoCmjDestinatariosReal({ estado, players, targetPlayerIds, fechas }) {
+  if (!estado || !estado.size) return null;
+  const hoy = todayStr();
+  const destino = targetPlayerIds === null ? players.filter((p) => p.estado === "activo") : players.filter((p) => targetPlayerIds.includes(p.id));
+  const afectados = destino
+    .map((p) => ({ p, e: estado.get(p.id) }))
+    .filter(({ e }) => e && (e.status === "red" || e.status === "amber"))
+    .sort((a, b) => (a.e.status === b.e.status ? 0 : a.e.status === "red" ? -1 : 1));
+  if (!afectados.length) return null;
+  const haceMax = Math.max(...afectados.map(({ e }) => (e.fechaTest ? diasEntreFechas(e.fechaTest, hoy) : 0)));
+  const incluyeHoy = (fechas || []).includes(hoy);
+  return (
+    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.ink }}>
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>Estado según el último CMJ</div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
+        {afectados.map(({ p, e }) => (
+          <DsBadge key={p.id} tone={e.status === "red" ? "danger" : "accent"}>
+            {p.name} · {e.status === "red" ? "rojo" : "ámbar"}{e.fechaTest ? ` (${fmtDateShort(e.fechaTest)})` : ""}
+          </DsBadge>
+        ))}
+      </div>
+      <div style={{ fontSize: 11.5, color: ds.inkSecondary }}>
+        Dato del último test disponible{haceMax > 0 ? ` (hasta ${haceMax} día${haceMax === 1 ? "" : "s"} de antigüedad)` : ""}. {incluyeHoy ? "El CMJ de hoy suele llegar después de la fuerza: revísalo antes de programar mañana." : "Valora si conviene ajustar la carga de estos jugadores en esta sesión."}
+      </div>
+    </div>
+  );
+}
+
+
+// Programación: con el último CMJ, qué jugadores en rojo/ámbar tienen fuerza
+// hoy o mañana, para que el entrenador ajuste la sesión de campo o la del día
+// siguiente (el CMJ del día llega tras la sesión de fuerza).
+function AvisoCmjProgramacionReal({ estado, players, sesiones, hoy, onEditar }) {
+  if (!estado || !estado.size || !players?.length) return null;
+  const manana = sumarDiasFecha(hoy, 1);
+  const filas = [];
+  [hoy, manana].forEach((f) => {
+    sesiones
+      .filter((s) => s.enviada && (s.fechas || []).includes(f))
+      .forEach((s) => {
+        const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : players.filter((p) => p.estado === "activo").map((p) => p.id);
+        const afectados = destino
+          .map((id) => ({ p: players.find((x) => x.id === id), e: estado.get(id) }))
+          .filter(({ p, e }) => p && e && (e.status === "red" || e.status === "amber"));
+        if (afectados.length) filas.push({ fecha: f, sesion: s, afectados });
+      });
+  });
+  if (!filas.length) return null;
+  return (
+    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 18 }}>
+      <div style={{ fontWeight: 700, fontSize: 13, color: ds.ink, marginBottom: 6 }}>Jugadores a vigilar según el último CMJ</div>
+      {filas.map(({ fecha, sesion, afectados }) => (
+        <div key={`${fecha}-${sesion.id}`} style={{ fontSize: 12.5, color: ds.inkSecondary, marginBottom: 6 }}>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, marginRight: 8 }}>{fecha === hoy ? "HOY" : "MAÑANA"}</span>
+          <strong style={{ color: ds.ink }}>{sesion.nombre || sesion.objetivo || "Sesión"}</strong>
+          {" — "}
+          {afectados.map(({ p, e }, i) => (
+            <span key={p.id}>
+              {p.name} ({e.status === "red" ? "rojo" : "ámbar"}{e.fechaTest ? `, ${fmtDateShort(e.fechaTest)}` : ""}){i < afectados.length - 1 ? ", " : ""}
+            </span>
+          ))}
+          {" "}
+          <button onClick={() => onEditar(sesion)} style={{ background: "transparent", border: "none", color: ds.accent, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>Revisar sesión →</button>
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: ds.inkMuted }}>El CMJ de hoy llega después de la fuerza: estos avisos usan el último test disponible (la fecha entre paréntesis).</div>
+    </div>
+  );
+}
+
+// ---------- Referencias de fuerza (calibración del e1RM) ----------
+// El entrenador puede introducir la "top serie" (carga × reps @ RIR) que un
+// jugador hizo en el pasado, o el resultado de un test, para que el e1RM y las
+// cargas sugeridas se calibren sin esperar semanas de datos. Se convierten en
+// items sintéticos con la misma forma que los del historial (esReferencia) y
+// SOLO se pasan a los cálculos de e1RM / carga; nunca cuentan como sesión
+// hecha, volumen ni adherencia. Si la tabla aún no existe, no pasa nada: la
+// lista queda vacía y el resto de la app funciona igual.
+function referenciasComoItems(rows) {
+  return (rows || [])
+    .filter((r) => r.ejercicio && r.carga_kg != null && r.reps != null && r.rir != null)
+    .map((r) => ({
+      id: `ref:${r.id}`,
+      tareaId: null,
+      jugadorId: r.jugador_id,
+      date: normalizarFecha(r.fecha),
+      name: r.ejercicio,
+      done: true,
+      cargaReal: r.carga_kg,
+      repsReal: r.reps,
+      rirReal: r.rir,
+      seriesHechas: 0,
+      sets: 0,
+      bloque: "Fuerza",
+      esResistencia: false,
+      materiales: r.material && r.material !== "std" ? [r.material] : [],
+      subtipoCorporal: "",
+      esReferencia: true,
+      tipoReferencia: r.tipo || "historico",
+    }));
+}
+// jugadorId: las de un jugador. Con `todos: true` (vista de entrenador), las de
+// todo el equipo. Sin jugador y sin `todos` no carga nada (p. ej. mientras la
+// pantalla del jugador aún no sabe quién es).
+function useReferenciasFuerza(jugadorId, { todos = false } = {}) {
+  const inactivo = !jugadorId && !todos;
+  const cacheKey = `referencias_fuerza:${jugadorId || "todos"}`;
+  const [rows, setRows] = useState(() => sharedDataCache.get(cacheKey) || []);
+  const [loaded, setLoaded] = useState(() => sharedDataCache.has(cacheKey));
+  const [version, setVersion] = useState(0);
+  useEffect(() => {
+    if (inactivo) {
+      setLoaded(true);
+      return undefined;
+    }
+    if (version === 0 && sharedDataCache.has(cacheKey)) {
+      setRows(sharedDataCache.get(cacheKey));
+      setLoaded(true);
+      return undefined;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const filas = await api.list("referenciasFuerza", jugadorId ? { jugador_id: jugadorId } : undefined);
+        const propias = jugadorId ? filas.filter((r) => r.jugador_id === jugadorId) : filas;
+        if (cancelled) return;
+        sharedDataCache.set(cacheKey, propias);
+        setRows(propias);
+      } catch {
+        if (!cancelled) setRows([]);
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [cacheKey, version, jugadorId, inactivo]);
+  const recargar = () => {
+    [...sharedDataCache.keys()].filter((k) => String(k).startsWith("referencias_fuerza:")).forEach((k) => sharedDataCache.delete(k));
+    setVersion((v) => v + 1);
+  };
+  return { loaded, rows: inactivo ? [] : rows, items: inactivo ? [] : referenciasComoItems(rows), recargar };
+}
 
 // ---------- Adherencia ponderada por tareas (ENT-07) ----------
 // Antes una sesión contaba como cumplida si el jugador registraba CUALQUIER
@@ -2099,9 +2398,14 @@ function usePlayerHistory(playerId) {
       rir: t.rir,
       tipos: e.tags_descriptivos || [],
       done: !!r.hecho,
-      cargaReal: r.carga_kg ?? "",
-      rirReal: r.rir ?? "",
-      repsReal: r.reps_hechas ?? "",
+      cargaReal: r.ignorar ? "" : r.carga_kg ?? "",
+      cargaOriginal: r.carga_kg ?? "",
+      repsOriginal: r.reps_hechas ?? "",
+      rirOriginal: r.rir ?? "",
+      ignorar: !!r.ignorar,
+      revisado: !!r.revisado,
+      rirReal: r.ignorar ? "" : r.rir ?? "",
+      repsReal: r.ignorar ? "" : r.reps_hechas ?? "",
       seriesHechas: r.series_hechas ?? "",
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
@@ -2153,13 +2457,18 @@ function useEquipoHistory() {
       date: normalizarFecha(r.fecha),
       name: e.nombre || "",
       done: !!r.hecho,
-      cargaReal: r.carga_kg ?? "",
+      cargaReal: r.ignorar ? "" : r.carga_kg ?? "",
+      cargaOriginal: r.carga_kg ?? "",
+      repsOriginal: r.reps_hechas ?? "",
+      rirOriginal: r.rir ?? "",
+      ignorar: !!r.ignorar,
+      revisado: !!r.revisado,
       esResistencia: t.bloque_sesion === "Resistencia",
       bloque: t.bloque_sesion || "General",
       // Necesarios para calcular el e1RM por ejercicio+equipo (ENT-01, ver
       // calcularCambiosE1rm): reps y RIR realmente hechos, y el material.
-      repsReal: r.reps_hechas ?? "",
-      rirReal: r.rir ?? "",
+      repsReal: r.ignorar ? "" : r.reps_hechas ?? "",
+      rirReal: r.ignorar ? "" : r.rir ?? "",
       materiales: parseMateriales(t.material),
       subtipoCorporal: r.subtipo_corporal || "",
       sets: t.series,
@@ -4046,6 +4355,7 @@ function useDatosDashboardEntrenador() {
   const [grupos, , gruposLoaded] = useEntityList("grupos");
   const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { items: equipoHistory, loaded: historyLoaded } = useEquipoHistory();
+  const { items: refsEquipo, loaded: refsEquipoLoaded } = useReferenciasFuerza(null, { todos: true });
   const loaded = playersLoaded && gruposLoaded && progLoaded && historyLoaded;
 
   if (!loaded) return { loaded: false };
@@ -4163,7 +4473,7 @@ function useDatosDashboardEntrenador() {
   // Tareas de Resistencia y bloque CMJ quedan fuera por no ser carga
   // comparable de la misma forma.
   const itemsPorJugador = new Map();
-  equipoHistory.forEach((it) => {
+  [...equipoHistory, ...refsEquipo].forEach((it) => {
     if (!itemsPorJugador.has(it.jugadorId)) itemsPorJugador.set(it.jugadorId, []);
     itemsPorJugador.get(it.jugadorId).push(it);
   });
@@ -4679,6 +4989,7 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
   // Fase 2: registros de todo el equipo para etiquetar la carga de fuerza de
   // la semana junto a los jugadores en rojo (ya está en caché por el Dashboard).
   const { loaded: equipoFuerzaLoaded, items: equipoFuerza } = useEquipoHistory();
+  const { items: refsPanel } = useReferenciasFuerza(null, { todos: true });
   const [saltos, setSaltos] = useState([]);
   const [microciclos, setMicrociclos] = useState([]);
   const [umbral, setUmbral] = useState(null);
@@ -4688,7 +4999,7 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
     let cancelled = false;
     Promise.all([supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null), supabase.from("cmj_microciclos").select("*"), api.config("cmj_umbral")]).then(([saltosRes, microRes, umbralGuardado]) => {
       if (cancelled) return;
-      if (!saltosRes.error) setSaltos(saltosRes.data || []);
+      if (!saltosRes.error) setSaltos((saltosRes.data || []).filter((s) => !s.excluido));
       if (!microRes.error) setMicrociclos(microRes.data || []);
       setUmbral(umbralGuardado || CMJ_UMBRAL_DEFECTO);
       setLoaded(true);
@@ -4745,10 +5056,23 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
   const ventanasPanel = cmjVentanasMicrociclo(microciclos);
   const hoyPanel = todayStr();
   const microActualPanel = cmjMicroDeFecha(hoyPanel, ventanasPanel) || [...ventanasPanel].reverse().find((v) => v.desde <= hoyPanel) || null;
+  // Registros de fuerza atípicos pendientes de revisar, por jugador.
+  const pendientesRevisar = new Map();
+  if (equipoFuerzaLoaded) {
+    detectarRegistrosAtipicos(equipoFuerza).forEach(({ item }) => pendientesRevisar.set(item.jugadorId, (pendientesRevisar.get(item.jugadorId) || 0) + 1));
+  }
+  // Series de fuerza que ya ha registrado hoy: el CMJ llega después, así el
+  // entrenador ve si un jugador en rojo ya ha entrenado fuerza (y cuánto).
+  const seriesFuerzaHoy = (jugadorId) =>
+    equipoFuerzaLoaded
+      ? equipoFuerza
+          .filter((it) => it.jugadorId === jugadorId && it.done && it.bloque === "Fuerza" && it.date === hoyPanel)
+          .reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0)
+      : 0;
   const etiquetaFuerzaJugador = (jugadorId) => {
     if (!equipoFuerzaLoaded || !microActualPanel) return null;
     const cargas = calcularCargaFuerzaPorMicro(
-      equipoFuerza.filter((it) => it.jugadorId === jugadorId),
+      [...equipoFuerza, ...refsPanel].filter((it) => it.jugadorId === jugadorId),
       ventanasPanel
     );
     return etiquetaCargaFuerza(cargas.find((c) => c.microId === microActualPanel.id));
@@ -4832,11 +5156,41 @@ function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById })
                 ) : (
                   <span style={{ color: ds.accent, fontWeight: 700 }}>{j.name}</span>
                 )}
-                {etiquetaFuerzaJugador(j.id) && <span style={{ color: ds.inkMuted }}> ({etiquetaFuerzaJugador(j.id)})</span>}
+                {(etiquetaFuerzaJugador(j.id) || seriesFuerzaHoy(j.id) > 0) && (
+                  <span style={{ color: ds.inkMuted }}>
+                    {" "}({[etiquetaFuerzaJugador(j.id), seriesFuerzaHoy(j.id) > 0 ? `hoy ya: ${seriesFuerzaHoy(j.id)} series de fuerza` : null].filter(Boolean).join(" · ")})
+                  </span>
+                )}
                 {i < jugadoresRojo.length - 1 ? ", " : ""}
               </React.Fragment>
             ))}{" "}
             — por debajo de su umbral individual, revisa antes de subir carga esta semana.
+          </p>
+        </div>
+      )}
+
+      {pendientesRevisar.size > 0 && (
+        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", marginTop: 10 }}>
+          <AlertTriangle size={13} color={ds.warning} style={{ flexShrink: 0, marginTop: 1 }} />
+          <p style={{ fontSize: 11, color: ds.ink, lineHeight: 1.45, margin: 0 }}>
+            Datos de fuerza por revisar:{" "}
+            {[...pendientesRevisar.entries()].map(([jid, n], i, arr) => {
+              const j = playersById?.get(jid);
+              if (!j) return null;
+              return (
+                <React.Fragment key={jid}>
+                  {onOpenHistory ? (
+                    <button onClick={() => onOpenHistory(j)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.accent, fontWeight: 700, fontSize: 11, borderBottom: `1px solid ${ds.accentBorderSubtle}` }}>
+                      {j.name}
+                    </button>
+                  ) : (
+                    <span style={{ fontWeight: 700 }}>{j.name}</span>
+                  )}{" "}
+                  ({n}){i < arr.length - 1 ? ", " : "."}
+                </React.Fragment>
+              );
+            })}{" "}
+            Un dato mal tecleado distorsiona su e1RM; ábrelo en Progreso para corregirlo o ignorarlo.
           </p>
         </div>
       )}
@@ -6947,7 +7301,7 @@ function CmjEstadoActualReal() {
       supabase.from("cmj_microciclos").select("*"),
       api.config("cmj_umbral"),
     ]);
-    if (!saltosRes.error) setSaltos(saltosRes.data || []);
+    if (!saltosRes.error) setSaltos((saltosRes.data || []).filter((s) => !s.excluido));
     if (!microRes.error) setMicrociclos(microRes.data || []);
     setUmbral(umbralGuardado || CMJ_UMBRAL_DEFECTO);
     setLoaded(true);
@@ -7187,7 +7541,7 @@ function CmjRankingReal() {
       supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null),
       supabase.from("cmj_microciclos").select("*"),
     ]);
-    if (!saltosRes.error) setSaltos(saltosRes.data || []);
+    if (!saltosRes.error) setSaltos((saltosRes.data || []).filter((s) => !s.excluido));
     if (!microRes.error) setMicrociclos(microRes.data || []);
     setLoaded(true);
   }, []);
@@ -7917,6 +8271,7 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
   // Antes: sesiones -> tareas en cadena (ejercicios en paralelo) — 2
   // peticiones encadenadas. Ahora: 1 sola, con las 3 cosas ya juntas.
   const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
+  const estadoCmjProg = useEstadoCmjEquipo(players || []);
   const [editingSesion, setEditingSesion] = useState(null);
   const [plantillaSesion, setPlantillaSesion] = useState(null);
   const [showEditor, setShowEditor] = useState(false);
@@ -8042,6 +8397,7 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
         </div>
+        <AvisoCmjProgramacionReal estado={estadoCmjProg} players={players || []} sesiones={sesiones} hoy={today} onEditar={editar} />
         {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
         {hoy.length > 0 && (
           <div style={{ marginBottom: 20 }}>
@@ -9585,6 +9941,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const registrosByTarea = new Map(registros.map((r) => [r.tarea_id, r]));
   const registrosEnviadosByTarea = new Map(registros.filter((r) => r.enviado !== false).map((r) => [r.tarea_id, r]));
   const { loaded: historyLoaded, items: historyItems } = usePlayerHistory(player?.id);
+  // Marcas de referencia que el entrenador ha introducido: calibran el e1RM y
+  // la carga sugerida desde el primer día (no cuentan como sesión hecha).
+  const { items: refItems } = useReferenciasFuerza(player?.id);
 
   // Adherencia semanal para la cabecera del dashboard (P5 — Fase 3): mismo
   // cálculo que ya usa el entrenador en ResumenFichaJugadorReal
@@ -9608,7 +9967,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       supabase.from("cmj_microciclos").select("*"),
     ]).then(([saltosRes, microRes]) => {
       if (cancelled) return;
-      setCmjSaltos(saltosRes.error ? [] : saltosRes.data || []);
+      setCmjSaltos(saltosRes.error ? [] : (saltosRes.data || []).filter((s) => !s.excluido));
       setCmjMicrociclos(microRes.error ? [] : microRes.data || []);
     });
     return () => { cancelled = true; };
@@ -9968,7 +10327,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return { fecha, etiqueta, pautado, estado, esHoy };
   });
 
-  const registrosConCarga = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
+  const registrosConCarga = [...historyItems, ...refItems].filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
   // A efectos de cuantificación y progreso, el mismo ejercicio hecho con
   // equipos distintos (p. ej. Sentadilla en Multipower vs. Sentadilla con
@@ -9984,7 +10343,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // ejercicio con más de un equipo — si siempre lo hace igual, no hace
   // falta repetir "(Barra)" en todas partes.
   const equiposPorNombre = new Map();
-  historyItems
+  [...historyItems, ...refItems]
     .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
     .forEach((it) => {
       const eq = materialEfectivo(it);
@@ -11520,7 +11879,7 @@ function calcularCargaFuerzaPorMicro(items, ventanas) {
       });
   });
   const cargas = ventanas.map((v) => {
-    const enMicro = fuerza.filter((it) => it.date >= v.desde && it.date <= v.hasta);
+    const enMicro = fuerza.filter((it) => !it.esReferencia && it.date >= v.desde && it.date <= v.hasta);
     const series = enMicro.reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0);
     const pcts = enMicro.map((it) => pctPorItem.get(it.id)).filter((x) => x != null && Number.isFinite(x));
     const fechasPesadas = [...new Set(enMicro.filter((it) => (pctPorItem.get(it.id) ?? 0) >= 0.85).map((it) => it.date))].sort();
@@ -14123,6 +14482,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   // tocar el contenido de los bloques, no volver a repasar fechas/PARA/MD.
   const [detallesAbiertos, setDetallesAbiertos] = useState(!isEditing);
   const [microciclosDiseno, microsCargados] = useCmjMicrociclos();
+  const estadoCmjDiseno = useEstadoCmjEquipo(players);
   const ventanasDiseno = useMemo(() => cmjVentanasMicrociclo(microciclosDiseno), [microciclosDiseno]);
   const [fechas, setFechas] = useState(
     sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
@@ -15129,6 +15489,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             Un jugador ya envió esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
+        {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
         {esReutilizacion && !isEditing && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.inkSecondary }}>
             <span style={{ fontWeight: 700, color: ds.ink }}>Progresión de carga</span>
@@ -16408,8 +16769,9 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
   const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { loaded: historyLoaded, items } = usePlayerHistory(jugador.id);
   const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
+  const { items: refItems, loaded: refLoaded } = useReferenciasFuerza(jugador.id);
 
-  if (!playersLoaded || !progLoaded || !historyLoaded || !equipoLoaded) return <LoadingBlock />;
+  if (!playersLoaded || !progLoaded || !historyLoaded || !equipoLoaded || !refLoaded) return <LoadingBlock />;
 
   const hoy = todayStr();
   const lunes = inicioSemanaCalendario(hoy);
@@ -16449,7 +16811,7 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
 
   // ENT-01: misma lógica que "Quién necesita atención" del Dashboard (media
   // de las variaciones de e1RM por ejercicio+equipo, ver calcularCambiosE1rm).
-  const cambiosE1rmSemana = calcularCambiosE1rm(items, lunes, hoy);
+  const cambiosE1rmSemana = calcularCambiosE1rm([...items, ...refItems], lunes, hoy);
   const variacionPct = (() => {
     if (!cambiosE1rmSemana.length) return null;
     const media = cambiosE1rmSemana.reduce((sum, c) => sum + c.pct, 0) / cambiosE1rmSemana.length;
@@ -16519,7 +16881,7 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
   // compartido con la pestaña Progreso) — solo se muestra si es de los
   // últimos 30 días; si no hay ninguno reciente, se omite el banner en vez
   // de inventarlo.
-  const recordsCarga = calcularRecordsCargaJugador(items);
+  const recordsCarga = calcularRecordsCargaJugador([...items, ...refItems]);
   const recordMasReciente = recordsCarga.length
     ? [...recordsCarga].sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0))[0]
     : null;
@@ -16963,6 +17325,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
   useEffect(() => { cargar(); }, [cargar]);
   // Fase 2: historial de fuerza del jugador para cruzarlo con sus microciclos.
   const { loaded: histFuerzaLoaded, items: histFuerza } = usePlayerHistory(jugadorId);
+  const { items: refFS } = useReferenciasFuerza(jugadorId);
 
   function toggleTag(k) {
     setFiltroTags((prev) => {
@@ -16974,7 +17337,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
 
   if (!loaded) return <LoadingBlock />;
 
-  const filasParaMotor = saltos.map((s) => ({
+  const filasParaMotor = saltos.filter((s) => !s.excluido).map((s) => ({
     jugadorId: s.jugador_id,
     nombre: jugadorNombre,
     dateKey: s.fecha,
@@ -17110,7 +17473,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
 
   // Fase 2 · fuerza y salto por microciclo (ver calcularCargaFuerzaPorMicro).
   const ventanasFS = cmjVentanasMicrociclo(microciclos);
-  const cargasFS = histFuerzaLoaded ? calcularCargaFuerzaPorMicro(histFuerza, ventanasFS) : [];
+  const cargasFS = histFuerzaLoaded ? calcularCargaFuerzaPorMicro([...histFuerza, ...refFS], ventanasFS) : [];
   const filasFS = cargasFS
     .map((c) => {
       const r = player.microResults.get(c.microId);
@@ -17184,6 +17547,7 @@ function CmjFichaJugadorReal({ jugadorId, jugadorNombre }) {
         })}
       </div>
 
+      <DatosPorRevisarCmjReal saltos={saltos} onCambio={cargar} />
       <FuerzaSaltoMicrociclosReal filas={filasFS} resumen={resumenFS} cargando={!histFuerzaLoaded} jugadorNombre={jugadorNombre} />
 
       <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 9 }}>Evolución por variable — últimos {ultimos4.length} tests</div>
@@ -17425,6 +17789,434 @@ function MiniGraficaSemanalReal({ puntos, refValor, refLabel, resaltarMejor }) {
   );
 }
 
+
+
+// Mensaje común cuando falta ejecutar sql/add_calidad_datos.sql.
+function mensajeErrorCalidad(e) {
+  return /ignorar|revisado|excluido|column/i.test(e?.message || "") ? "Falta ejecutar sql/add_calidad_datos.sql en Supabase." : "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.";
+}
+
+// Registros de fuerza de un jugador que se salen de lo habitual. El
+// entrenador decide: está bien, corregir el dato, o ignorarlo (deja de contar
+// para e1RM y cargas, pero la sesión sigue contando como hecha).
+function DatosPorRevisarFuerzaReal({ items, onCambio }) {
+  const atipicos = detectarRegistrosAtipicos(items);
+  const ignorados = items.filter((it) => it.ignorar);
+  const [editando, setEditando] = useState(null);
+  const [form, setForm] = useState({ carga: "", reps: "", rir: "" });
+  const [error, setError] = useState("");
+  const [trabajando, setTrabajando] = useState(false);
+  if (!atipicos.length && !ignorados.length) return null;
+  const actualizar = async (id, cambios) => {
+    setError("");
+    setTrabajando(true);
+    try {
+      const { error: e } = await supabase.from("registros").update(cambios).eq("id", id);
+      if (e) throw new Error(e.message);
+      invalidateEntityCache("registros");
+      setEditando(null);
+      onCambio?.();
+    } catch (e) {
+      setError(mensajeErrorCalidad(e));
+    } finally {
+      setTrabajando(false);
+    }
+  };
+  const guardarCorreccion = (it) => {
+    const carga = Number(String(form.carga).replace(",", "."));
+    const reps = Number(form.reps);
+    const rir = Number(form.rir);
+    if (!Number.isFinite(carga) || carga <= 0 || !Number.isFinite(reps) || reps < 1 || form.rir === "" || !Number.isFinite(rir) || rir < 0) return setError("Revisa carga, repeticiones y RIR.");
+    actualizar(it.id, { carga_kg: carga, reps_hechas: reps, rir, revisado: true });
+  };
+  const campo = { background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12, padding: "5px 7px", width: 64 };
+  const textoRegistro = (it) => `${it.cargaOriginal} kg × ${it.repsOriginal || "?"}${it.rirOriginal !== "" ? ` @ RIR ${it.rirOriginal}` : ""}`;
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 4 }}>
+        Datos por revisar {atipicos.length > 0 && <DsBadge tone="danger">{atipicos.length}</DsBadge>}
+      </div>
+      <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 10 }}>
+        Registros que se salen de lo habitual de este jugador en ese ejercicio. Nada se cambia solo: si es un error de tecleo, corrígelo o ignóralo para que no distorsione el e1RM ni las cargas.
+      </div>
+      {error && <div style={{ fontSize: 12, color: ds.danger, marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {atipicos.map(({ item: it, motivos }) => (
+          <div key={it.id} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "10px 12px" }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted }}>{fmtDateShort(it.date)}</span>
+              <span style={{ fontWeight: 700, color: ds.ink, fontSize: 13 }}>{it.name}</span>
+              <span style={{ color: ds.inkSecondary, fontSize: 12.5 }}>{textoRegistro(it)}</span>
+            </div>
+            <div style={{ fontSize: 11.5, color: ds.warning, margin: "4px 0 8px" }}>{motivos.join(" · ")}</div>
+            {editando === it.id ? (
+              <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                <input placeholder="kg" inputMode="decimal" value={form.carga} onChange={(e) => setForm({ ...form, carga: e.target.value })} style={campo} />
+                <input placeholder="reps" inputMode="numeric" value={form.reps} onChange={(e) => setForm({ ...form, reps: e.target.value })} style={campo} />
+                <input placeholder="RIR" inputMode="numeric" value={form.rir} onChange={(e) => setForm({ ...form, rir: e.target.value })} style={campo} />
+                <DsButton size="sm" disabled={trabajando} onClick={() => guardarCorreccion(it)}>Guardar</DsButton>
+                <DsButton size="sm" variant="secondary" onClick={() => setEditando(null)}>Cancelar</DsButton>
+              </div>
+            ) : (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                <DsButton size="sm" variant="secondary" disabled={trabajando} onClick={() => actualizar(it.id, { revisado: true })}>Está bien</DsButton>
+                <DsButton size="sm" variant="secondary" disabled={trabajando} onClick={() => { setEditando(it.id); setForm({ carga: String(it.cargaOriginal), reps: String(it.repsOriginal), rir: String(it.rirOriginal) }); }}>Corregir</DsButton>
+                <DsButton size="sm" variant="secondary" disabled={trabajando} onClick={() => actualizar(it.id, { ignorar: true, revisado: true })}>Ignorar dato</DsButton>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {ignorados.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 6 }}>Ignorados (no cuentan para e1RM ni cargas):</div>
+          {ignorados.map((it) => (
+            <div key={it.id} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: ds.inkSecondary, padding: "4px 0" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, width: 60 }}>{fmtDateShort(it.date)}</span>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{it.name} · {textoRegistro(it)}</span>
+              <button onClick={() => actualizar(it.id, { ignorar: false })} disabled={trabajando} style={{ background: "transparent", border: "none", color: ds.accent, cursor: "pointer", fontSize: 11.5 }}>Restaurar</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Saltos CMJ que se alejan de la mediana del jugador. "Excluir" saca ese test
+// del análisis (semáforos, umbrales individuales); se puede restaurar.
+function DatosPorRevisarCmjReal({ saltos, onCambio }) {
+  const atipicos = detectarCmjAtipicos(saltos);
+  const excluidos = saltos.filter((s) => s.excluido);
+  const [error, setError] = useState("");
+  const [trabajando, setTrabajando] = useState(false);
+  if (!atipicos.length && !excluidos.length) return null;
+  const actualizar = async (s, cambios) => {
+    setError("");
+    setTrabajando(true);
+    try {
+      const { error: e } = await supabase.from("cmj_saltos").update(cambios).eq("nombre_csv", s.nombre_csv).eq("fecha", s.fecha);
+      if (e) throw new Error(e.message);
+      onCambio?.();
+    } catch (e) {
+      setError(mensajeErrorCalidad(e));
+    } finally {
+      setTrabajando(false);
+    }
+  };
+  return (
+    <div style={{ marginBottom: 20 }}>
+      <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 4 }}>
+        Saltos por revisar {atipicos.length > 0 && <DsBadge tone="danger">{atipicos.length}</DsBadge>}
+      </div>
+      <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 10 }}>
+        Tests cuya altura se aleja de lo habitual de este jugador (mala medición, salto con otra estrategia…). Si lo excluyes, deja de contar en semáforos y umbrales.
+      </div>
+      {error && <div style={{ fontSize: 12, color: ds.danger, marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {atipicos.map(({ salto: s, motivos }) => (
+          <div key={`${s.nombre_csv}|${s.fecha}`} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "10px 12px" }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "baseline" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted }}>{fmtDateShort(String(s.fecha).slice(0, 10))}</span>
+              <span style={{ fontSize: 12.5, color: ds.warning }}>{motivos.join(" · ")}</span>
+            </div>
+            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+              <DsButton size="sm" variant="secondary" disabled={trabajando} onClick={() => actualizar(s, { revisado: true })}>Está bien</DsButton>
+              <DsButton size="sm" variant="secondary" disabled={trabajando} onClick={() => actualizar(s, { excluido: true, revisado: true })}>Excluir del análisis</DsButton>
+            </div>
+          </div>
+        ))}
+      </div>
+      {excluidos.length > 0 && (
+        <div style={{ marginTop: 12 }}>
+          <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 6 }}>Excluidos del análisis:</div>
+          {excluidos.map((s) => (
+            <div key={`${s.nombre_csv}|${s.fecha}`} style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 12, color: ds.inkSecondary, padding: "4px 0" }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, width: 60 }}>{fmtDateShort(String(s.fecha).slice(0, 10))}</span>
+              <span style={{ flex: 1 }}>{Number(s.altura).toFixed(1)} cm</span>
+              <button onClick={() => actualizar(s, { excluido: false })} disabled={trabajando} style={{ background: "transparent", border: "none", color: ds.accent, cursor: "pointer", fontSize: 11.5 }}>Restaurar</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+// ---------- Informe exportable por jugador ----------
+// Resumen de fuerza, carga, CMJ y adherencia para compartir con el cuerpo
+// técnico o médico sin darles acceso a la app. Se abre como página imprimible
+// (Imprimir → Guardar como PDF) y se puede bajar el detalle en CSV.
+function escaparHtml(v) {
+  return String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function construirInformeHtml(d) {
+  const tabla = (cabeceras, filas) =>
+    filas.length
+      ? `<table><thead><tr>${cabeceras.map((h) => `<th>${escaparHtml(h)}</th>`).join("")}</tr></thead><tbody>${filas
+          .map((f) => `<tr>${f.map((c) => `<td>${escaparHtml(c)}</td>`).join("")}</tr>`)
+          .join("")}</tbody></table>`
+      : `<p class="nd">Sin datos en este periodo.</p>`;
+  const fmtF = (f) => (f ? String(f).slice(8, 10) + "/" + String(f).slice(5, 7) + "/" + String(f).slice(0, 4) : "");
+  return `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Informe · ${escaparHtml(d.nombre)}</title>
+<style>
+body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;color:#111;max-width:820px;margin:24px auto;padding:0 16px;line-height:1.4}
+h1{font-size:22px;margin:0 0 2px}h2{font-size:15px;margin:22px 0 6px;border-bottom:1px solid #ccc;padding-bottom:3px}
+.sub{color:#555;font-size:12.5px;margin-bottom:8px}.nd{color:#777;font-size:12.5px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}th,td{border:1px solid #d5d5d5;padding:4px 7px;text-align:left}th{background:#f3f3f3}
+.nota{font-size:11px;color:#666;margin-top:22px}
+@media print{body{margin:8mm}}
+</style></head><body>
+<h1>${escaparHtml(d.nombre)}</h1>
+<div class="sub">Informe generado el ${escaparHtml(fmtF(d.generado))} · datos de la app de fuerza y control de fatiga (CMJ)</div>
+<h2>Adherencia semanal (trabajo completado sobre lo asignado)</h2>
+${tabla(["Semana", "Adherencia"], d.adherencia.map((a) => [a.label, `${a.valor} %`]))}
+<h2>Fuerza: 1RM estimado por ejercicio</h2>
+${tabla(["Ejercicio", "e1RM actual (kg)", "Fecha", "Cambio vs. marca anterior"], d.records.map((r) => [r.nombre, r.valor, fmtF(r.fecha), r.pctSobreAnterior != null ? `${r.pctSobreAnterior > 0 ? "+" : ""}${Math.round(r.pctSobreAnterior)} %` : "—"]))}
+<h2>Cumplimiento de la pauta (últimas 4 semanas)</h2>
+${tabla(["Indicador", "Valor"], d.cumplimiento)}
+<h2>Carga de fuerza por microciclo</h2>
+${tabla(["Microciclo", "Series", "Sesiones", "Sesiones pesadas (≥85 % 1RM)", "Carga relativa"], d.cargas)}
+<h2>CMJ: últimos tests</h2>
+${tabla(["Fecha", "Altura (cm)", "Potencia rel. (W/kg)", "Fuerza rel. (N/kg)", "Velocidad (m/s)"], d.cmj)}
+<div class="nota">El 1RM se estima a partir de carga, repeticiones y RIR de las series registradas por el jugador (y de las marcas de referencia del entrenador). Es una estimación, no un test directo. La adherencia pondera el trabajo completado por bloque (fuerza pesa más que movilidad). Los datos marcados como atípicos e ignorados por el entrenador no se incluyen en los cálculos de fuerza.</div>
+</body></html>`;
+}
+function construirCsvRegistros(items, refItems) {
+  const cab = ["fecha", "ejercicio", "material", "series_pautadas", "series_hechas", "reps", "carga_kg", "rir", "e1rm_estimado_kg", "tipo", "ignorado"];
+  const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const filas = [...items.filter((it) => it.done && !it.esResistencia && it.bloque === "Fuerza"), ...refItems].map((it) => {
+    const e1 = e1rmDeValores(it.cargaOriginal ?? it.cargaReal, it.repsOriginal ?? it.repsReal, it.rirOriginal ?? it.rirReal);
+    return [
+      it.date,
+      it.name,
+      materialEfectivo(it),
+      it.esReferencia ? "" : it.sets ?? "",
+      it.esReferencia ? "" : it.seriesHechas ?? "",
+      it.repsOriginal ?? it.repsReal ?? "",
+      it.cargaOriginal ?? it.cargaReal ?? "",
+      it.rirOriginal ?? it.rirReal ?? "",
+      e1 != null ? Math.round(e1 * 10) / 10 : "",
+      it.esReferencia ? (it.tipoReferencia === "test" ? "referencia (test)" : "referencia (histórica)") : "sesión",
+      it.ignorar ? "sí" : "",
+    ].map(esc).join(",");
+  });
+  return "\uFEFF" + [cab.map(esc).join(","), ...filas].join("\n");
+}
+function descargarArchivo(nombre, contenido, tipo) {
+  const url = URL.createObjectURL(new Blob([contenido], { type: tipo }));
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = nombre;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+function BotonesInformeJugadorReal({ jugador, items, refItems, puntosAdherencia, cumplimiento, textoRir }) {
+  const [trabajando, setTrabajando] = useState(false);
+  const [error, setError] = useState("");
+  const abrirInforme = async () => {
+    setError("");
+    setTrabajando(true);
+    try {
+      const [saltosRes, microRes] = await Promise.all([
+        supabase.from("cmj_saltos").select("*").eq("jugador_id", jugador.id),
+        supabase.from("cmj_microciclos").select("*"),
+      ]);
+      const todos = [...items, ...refItems];
+      const ventanas = cmjVentanasMicrociclo(microRes.error ? [] : microRes.data || []);
+      const cargas = calcularCargaFuerzaPorMicro(todos, ventanas).filter((c) => c.hayDatos);
+      const saltos = (saltosRes.error ? [] : saltosRes.data || [])
+        .filter((r) => !r.excluido)
+        .sort((a, b) => (String(a.fecha) < String(b.fecha) ? 1 : -1))
+        .slice(0, 12);
+      const num = (v, d = 1) => (v == null || !Number.isFinite(Number(v)) ? "—" : Number(v).toFixed(d));
+      const cumpl = [];
+      if (cumplimiento.series) cumpl.push(["Series hechas / pautadas", `${cumplimiento.series.hechas} de ${cumplimiento.series.pautadas} (${cumplimiento.series.pct} %)`]);
+      if (cumplimiento.reps) cumpl.push(["Reps objetivo alcanzadas", `${cumplimiento.reps.ok} de ${cumplimiento.reps.total} tareas (${cumplimiento.reps.pct} %)`]);
+      if (cumplimiento.rirDif) cumpl.push(["RIR real vs. pauta", `${cumplimiento.rirDif.media > 0 ? "+" : ""}${cumplimiento.rirDif.media.toFixed(1)} (${textoRir(cumplimiento.rirDif.media)})`]);
+      const html = construirInformeHtml({
+        nombre: jugador.name,
+        generado: todayStr(),
+        adherencia: puntosAdherencia,
+        records: calcularRecordsCargaJugador(todos),
+        cumplimiento: cumpl,
+        cargas: cargas.map((c) => [`Micro ${c.numero} (${c.desde} → ${c.hasta})`, c.series, c.sesiones, c.fechasPesadas.length, c.nivel ? `${c.nivel} (${Math.round(c.relativa * 100)} % de su media)` : "—"]),
+        cmj: saltos.map((r) => [
+          String(r.fecha).slice(0, 10),
+          num(r.altura),
+          r.kinetics_valid && r.peso ? num(r.potencia / r.peso) : "—",
+          r.kinetics_valid && r.peso ? num(r.fuerza / r.peso) : "—",
+          num(r.velocidad, 2),
+        ]),
+      });
+      const w = window.open("", "_blank");
+      if (!w) throw new Error("popup");
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (e) {
+      setError(e?.message === "popup" ? "El navegador ha bloqueado la ventana del informe. Permite las ventanas emergentes para esta página." : "No se pudo generar el informe. Inténtalo de nuevo.");
+    } finally {
+      setTrabajando(false);
+    }
+  };
+  return (
+    <div style={{ marginTop: 22, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <DsButton variant="secondary" size="sm" disabled={trabajando} onClick={abrirInforme}>{trabajando ? "Preparando…" : "Informe imprimible (PDF)"}</DsButton>
+      <DsButton variant="secondary" size="sm" onClick={() => descargarArchivo(`fuerza_${jugador.name.replace(/\s+/g, "_")}_${todayStr()}.csv`, construirCsvRegistros(items, refItems), "text/csv;charset=utf-8")}>Descargar registros (CSV)</DsButton>
+      {error && <span style={{ fontSize: 12, color: ds.danger }}>{error}</span>}
+    </div>
+  );
+}
+
+// Editor de referencias de fuerza de un jugador (pestaña Progreso): tops de
+// serie de antes de usar la app, o resultados de un test. Con ellas el e1RM y
+// la carga sugerida quedan calibrados desde el primer día.
+function ReferenciasFuerzaFichaReal({ jugador, filas, recargar }) {
+  const [ejercicios, , ejerciciosLoaded] = useEntityList("ejercicios");
+  const [materiales] = useMaterialesDisponibles();
+  const vacio = { ejercicio: "", material: "std", fecha: todayStr(), carga: "", reps: "", rir: "", tipo: "historico", nota: "" };
+  const [form, setForm] = useState(vacio);
+  const [abierto, setAbierto] = useState(false);
+  const [guardando, setGuardando] = useState(false);
+  const [error, setError] = useState("");
+  const listaEjercicios = ejercicios.filter((e) => e.bloque === "Fuerza").map((e) => e.nombre).sort((a, b) => a.localeCompare(b));
+  const set = (campo, valor) => setForm((f) => ({ ...f, [campo]: valor }));
+  const guardar = async () => {
+    setError("");
+    const carga = Number(String(form.carga).replace(",", "."));
+    const reps = Number(form.reps);
+    const rir = Number(form.rir);
+    if (!form.ejercicio) return setError("Elige el ejercicio.");
+    if (!Number.isFinite(carga) || carga <= 0) return setError("Pon la carga en kg.");
+    if (!Number.isFinite(reps) || reps < 1 || reps > REPS_MAX_RIR_FIABLE) return setError(`Las repeticiones deben estar entre 1 y ${REPS_MAX_RIR_FIABLE}: con más, el e1RM deja de ser fiable.`);
+    if (form.rir === "" || !Number.isFinite(rir) || rir < 0 || rir > 10) return setError("Pon el RIR (0 = al fallo). Sin él no se puede estimar el 1RM.");
+    if (!form.fecha) return setError("Pon la fecha (aproximada si no la sabes).");
+    setGuardando(true);
+    try {
+      await api.save("referenciasFuerza", {
+        jugador_id: jugador.id,
+        ejercicio: form.ejercicio,
+        material: form.material || "std",
+        fecha: form.fecha,
+        carga_kg: carga,
+        reps,
+        rir,
+        tipo: form.tipo,
+        nota: form.nota.trim(),
+      });
+      setForm({ ...vacio, ejercicio: form.ejercicio, material: form.material });
+      setAbierto(false);
+      recargar();
+    } catch (e) {
+      setError(/referencias_fuerza|relation|does not exist/i.test(e?.message || "") ? "Falta crear la tabla: ejecuta sql/add_referencias_fuerza.sql en Supabase." : "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
+    } finally {
+      setGuardando(false);
+    }
+  };
+  const borrar = async (id) => {
+    try {
+      await api.delete("referenciasFuerza", id);
+      recargar();
+    } catch {
+      setError("No se pudo borrar.");
+    }
+  };
+  const campo = { background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px", width: "100%", boxSizing: "border-box" };
+  const etiqueta = { fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 4 };
+  const e1rmDe = (r) => {
+    const pct = pct1RMporRTF(Number(r.reps) + Number(r.rir));
+    return pct ? Math.round(Number(r.carga_kg) / pct) : null;
+  };
+  return (
+    <div style={{ marginTop: 22 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 9 }}>
+        <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink }}>Referencias de fuerza</div>
+        <DsButton size="sm" variant="secondary" onClick={() => setAbierto((v) => !v)}>{abierto ? "Cancelar" : "+ Añadir marca"}</DsButton>
+      </div>
+      <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 10 }}>
+        Top series de antes de usar la app o resultados de un test. Calibran el e1RM y las cargas sugeridas desde el primer día; no cuentan como sesión hecha ni como volumen.
+      </div>
+      {abierto && (
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: 14, marginBottom: 12, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 }}>
+          <label style={{ gridColumn: "1 / -1" }}>
+            <span style={etiqueta}>Ejercicio</span>
+            <select value={form.ejercicio} onChange={(e) => set("ejercicio", e.target.value)} style={campo} disabled={!ejerciciosLoaded}>
+              <option value="">Elige un ejercicio de Fuerza…</option>
+              {listaEjercicios.map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span style={etiqueta}>Material</span>
+            <select value={form.material} onChange={(e) => set("material", e.target.value)} style={campo}>
+              <option value="std">Sin material concreto</option>
+              {materiales.map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            <span style={etiqueta}>Fecha</span>
+            <input type="date" value={form.fecha} onChange={(e) => set("fecha", e.target.value)} style={campo} />
+          </label>
+          <label>
+            <span style={etiqueta}>Carga (kg)</span>
+            <input inputMode="decimal" value={form.carga} onChange={(e) => set("carga", e.target.value)} style={campo} />
+          </label>
+          <label>
+            <span style={etiqueta}>Reps</span>
+            <input inputMode="numeric" value={form.reps} onChange={(e) => set("reps", e.target.value)} style={campo} />
+          </label>
+          <label>
+            <span style={etiqueta}>RIR</span>
+            <input inputMode="numeric" value={form.rir} onChange={(e) => set("rir", e.target.value)} style={campo} placeholder="0 = al fallo" />
+          </label>
+          <label>
+            <span style={etiqueta}>Tipo</span>
+            <select value={form.tipo} onChange={(e) => set("tipo", e.target.value)} style={campo}>
+              <option value="historico">Top serie histórica</option>
+              <option value="test">Test</option>
+            </select>
+          </label>
+          <label style={{ gridColumn: "1 / -1" }}>
+            <span style={etiqueta}>Nota (opcional)</span>
+            <input value={form.nota} onChange={(e) => set("nota", e.target.value)} style={campo} />
+          </label>
+          {error && <div style={{ gridColumn: "1 / -1", fontSize: 12, color: ds.danger }}>{error}</div>}
+          <div style={{ gridColumn: "1 / -1" }}>
+            <DsButton onClick={guardar} disabled={guardando}>{guardando ? "Guardando…" : "Guardar marca"}</DsButton>
+          </div>
+        </div>
+      )}
+      {!abierto && error && <div style={{ fontSize: 12, color: ds.danger, marginBottom: 8 }}>{error}</div>}
+      {filas.length === 0 ? (
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "16px", textAlign: "center", color: ds.inkMuted, fontSize: 12 }}>
+          Sin marcas de referencia todavía.
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {[...filas].sort((a, b) => (normalizarFecha(a.fecha) < normalizarFecha(b.fecha) ? 1 : -1)).map((r) => (
+            <div key={r.id} style={{ display: "flex", alignItems: "center", gap: 10, background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "8px 12px", fontSize: 12.5 }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, width: 70, flexShrink: 0 }}>{fmtDateShort(normalizarFecha(r.fecha))}</span>
+              <span style={{ flex: 1, minWidth: 0, color: ds.ink, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {r.ejercicio}{r.material && r.material !== "std" ? ` (${r.material})` : ""}
+              </span>
+              <span style={{ color: ds.inkSecondary, flexShrink: 0 }}>{r.carga_kg} kg × {r.reps} @ RIR {r.rir}{e1rmDe(r) ? ` → e1RM ${e1rmDe(r)} kg` : ""}</span>
+              <DsBadge tone={r.tipo === "test" ? "accent" : "neutral"}>{r.tipo === "test" ? "Test" : "Histórica"}</DsBadge>
+              <button onClick={() => borrar(r.id)} title="Borrar marca" style={{ background: "transparent", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 15 }}>×</button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Pestaña "Progreso" de la ficha — NO es un placeholder: reutiliza el mismo
 // motor que ya está verificado en GraficaProgresoCargaReal/e1RM
 // (calcularRecordsCargaJugador, compartido con el record-callout de
@@ -17432,9 +18224,10 @@ function MiniGraficaSemanalReal({ puntos, refValor, refLabel, resaltarMejor }) {
 // semana y récords personales de los últimos 30 días — todo con datos
 // reales de usePlayerHistory, nada inventado.
 function ProgresoFichaJugadorReal({ jugador }) {
-  const { loaded, items } = usePlayerHistory(jugador.id);
+  const { loaded, items, retry: recargarHistorial } = usePlayerHistory(jugador.id);
   const { sesiones: sesionesProg, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
-  if (!loaded || !progLoaded) return <LoadingBlock />;
+  const { items: refItems, rows: refRows, loaded: refLoaded, recargar: recargarRefs } = useReferenciasFuerza(jugador.id);
+  if (!loaded || !progLoaded || !refLoaded) return <LoadingBlock />;
 
   const hoy = todayStr();
   const lunes = inicioSemanaCalendario(hoy);
@@ -17493,7 +18286,7 @@ function ProgresoFichaJugadorReal({ jugador }) {
   // record-callout de Resumen. Si ninguno cae en la ventana, se muestra el
   // estado vacío honesto en vez de forzar algo.
   const hace30Dias = sumarDiasFecha(hoy, -30);
-  const recordsRecientes = calcularRecordsCargaJugador(items)
+  const recordsRecientes = calcularRecordsCargaJugador([...items, ...refItems])
     .filter((r) => r.fecha >= hace30Dias)
     .sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
 
@@ -17504,6 +18297,7 @@ function ProgresoFichaJugadorReal({ jugador }) {
 
   return (
     <div>
+      <DatosPorRevisarFuerzaReal items={items} onCambio={recargarHistorial} />
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginBottom: 8 }}>
         <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px 10px" }}>
           <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
@@ -17574,6 +18368,8 @@ function ProgresoFichaJugadorReal({ jugador }) {
       <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 10 }}>
         Solo se listan los ejercicios donde se ha batido récord (1RM estimado) en los últimos 30 días — mismo motor que "Tus récords" del jugador y mismo lenguaje visual que las gráficas de fuerza.
       </div>
+      <ReferenciasFuerzaFichaReal jugador={jugador} filas={refRows} recargar={recargarRefs} />
+      <BotonesInformeJugadorReal jugador={jugador} items={items} refItems={refItems} puntosAdherencia={puntosAdherencia} cumplimiento={cumplimiento} textoRir={textoRir} />
     </div>
   );
 }
