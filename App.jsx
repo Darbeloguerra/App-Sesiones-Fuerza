@@ -1016,7 +1016,8 @@ function diasEntreFechas(desde, hasta) {
 }
 // Aviso para el entrenador: jugadores destinatarios en rojo/ámbar según el
 // último CMJ. Solo informa, no cambia nada.
-function AvisoCmjDestinatariosReal({ estado, players, targetPlayerIds, fechas }) {
+function AvisoCmjDestinatariosReal({ estado, players, targetPlayerIds, fechas, desplegable = false }) {
+  const [abierto, setAbierto] = useState(false);
   if (!estado || !estado.size) return null;
   const hoy = todayStr();
   const destino = targetPlayerIds === null ? players.filter((p) => p.estado === "activo") : players.filter((p) => targetPlayerIds.includes(p.id));
@@ -1027,9 +1028,29 @@ function AvisoCmjDestinatariosReal({ estado, players, targetPlayerIds, fechas })
   if (!afectados.length) return null;
   const haceMax = Math.max(...afectados.map(({ e }) => (e.fechaTest ? diasEntreFechas(e.fechaTest, hoy) : 0)));
   const incluyeHoy = (fechas || []).includes(hoy);
+  const nRojos = afectados.filter(({ e }) => e.status === "red").length;
+  const nAmbar = afectados.length - nRojos;
+  if (desplegable && !abierto) {
+    return (
+      <button
+        type="button"
+        onClick={() => setAbierto(true)}
+        style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "7px 12px", fontSize: 12, color: ds.ink, cursor: "pointer", textAlign: "left" }}
+      >
+        <ChevronDown size={14} style={{ flexShrink: 0 }} />
+        <span style={{ fontWeight: 700 }}>Estado CMJ de los destinatarios</span>
+        <span style={{ color: ds.inkSecondary }}>
+          {nRojos > 0 ? `${nRojos} en rojo` : ""}{nRojos > 0 && nAmbar > 0 ? " · " : ""}{nAmbar > 0 ? `${nAmbar} en ámbar` : ""}
+        </span>
+      </button>
+    );
+  }
   return (
-    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.ink }}>
-      <div style={{ fontWeight: 700, marginBottom: 4 }}>Estado según el último CMJ</div>
+    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: desplegable ? 0 : 18, fontSize: 12.5, color: ds.ink }}>
+      <div onClick={desplegable ? () => setAbierto(false) : undefined} style={{ fontWeight: 700, marginBottom: 4, cursor: desplegable ? "pointer" : undefined, display: "flex", alignItems: "center", gap: 6 }}>
+        {desplegable && <ChevronDown size={14} style={{ transform: "rotate(180deg)" }} />}
+        Estado según el último CMJ
+      </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 6 }}>
         {afectados.map(({ p, e }) => (
           <DsBadge key={p.id} tone={e.status === "red" ? "danger" : "accent"}>
@@ -14700,16 +14721,23 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar, grupos = [
 // los avisos pendientes. El tiempo es orientativo (ver estimarTareaSeg).
 function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloque }) {
   const { bloques, totalSeg, fuerza, avisos } = resumen;
+  const [abiertos, setAbiertos] = useState({});
+  const [masDatos, setMasDatos] = useState(false);
+  const alternar = (id) => setAbiertos((prev) => ({ ...prev, [id]: !prev[id] }));
+  const hayAbiertos = bloques.some((b) => abiertos[b.id]);
+  const todosAbiertos = (valor) => setAbiertos(Object.fromEntries(bloques.map((b) => [b.id, valor])));
   const stats = [
     fuerza.n ? `${fuerza.n} ej.` : null,
     fuerza.series ? `${fuerza.series} series` : null,
     fuerza.pct != null ? `${Math.round(fuerza.pct)} % 1RM` : null,
     fuerza.rir != null ? `RIR ${fuerza.rir.toFixed(1)}` : null,
   ].filter(Boolean);
+  const zonas = Object.entries(fuerza.porZona || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  const linkBtn = { background: "none", border: "none", color: ds.inkMuted, fontSize: 10.5, cursor: "pointer", padding: 0, textDecoration: "underline" };
   return (
     <aside
       style={{
-        width: anchoDesktop ? 250 : "100%",
+        width: anchoDesktop ? 280 : "100%",
         flexShrink: 0,
         boxSizing: "border-box",
         background: ds.surface,
@@ -14718,30 +14746,75 @@ function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloq
         padding: "10px 12px",
         position: anchoDesktop ? "sticky" : "static",
         top: 0,
+        maxHeight: anchoDesktop ? "100%" : undefined,
+        overflowY: anchoDesktop ? "auto" : "visible",
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
         <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 700 }}>Resumen</span>
         <span title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 16, fontWeight: 700, color: ds.accent }}>
           ~{formatearDuracionDiseno(totalSeg)}
         </span>
       </div>
-      {bloques.map((b) => (
-        <div
-          key={b.id}
-          onClick={() => onIrBloque(b.id)}
-          title={b.sinDato ? "Faltan series o repeticiones para estimar el tiempo" : b.detalle}
-          style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", borderRadius: 5, cursor: "pointer", background: bloqueActivo === b.id ? ds.accentSubtle : "transparent", opacity: b.vacio ? 0.5 : 1 }}
-        >
-          <span style={{ flex: 1, fontSize: 11.5, fontWeight: 600 }}>{b.nombre}</span>
-          {b.sinDato && <span style={{ color: ds.danger, fontSize: 11 }}>!</span>}
-          <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>{b.seg ? formatearDuracionDiseno(b.seg) : "—"}</span>
-        </div>
-      ))}
+      <div style={{ textAlign: "right", marginBottom: 4 }}>
+        <button type="button" onClick={() => todosAbiertos(!hayAbiertos)} style={linkBtn}>{hayAbiertos ? "Contraer todo" : "Ver detalle de todos"}</button>
+      </div>
+      {bloques.map((b) => {
+        const abierto = !!abiertos[b.id];
+        const puede = (b.items || []).length > 0;
+        return (
+          <div key={b.id} style={{ opacity: b.vacio ? 0.55 : 1 }}>
+            <div
+              onClick={() => (puede ? alternar(b.id) : onIrBloque(b.id))}
+              title={b.sinDato ? "Faltan series o repeticiones para estimar el tiempo" : b.detalle}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 5, cursor: "pointer", background: bloqueActivo === b.id ? ds.accentSubtle : "transparent" }}
+            >
+              <ChevronDown size={12} style={{ flexShrink: 0, color: ds.inkMuted, transition: "transform .15s", transform: abierto ? "rotate(180deg)" : "none", visibility: puede ? "visible" : "hidden" }} />
+              <span style={{ flex: 1, fontSize: 11.5, fontWeight: 600 }}>{b.nombre}</span>
+              {b.sinDato && <span style={{ color: ds.danger, fontSize: 11 }}>!</span>}
+              <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>{b.seg ? formatearDuracionDiseno(b.seg) : "—"}</span>
+            </div>
+            {abierto && puede && (
+              <div style={{ margin: "2px 0 6px 18px", paddingLeft: 8, borderLeft: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 5 }}>
+                {b.items.map((it, i) => (
+                  <div key={i} style={{ fontSize: 10.5, lineHeight: 1.35 }}>
+                    <div style={{ display: "flex", gap: 6 }}>
+                      <span style={{ flex: 1, minWidth: 0, fontWeight: 600, color: ds.ink }}>{it.titulo}</span>
+                      {it.seg ? <span style={{ fontFamily: dsF.mono, color: ds.inkMuted }}>{formatearDuracionDiseno(it.seg)}</span> : null}
+                    </div>
+                    {it.sub && <div style={{ color: ds.inkSecondary }}>{it.sub}</div>}
+                  </div>
+                ))}
+                <button type="button" onClick={() => onIrBloque(b.id)} style={{ ...linkBtn, alignSelf: "flex-start" }}>Ir al bloque</button>
+              </div>
+            )}
+          </div>
+        );
+      })}
       {stats.length > 0 && (
-        <div style={{ borderTop: `1px solid ${ds.border}`, marginTop: 6, paddingTop: 6, fontSize: 10.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
-          <span style={{ color: ds.inkMuted }}>Fuerza: </span>
-          {stats.join(" · ")}
+        <div style={{ borderTop: `1px solid ${ds.border}`, marginTop: 6, paddingTop: 6 }}>
+          <div style={{ fontSize: 10.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
+            <span style={{ color: ds.inkMuted }}>Fuerza: </span>
+            {stats.join(" · ")}
+          </div>
+          <button type="button" onClick={() => setMasDatos((v) => !v)} style={{ ...linkBtn, marginTop: 3 }}>{masDatos ? "Menos datos" : "Más datos de fuerza"}</button>
+          {masDatos && (
+            <div style={{ marginTop: 5, fontSize: 10.5, color: ds.inkSecondary, lineHeight: 1.5, display: "flex", flexDirection: "column", gap: 3 }}>
+              {fuerza.repsTotales > 0 && <div>Repeticiones totales: <strong>{fuerza.repsTotales}</strong></div>}
+              {fuerza.descansoMedio != null && <div>Descanso medio entre series: <strong>{Math.round(fuerza.descansoMedio)} s</strong></div>}
+              {fuerza.segTrabajo > 0 && <div>Duración del bloque de fuerza: <strong>{formatearDuracionDiseno(fuerza.segTrabajo)}</strong></div>}
+              {zonas.length > 0 && (
+                <div>
+                  Series por zona:
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 3 }}>
+                    {zonas.map(([z, n]) => (
+                      <span key={z} style={{ border: `1px solid ${ds.border}`, borderRadius: 5, padding: "1px 6px" }}>{z} · {n}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
       {avisos.length > 0 && (
@@ -15694,14 +15767,25 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     const segFuerza = estimarBloqueTareasSeg(tareasFuerza, circuitosFuerza, "Fuerza");
     const segCmj = cmjActiva ? 300 : 0;
     const nTareasDe = (tareas, circuitos) => tareas.length + circuitos.reduce((a, c) => a + (c.tareas?.length || 0), 0);
+    const lineaTarea = (t, bloque) => {
+      const unidad = t.modo === "tiempo" ? "s" : t.modo === "minutos" ? "min" : t.modo === "metros" ? "m" : "";
+      const volumen = t.series || t.cantidad ? `${t.series || "?"}×${t.cantidad || "?"}${unidad}${t.lateralidad === "unilateral" ? " (unilat.)" : ""}` : "sin series/reps";
+      const carga = bloque !== "Fuerza" ? "" : t.modoCarga === "pct1rm" ? (Number(t.pct1rm) > 0 ? `${t.pct1rm} %1RM` : "sin %1RM") : t.rir !== "" && t.rir != null ? `RIR ${t.rir}` : "sin RIR";
+      const desc = (Number(t.series) || 0) > 1 ? `desc. ${descansoEfectivoSeg(t, bloque)} s` : "";
+      return { titulo: t.nombre, sub: [volumen, carga, desc, t.alternaCon ? `↔ ${t.alternaConNombre || "otro"}` : ""].filter(Boolean).join(" · "), seg: estimarTareaSeg(t, bloque) };
+    };
+    const itemsDe = (tareas, circuitos, bloque) => [
+      ...tareas.map((t) => lineaTarea(t, bloque)),
+      ...circuitos.map((c, i) => ({ titulo: `Circuito ${i + 1} · ${Number(c.rondas) || 1} ronda(s)`, sub: (c.tareas || []).map((t) => t.nombre).join(", ") || "vacío", seg: estimarCircuitoSeg(c, bloque) })),
+    ];
     const bloques = [
-      { id: "activacion", nombre: "Activación", seg: segActivacion, detalle: activacionActiva ? "" : "no incluida", vacio: !activacionActiva },
-      { id: "movilidad", nombre: "Movilidad", seg: segMovilidad, detalle: segMovilidad ? "estimado" : "no incluida", vacio: !segMovilidad },
-      { id: "preventivo", nombre: "Preventivo", seg: segPreventivo, detalle: nPrev ? `${nPrev} ejercicio(s) · estimado` : "no incluido", vacio: !nPrev },
-      { id: "core", nombre: "Core", seg: segCore, detalle: nTareasDe(tareasCore, circuitosCore) ? `${nTareasDe(tareasCore, circuitosCore)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasCore, circuitosCore), sinDato: nTareasDe(tareasCore, circuitosCore) > 0 && !segCore },
-      { id: "resistencia", nombre: "Resistencia", seg: segResistencia, detalle: nTareasDe(tareasResistencia, circuitosResistencia) ? `${nTareasDe(tareasResistencia, circuitosResistencia)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasResistencia, circuitosResistencia), sinDato: nTareasDe(tareasResistencia, circuitosResistencia) > 0 && !segResistencia },
-      { id: "cmj", nombre: "CMJ", seg: segCmj, detalle: cmjActiva ? "estimado" : "no incluido", vacio: !cmjActiva },
-      { id: "fuerza", nombre: "Fuerza", seg: segFuerza, detalle: nTareasDe(tareasFuerza, circuitosFuerza) ? `${nTareasDe(tareasFuerza, circuitosFuerza)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasFuerza, circuitosFuerza), sinDato: nTareasDe(tareasFuerza, circuitosFuerza) > 0 && !segFuerza },
+      { id: "activacion", nombre: "Activación", seg: segActivacion, detalle: activacionActiva ? "" : "no incluida", vacio: !activacionActiva, items: activacionActiva ? [{ titulo: activacionEjercicioNombre || "Bici estática", sub: `${duracionActivacion || "—"} ${unidadActivacion === "minutos" ? "min" : "seg"}`, seg: segActivacion }] : [] },
+      { id: "movilidad", nombre: "Movilidad", seg: segMovilidad, detalle: segMovilidad ? "estimado" : "no incluida", vacio: !segMovilidad, items: segMovilidad ? [{ titulo: modoMovilidad === "automatico" ? "Ejercicio del pool rotativo" : tareaMovilidadManual?.nombre || "—", sub: modoMovilidad === "automatico" ? "se elige al guardar" : "elegido a mano", seg: segMovilidad }] : [] },
+      { id: "preventivo", nombre: "Preventivo", seg: segPreventivo, detalle: nPrev ? `${nPrev} ejercicio(s) · estimado` : "no incluido", vacio: !nPrev, items: nPrev ? (modoPreventivo === "automatico" ? [{ titulo: `${nPrev} ejercicio(s) de la categoría preventiva`, sub: "se eligen al guardar", seg: segPreventivo }] : tareasPreventivoManual.map((t) => ({ titulo: t.nombre, sub: "elegido a mano", seg: 180 }))) : [] },
+      { id: "core", nombre: "Core", seg: segCore, detalle: nTareasDe(tareasCore, circuitosCore) ? `${nTareasDe(tareasCore, circuitosCore)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasCore, circuitosCore), items: itemsDe(tareasCore, circuitosCore, "Core"), sinDato: nTareasDe(tareasCore, circuitosCore) > 0 && !segCore },
+      { id: "resistencia", nombre: "Resistencia", seg: segResistencia, detalle: nTareasDe(tareasResistencia, circuitosResistencia) ? `${nTareasDe(tareasResistencia, circuitosResistencia)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasResistencia, circuitosResistencia), items: [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].map((t) => ({ titulo: t.nombre, sub: [t.tipoResistenciaCardio ? t.tipoResistenciaCardio.toUpperCase() : "sin tipo", t.capacidad].filter(Boolean).join(" · "), seg: estimarResistenciaSeg(t) })), sinDato: nTareasDe(tareasResistencia, circuitosResistencia) > 0 && !segResistencia },
+      { id: "cmj", nombre: "CMJ", seg: segCmj, detalle: cmjActiva ? "estimado" : "no incluido", vacio: !cmjActiva, items: cmjActiva ? [{ titulo: "Medición CMJ", sub: "el jugador verá un aviso en su sesión", seg: segCmj }] : [] },
+      { id: "fuerza", nombre: "Fuerza", seg: segFuerza, detalle: nTareasDe(tareasFuerza, circuitosFuerza) ? `${nTareasDe(tareasFuerza, circuitosFuerza)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasFuerza, circuitosFuerza), items: itemsDe(tareasFuerza, circuitosFuerza, "Fuerza"), sinDato: nTareasDe(tareasFuerza, circuitosFuerza) > 0 && !segFuerza },
     ];
     const totalSeg = bloques.reduce((sum, b) => sum + b.seg, 0);
 
@@ -15713,6 +15797,17 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     const sinCarga = fuerzaTareas.filter((t) => (t.modoCarga === "pct1rm" ? !(Number(t.pct1rm) > 0) : t.rir === "" || t.rir == null));
     const sinSeries = fuerzaTareas.filter((t) => !(Number(t.series) > 0) || !(Number(t.cantidad) > 0));
 
+    const porZona = {};
+    tareasFuerza.forEach((t) => {
+      const z = zonaDe(t) || "Sin zona";
+      porZona[z] = (porZona[z] || 0) + (Number(t.series) || 0);
+    });
+    circuitosFuerza.forEach((c) => (c.tareas || []).forEach((t) => {
+      const z = zonaDe(t) || "Sin zona";
+      porZona[z] = (porZona[z] || 0) + (Number(c.rondas) || 1);
+    }));
+    const descansos = tareasFuerza.filter((t) => (Number(t.series) || 0) > 1).map((t) => descansoEfectivoSeg(t, "Fuerza"));
+    const repsTotales = tareasFuerza.reduce((sum, t) => sum + (t.modo === "reps" ? (Number(t.series) || 0) * (Number(t.cantidad) || 0) : 0), 0);
     const filasDescanso = tareasFuerza
       .filter((t) => (Number(t.series) || 0) > 1)
       .map((t) => ({ t, seg: descansoEfectivoSeg(t, "Fuerza"), propio: Number(t.descanso) > 0 }));
@@ -15725,7 +15820,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     if (targetPlayerIds !== null && !(targetPlayerIds || []).length) avisos.push("Sin jugadores destinatarios: no se podrá enviar.");
     if (sinCarga.length) avisos.push(`${sinCarga.length} ejercicio(s) de Fuerza sin %1RM ni RIR (${sinCarga.slice(0, 2).map((t) => t.nombre).join(", ")}${sinCarga.length > 2 ? "…" : ""}).`);
     if (sinSeries.length) avisos.push(`${sinSeries.length} ejercicio(s) de Fuerza sin series o repeticiones: no cuentan en el tiempo estimado.`);
-    return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs) }, filasDescanso, sugerencias, avisos };
+    return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs), porZona, descansoMedio: media(descansos), repsTotales, segTrabajo: segFuerza }, filasDescanso, sugerencias, avisos };
   })();
 
   return (
@@ -16245,7 +16340,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 )}
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
+                    {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
