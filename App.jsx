@@ -385,7 +385,7 @@ const NUMERIC_DEFAULTS = {
   ejercicios: { orden_rotacion: null },
   sesiones: { preventivo_activo: 0 },
   circuitos: { rondas: null },
-  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null },
+  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null, descanso_seg: null },
   registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null },
   referenciasFuerza: { carga_kg: null, reps: null, rir: null },
 };
@@ -1730,6 +1730,11 @@ function tareaADraft(t, ejerciciosById, opts = {}) {
     recuperacionUnidad: resistencia.recuperacionUnidad,
     circuito_id: nuevo ? "" : t.circuito_id || "",
     orden_en_circuito: nuevo ? "" : t.orden_en_circuito || "",
+    // Descanso entre series (segundos; "" = usar el recomendado) y ejercicio
+    // con el que se alterna en ese descanso (ver estimarSesionDiseno).
+    descanso: t.descanso_seg ?? "",
+    alternaCon: t.alterna_con || "",
+    alternaConNombre: t.alterna_con ? ejerciciosById.get(t.alterna_con)?.nombre || "" : "",
   };
 }
 
@@ -2215,7 +2220,7 @@ function useCategoriasPreventivas() {
 
 // Igual que useCategoriasPreventivas: caché compartida entre pantallas, para
 // no volver a pedir el listado de materiales cada vez que se entra a Diseñar
-// sesión o a Dinámicas complementarias (antes cada una lo pedía por su cuenta,
+// sesión (antes cada una lo pedía por su cuenta,
 // sin caché, en cada visita).
 function useMaterialesDisponibles() {
   const cacheKey = "materiales";
@@ -2414,6 +2419,7 @@ function usePlayerHistory(playerId) {
       subtipoCorporal: r.subtipo_corporal || "",
       unilateral: t.lateralidad === "unilateral",
       esResistencia: t.bloque_sesion === "Resistencia",
+      esElastica: (t.tipo_resistencia || "") === "Elástica",
       objetivoResistencia: t.bloque_sesion === "Resistencia" ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data)) : null,
     };
   });
@@ -2464,6 +2470,7 @@ function useEquipoHistory() {
       ignorar: !!r.ignorar,
       revisado: !!r.revisado,
       esResistencia: t.bloque_sesion === "Resistencia",
+      esElastica: (t.tipo_resistencia || "") === "Elástica",
       bloque: t.bloque_sesion || "General",
       // Necesarios para calcular el e1RM por ejercicio+equipo (ENT-01, ver
       // calcularCambiosE1rm): reps y RIR realmente hechos, y el material.
@@ -4054,7 +4061,6 @@ const MODULOS_DASHBOARD = [
   { id: "programacion", nombre: "Programación", descripcion: "Sesión de hoy y próximas programadas", icono: "calendario" },
   { id: "calendario", nombre: "Calendario", descripcion: "Planifica sesiones futuras por equipo, grupo o jugador", icono: "calendario" },
   { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
-  { id: "complementarias", nombre: "Dinámicas complementarias", descripcion: "Programas puntuales (ej. Miembro Superior) para días concretos", icono: "rayo" },
   { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
   { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
   { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
@@ -4500,6 +4506,7 @@ function useDatosDashboardEntrenador() {
         tareasCount: cambios.reduce((sum, c) => sum + c.nRegistros, 0),
         nEjercicios: cambios.length,
         peor,
+        cambios: ordenados,
       };
     })
     .filter(Boolean)
@@ -4854,8 +4861,36 @@ function sparklinePuntos(valores) {
 // (móvil): fila más baja y sin el párrafo de detalle, para poder listar
 // muchos jugadores sin que cada uno ocupe tanto alto — el % ya dice lo
 // esencial, el detalle no aporta tanto como para pagar ese espacio en móvil.
+
+// Lista de TODOS los ejercicios que cambian esta semana frente a su nivel
+// habitual (de peor a mejor), para que se vea qué ejercicios explican el
+// semáforo y no solo el peor. `cambios` viene de calcularCambiosE1rm.
+function ListaCambiosEjerciciosReal({ cambios, compact }) {
+  if (!cambios || !cambios.length) return null;
+  const fmtVal = (c, v) => (c.conCarga ? `${Math.round(v)} kg` : `${v.toFixed(1)} reps`);
+  const color = (pct) => (pct <= -8 ? ds.danger : pct < -3 ? ds.warning : pct >= 3 ? ds.success : ds.inkMuted);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: compact ? 2 : 3 }}>
+      {cambios.map((c) => (
+        <div key={c.clave} style={{ display: "flex", alignItems: "baseline", gap: 8, fontSize: compact ? 10.5 : 11 }}>
+          <span style={{ flex: 1, minWidth: 0, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.nombre}</span>
+          <span style={{ color: ds.inkMuted, flexShrink: 0 }}>
+            {c.actual != null ? `${fmtVal(c, c.actual)} vs ${fmtVal(c, c.habitual)}` : ""}
+          </span>
+          <span style={{ fontFamily: dsF.mono, fontWeight: 700, color: color(c.pct), flexShrink: 0, minWidth: 40, textAlign: "right" }}>
+            {c.pct > 0 ? "+" : ""}{c.pct.toFixed(0)}%
+          </span>
+        </div>
+      ))}
+      <div style={{ fontSize: 10, color: ds.inkMuted, marginTop: 2 }}>
+        Fuerza estimada (e1RM) de lo último hecho esta semana frente a la media de lo anterior. {cambios.some((c) => !c.conCarga) ? "Sin carga (p. ej. dominadas): repeticiones al fallo." : ""}
+      </div>
+    </div>
+  );
+}
+
 function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
-  const { jugador, pct, pctMedia, usaPeor, serieReciente, nombresEjercicios, tareasCount, nEjercicios, peor } = variacion;
+  const { jugador, pct, pctMedia, usaPeor, serieReciente, nombresEjercicios, tareasCount, nEjercicios, peor, cambios } = variacion;
   const metaTareas = tareasCount ? `${(nombresEjercicios || []).slice(0, 2).join(", ")}${(nombresEjercicios || []).length > 2 ? "…" : ""} · ${tareasCount} tarea${tareasCount === 1 ? "" : "s"}` : "";
   const positivo = pct >= 0;
   const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
@@ -4903,12 +4938,22 @@ function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
   );
 
   if (compact) {
-    return <div style={{ borderBottom: `1px solid ${ds.border}` }}>{fila}</div>;
+    return (
+      <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
+        {fila}
+        <div style={{ padding: "0 0 8px 15px" }}>
+          <ListaCambiosEjerciciosReal cambios={cambios} compact />
+        </div>
+      </details>
+    );
   }
   return (
     <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
       {fila}
       <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
+        <div style={{ marginBottom: 6 }}>
+          <ListaCambiosEjerciciosReal cambios={cambios} />
+        </div>
         {metaTareas && <div style={{ marginBottom: 2 }}>{metaTareas}</div>}
         {usaPeor ? (
           <>
@@ -6083,7 +6128,7 @@ function MiProgresoJugadorReal({ items, loaded, historialSemanas = [], rachaSema
 
   if (!loaded) return <LoadingBlock />;
 
-  const elegibles = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ");
+  const elegibles = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ");
 
   // ¿Este ejercicio+EQUIPO se ha trabajado alguna vez con carga registrada?
   // Si sí, se compara en 1RM estimado (kg); si nunca lleva carga (dominadas,
@@ -6335,6 +6380,7 @@ function construirItemsHistorial(registros, tareasById, ejerciciosById, sesiones
       subtipoCorporal: r.subtipo_corporal || "",
       unilateral: t.lateralidad === "unilateral",
       esResistencia: t.bloque_sesion === "Resistencia",
+      esElastica: (t.tipo_resistencia || "") === "Elástica",
       objetivoResistencia: t.bloque_sesion === "Resistencia" ? formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data)) : null,
     };
   });
@@ -6360,7 +6406,7 @@ function HistorialPorJugador({ players, jugadorInicial, tareasById, ejerciciosBy
   // de antes del rango.
   const cambioPctPorId = {};
   [...items]
-    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
+    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.cargaReal !== "" && it.cargaReal != null)
     .sort((a, b) => (a.date < b.date ? -1 : 1))
     .reduce((ultimoPorClave, it) => {
       const clave = claveDisenoTarea(it.name, materialEfectivo(it), it.unilateral, it.reps, it.rir);
@@ -6405,7 +6451,7 @@ function HistorialPorJugador({ players, jugadorInicial, tareasById, ejerciciosBy
   // que en realidad era un estímulo distinto y más ligero a propósito.
   const combinacionesPorClave = new Map();
   items
-    .filter((it) => it.done && !it.esResistencia && it.cargaReal !== "" && it.cargaReal != null)
+    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.cargaReal !== "" && it.cargaReal != null)
     .forEach((it) => {
       const equipo = materialEfectivo(it);
       const clave = claveDisenoTarea(it.name, equipo, it.unilateral, it.reps, it.rir);
@@ -8283,8 +8329,7 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
   const [errorBorrado, setErrorBorrado] = useState("");
 
   if (showEditor) {
-    const esComplementaria = (editingSesion || plantillaSesion)?.tipo === "complementaria";
-    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const EditorComponent = DisenoSesionReal;
     const cerrar = () => {
       setShowEditor(false);
       setEditingSesion(null);
@@ -8607,7 +8652,6 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [plantillaSesion, setPlantillaSesion] = useState(null);
   const [fechasParaEditor, setFechasParaEditor] = useState(null);
   const [destinatariosParaEditor, setDestinatariosParaEditor] = useState(undefined);
-  const [tipoEditor, setTipoEditor] = useState("sesion"); // "sesion" | "complementaria"
   const [showEditor, setShowEditor] = useState(false);
   const [errorBorrado, setErrorBorrado] = useState("");
 
@@ -8619,8 +8663,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [buscarScope, setBuscarScope] = useState("");
 
   if (showEditor) {
-    const esComplementaria = tipoEditor === "complementaria" || (editingSesion || plantillaSesion)?.tipo === "complementaria";
-    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const EditorComponent = DisenoSesionReal;
     const cerrar = () => {
       setShowEditor(false);
       setEditingSesion(null);
@@ -8694,13 +8737,11 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
 
   const editar = (s) => {
     setEditingSesion(s);
-    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
     setShowEditor(true);
   };
   const reutilizar = (s) => {
     setPlantillaSesion(s);
     setEditingSesion(null);
-    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
     setShowEditor(true);
   };
   // "Personalizar solo para X": misma mecánica que Reutilizar (sesión nueva,
@@ -8711,10 +8752,9 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     setPlantillaSesion({ ...s, jugadores_destino: [jugadorId] });
     setEditingSesion(null);
     setFechasParaEditor([fecha]);
-    setTipoEditor(s.tipo === "complementaria" ? "complementaria" : "sesion");
     setShowEditor(true);
   };
-  const nuevaSesionEnFecha = (fecha, tipo) => {
+  const nuevaSesionEnFecha = (fecha) => {
     setPlantillaSesion(null);
     setEditingSesion(null);
     setFechasParaEditor([fecha]);
@@ -8725,7 +8765,6 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         ? activos.filter((p) => (p.gruposIds || []).includes(scope.grupoId)).map((p) => p.id)
         : null
     );
-    setTipoEditor(tipo);
     setShowEditor(true);
   };
   // Atender una petición: abre el editor con la fecha y el jugador ya
@@ -8737,7 +8776,6 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     setEditingSesion(null);
     setFechasParaEditor([sol.fecha]);
     setDestinatariosParaEditor([sol.jugador_id]);
-    setTipoEditor(tipo);
     setScopeId(`j:${sol.jugador_id}`);
     setDiaSel(sol.fecha);
     setShowEditor(true);
@@ -8996,11 +9034,8 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             </div>
           )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <DsButton size="sm" onClick={() => nuevaSesionEnFecha(diaSel, "sesion")}>
+            <DsButton size="sm" onClick={() => nuevaSesionEnFecha(diaSel)}>
               + Diseñar sesión
-            </DsButton>
-            <DsButton size="sm" variant="secondary" onClick={() => nuevaSesionEnFecha(diaSel, "complementaria")}>
-              + Dinámica complementaria
             </DsButton>
           </div>
         </div>
@@ -9054,7 +9089,7 @@ function resumenRegistroReal(tarea, registro) {
   if (tarea.esCmj) {
     return registro.carga !== "" && registro.carga != null ? `${registro.carga} cm` : "Registrado";
   }
-  if (tarea.esCore) return "Hecho";
+  if (tarea.esCore || tarea.esElastica) return "Hecho";
   const partes = [];
   if (registro.reps !== "" && registro.reps != null) partes.push(`${registro.reps} ${tarea.unidad || "reps"}`);
   if (registro.carga !== "" && registro.carga != null) {
@@ -9075,7 +9110,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
   // El CMJ ya no se despliega para editar nada: la altura ya no la
   // introduce el jugador (viene del CSV que sube el entrenador), así que no
   // hay campo que rellenar — solo queda marcarla como hecha cuando la haga.
-  const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj && !tarea.esCore;
+  const puedeDesplegar = mostrarRegistro && !hecho && !tarea.esCmj && !tarea.esCore && !tarea.esElastica;
   const mostrarFormulario = puedeDesplegar && expandido;
   return (
     <DsCard
@@ -9896,7 +9931,7 @@ function seriesHechasDeRegistro(tarea, draft) {
 // pide reps y RIR y lo explica. Solo aplica a tareas con carga en kg y
 // repeticiones (no Resistencia, CMJ, core, ni peso corporal sin lastre).
 function necesitaCalibrarE1rm(tarea, registro) {
-  if (!tarea || tarea.esResistencia || tarea.esCmj || tarea.esCore) return false;
+  if (!tarea || tarea.esResistencia || tarea.esCmj || tarea.esCore || tarea.esElastica) return false;
   if (tarea.unidad && tarea.unidad !== "reps") return false;
   if (tarea.esCorporal && registro?.subtipo !== "lastre") return false;
   if (tarea.eligeEquipo) {
@@ -10298,7 +10333,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const finCalendario = sumarDiasFecha(inicio, 6);
     const fin = i === 0 ? date : finCalendario;
     const pct = calcularAdherenciaJugador(fechasAsignadasJugador(inicio, fin));
-    const volumen = historyItems.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= inicio && it.date <= finCalendario).length;
+    const volumen = historyItems.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.date >= inicio && it.date <= finCalendario).length;
     historialSemanas.push({ inicio, pct, volumen });
   }
   let rachaSemanas = 0;
@@ -10328,7 +10363,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return { fecha, etiqueta, pautado, estado, esHoy };
   });
 
-  const registrosConCarga = [...historyItems, ...refItems].filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
+  const registrosConCarga = [...historyItems, ...refItems].filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
 
   // A efectos de cuantificación y progreso, el mismo ejercicio hecho con
   // equipos distintos (p. ej. Sentadilla en Multipower vs. Sentadilla con
@@ -10345,7 +10380,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // falta repetir "(Barra)" en todas partes.
   const equiposPorNombre = new Map();
   [...historyItems, ...refItems]
-    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ")
     .forEach((it) => {
       const eq = materialEfectivo(it);
       if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
@@ -10419,7 +10454,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // signo + cuántos más se movieron en la misma dirección.
   const registrosPorClaveTodos = new Map();
   historyItems
-    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ")
     .forEach((it) => {
       const equipo = materialEfectivo(it);
       const clave = `${it.name}::${equipo}`;
@@ -10622,6 +10657,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // trabajo de Core (planchas, antirrotación...), así que no se
       // despliega ninguna tarjeta de registro (ver TareaCardReal).
       esCore: t.bloque_sesion === "Core",
+      // Resistencia elástica (gomas/bandas): no hay un peso que anotar ni se
+      // pide nada al jugador, igual que en Core — solo marcarla como hecha.
+      esElastica: (t.tipo_resistencia || "") === "Elástica",
       // El MD de la sesión de hoy no importa aquí — se recuerda el último
       // test CMJ del CSV, sea de cuando sea, con su día de medida entre
       // paréntesis. Ya no es un dato que metiera el jugador: es solo
@@ -10712,7 +10750,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // - Corporal sin equipo (peso del propio cuerpo, sin lastre): no es peso libre -> exige reps, no carga.
   // - Cualquier otra (peso libre, con o sin elegir equipo): exige carga y reps.
   const registroIncompleto = (t) => {
-    if (t.esResistencia || t.esCmj || t.esCore) return false;
+    if (t.esResistencia || t.esCmj || t.esCore || t.esElastica) return false;
     const r = getRegistro(t.id);
     if (t.esCorporal) {
       if (r.subtipo === "lastre") return !r.carga || !r.reps;
@@ -11660,10 +11698,10 @@ function pct1RMporRTF(rtf) {
 // la siguiente mejor marca, y la serie cronológica completa de e1RM (para
 // la mini-gráfica "línea discontinua en la mejor marca + anillo verde").
 function calcularRecordsCargaJugador(items) {
-  const registrosConCarga = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
+  const registrosConCarga = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
   const equiposPorNombre = new Map();
   items
-    .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ")
+    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ")
     .forEach((it) => {
       const eq = materialEfectivo(it);
       if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
@@ -11721,7 +11759,7 @@ function calcularRecordsCargaJugador(items) {
 // nada que comparar. `serie` son los últimos valores del ejercicio (para el
 // sparkline).
 function calcularCambiosE1rm(items, inicio, fin) {
-  const validos = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ");
+  const validos = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ");
   const equiposPorNombre = new Map();
   const porClave = new Map();
   const claveConCarga = new Set();
@@ -11767,6 +11805,11 @@ function calcularCambiosE1rm(items, inicio, fin) {
       conCarga,
       nRegistros: dentro.length,
       serie: conValor.slice(-5).map((x) => x.v),
+      // Para poder explicar cada ejercicio: valor de ahora, su nivel habitual
+      // (media de lo anterior), cuándo fue y si es kg (e1RM) o repeticiones.
+      actual: ultimo.v,
+      habitual: mediaAntes,
+      fecha: ultimo.it.date,
     });
   });
   return cambios;
@@ -11782,7 +11825,7 @@ function calcularCambiosE1rm(items, inicio, fin) {
 //   más cerca del fallo de lo pautado; positiva = se guardó más de lo pautado).
 // Excluye Resistencia y CMJ. Devuelve null en cada lectura sin datos.
 function calcularCumplimientoPauta(items, desde, hasta) {
-  const regs = items.filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= desde && it.date <= hasta);
+  const regs = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.date >= desde && it.date <= hasta);
   let seriesHechas = 0;
   let seriesPautadas = 0;
   let repsOk = 0;
@@ -11860,7 +11903,7 @@ function e1rmDeItem(it) {
 // con la media de sus hasta 4 microciclos anteriores con datos (necesita al
 // menos 2): baja < 75 %, alta > 125 %.
 function calcularCargaFuerzaPorMicro(items, ventanas) {
-  const fuerza = items.filter((it) => it.done && !it.esResistencia && it.bloque === "Fuerza");
+  const fuerza = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque === "Fuerza");
   const porClave = new Map();
   fuerza.forEach((it) => {
     const clave = `${it.name}::${materialEfectivo(it)}`;
@@ -12667,7 +12710,7 @@ function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir }) {
 // rejilla). Reutiliza tal cual los datos y el criterio de "plantilla" que ya
 // existía en ProgramacionReal (Biblioteca de sesiones: cualquier sesión con
 // nombre puesto por el entrenador) y los editores reales (DisenoSesionReal /
-// DinamicaComplementariaReal) para Editar/Asignar — no se inventa ningún
+// editor) para Editar/Asignar — no se inventa ningún
 // flujo nuevo de guardado ni de asignación.
 function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   const { loaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
@@ -12703,8 +12746,7 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   const plantillaSel = plantillaSelId ? conTareas.find((s) => s.id === plantillaSelId) : null;
 
   if (modoEditor && plantillaSel) {
-    const esComplementaria = plantillaSel.tipo === "complementaria";
-    const EditorComponent = esComplementaria ? DinamicaComplementariaReal : DisenoSesionReal;
+    const EditorComponent = DisenoSesionReal;
     const cerrar = () => setModoEditor(null);
     return (
       <EditorComponent
@@ -13296,6 +13338,171 @@ function IconoBloqueDiseno({ id }) {
   }
 }
 
+// ---------- Tiempo estimado de sesión y descanso recomendado ----------
+// Estimación orientativa para el diseñador: tiempo de trabajo de cada serie
+// (reps × ritmo medio, o el tiempo pautado) + descanso entre series. El
+// descanso sale de lo que escribas en la tarea o, si lo dejas en blanco, de
+// una recomendación según la intensidad (%1RM / RIR). Alternar dos ejercicios
+// de zonas distintas esconde el descanso de uno dentro del trabajo del otro.
+const SEG_POR_REP = 4;
+const SEG_TRANSICION = 30; // cambio de ejercicio / colocar material
+const SEG_TRANSICION_CIRCUITO = 15;
+const SEG_ENTRE_RONDAS = 60;
+const UMBRAL_DESCANSO_ALTERNAR = 90; // solo se sugiere alternar si el descanso da para ello
+
+function aSegundosDiseno(valor, unidad) {
+  const n = Number(valor);
+  if (!n || Number.isNaN(n) || n < 0) return 0;
+  return /^min/i.test(unidad || "") ? n * 60 : n;
+}
+
+function descansoRecomendadoSeg(t, bloque) {
+  if (bloque !== "Fuerza") return 45;
+  if (t.modo && t.modo !== "reps") return 60;
+  if (t.modoCarga === "pct1rm") {
+    const p = Number(t.pct1rm);
+    if (!p || Number.isNaN(p)) return 120;
+    if (p >= 90) return 240;
+    if (p >= 85) return 210;
+    if (p >= 80) return 180;
+    if (p >= 70) return 150;
+    if (p >= 60) return 120;
+    return 90;
+  }
+  if (t.rir === "" || t.rir == null || Number.isNaN(Number(t.rir))) return 120;
+  const r = Number(t.rir);
+  if (r <= 1) return 180;
+  if (r <= 2) return 150;
+  if (r <= 3) return 120;
+  return 90;
+}
+
+function descansoEfectivoSeg(t, bloque) {
+  const d = Number(t.descanso);
+  return d > 0 ? d : descansoRecomendadoSeg(t, bloque);
+}
+
+function trabajoSerieSeg(t) {
+  const c = Number(t.cantidad);
+  if (!c || Number.isNaN(c)) return 0;
+  const base = t.modo === "tiempo" ? c : t.modo === "minutos" ? c * 60 : t.modo === "metros" ? 30 : c * SEG_POR_REP;
+  return t.lateralidad === "unilateral" ? base * 2 : base;
+}
+
+function estimarTareaSeg(t, bloque) {
+  const trabajo = trabajoSerieSeg(t);
+  if (!trabajo) return 0;
+  const series = Math.max(1, Number(t.series) || 1);
+  return series * trabajo + (series - 1) * descansoEfectivoSeg(t, bloque) + SEG_TRANSICION;
+}
+
+// Dos ejercicios alternados (A, B, A, B…): entre dos series seguidas de A
+// transcurre el trabajo de B más lo que haga falta de espera, y viceversa.
+function estimarParSeg(a, b, bloque) {
+  const tA = trabajoSerieSeg(a);
+  const tB = trabajoSerieSeg(b);
+  if (!tA || !tB) return estimarTareaSeg(a, bloque) + estimarTareaSeg(b, bloque);
+  const sA = Math.max(1, Number(a.series) || 1);
+  const sB = Math.max(1, Number(b.series) || 1);
+  const rA = descansoEfectivoSeg(a, bloque);
+  const rB = descansoEfectivoSeg(b, bloque);
+  const ciclo = Math.max(tA + tB, tA + rA, tB + rB);
+  const comunes = Math.min(sA, sB);
+  const sobraA = sA - comunes;
+  const sobraB = sB - comunes;
+  return comunes * ciclo + sobraA * (tA + rA) + sobraB * (tB + rB) + SEG_TRANSICION;
+}
+
+function estimarResistenciaSeg(t) {
+  const tipo = t.tipoResistenciaCardio || "";
+  const tiempo = aSegundosDiseno(t.tiempo, t.tiempoUnidad);
+  const recup = aSegundosDiseno(t.recuperacion, t.recuperacionUnidad);
+  const bloques = Math.max(1, Number(t.bloques) || 1);
+  if (tipo === "continuo") {
+    const series = Math.max(1, Number(t.series) || 1);
+    return tiempo ? series * tiempo + (series - 1) * recup : 0;
+  }
+  if (tipo === "hiit") {
+    const intervalos = Number(t.intervalos) || 0;
+    if (!intervalos || !tiempo) return 0;
+    return bloques * (intervalos * tiempo + (intervalos - 1) * recup) + (bloques - 1) * recup;
+  }
+  if (tipo === "rsa") {
+    const series = Number(t.series) || 0;
+    const trabajo = Number(t.duracion) || (Number(t.distancia) ? Number(t.distancia) / 5 : 0);
+    if (!series || !trabajo) return 0;
+    return bloques * (series * trabajo + (series - 1) * recup) + (bloques - 1) * recup;
+  }
+  return 0;
+}
+
+function estimarCircuitoSeg(c, bloque) {
+  const rondas = Math.max(1, Number(c.rondas) || 1);
+  const porRonda = (c.tareas || []).reduce((sum, t) => sum + trabajoSerieSeg(t) + SEG_TRANSICION_CIRCUITO, 0);
+  return porRonda ? rondas * porRonda + (rondas - 1) * SEG_ENTRE_RONDAS + SEG_TRANSICION : 0;
+}
+
+// Empareja tareas sueltas de un bloque según `alternaCon` (id de ejercicio del
+// compañero). Devuelve { pares: [[a, b]], sueltas: [t…] }.
+function emparejarTareasAlternadas(tareas) {
+  const usadas = new Set();
+  const pares = [];
+  tareas.forEach((a) => {
+    if (usadas.has(a.key) || !a.alternaCon) return;
+    const b = tareas.find((x) => x.key !== a.key && !usadas.has(x.key) && x.ejercicioId === a.alternaCon);
+    if (!b) return;
+    usadas.add(a.key);
+    usadas.add(b.key);
+    pares.push([a, b]);
+  });
+  return { pares, sueltas: tareas.filter((t) => !usadas.has(t.key)) };
+}
+
+function estimarBloqueTareasSeg(tareas, circuitos, bloque) {
+  const { pares, sueltas } = emparejarTareasAlternadas(tareas);
+  return (
+    pares.reduce((sum, [a, b]) => sum + estimarParSeg(a, b, bloque), 0) +
+    sueltas.reduce((sum, t) => sum + estimarTareaSeg(t, bloque), 0) +
+    circuitos.reduce((sum, c) => sum + estimarCircuitoSeg(c, bloque), 0)
+  );
+}
+
+// Sugerencias: parejas de tareas sueltas de zonas distintas en las que una de
+// ellas tiene descanso largo. Ahorro mínimo 2 min para no llenar de ruido.
+function sugerirAlternancias(tareas, bloque, zonaDe) {
+  const { sueltas } = emparejarTareasAlternadas(tareas);
+  const candidatas = sueltas.filter((t) => trabajoSerieSeg(t) > 0);
+  const opciones = [];
+  candidatas.forEach((a, i) => {
+    if ((Number(a.series) || 1) < 2 || descansoEfectivoSeg(a, bloque) < UMBRAL_DESCANSO_ALTERNAR) return;
+    candidatas.forEach((b, j) => {
+      if (i === j) return;
+      const za = zonaDe(a);
+      const zb = zonaDe(b);
+      if (!za || !zb || za === zb) return;
+      const ahorro = estimarTareaSeg(a, bloque) + estimarTareaSeg(b, bloque) - estimarParSeg(a, b, bloque);
+      if (ahorro >= 120) opciones.push({ a, b, ahorro });
+    });
+  });
+  opciones.sort((x, y) => y.ahorro - x.ahorro);
+  const usadas = new Set();
+  const out = [];
+  opciones.forEach((o) => {
+    if (usadas.has(o.a.key) || usadas.has(o.b.key)) return;
+    usadas.add(o.a.key);
+    usadas.add(o.b.key);
+    out.push(o);
+  });
+  return out;
+}
+
+function formatearDuracionDiseno(seg) {
+  if (!seg) return "—";
+  const min = Math.round(seg / 60);
+  if (min < 60) return `${min} min`;
+  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
+}
+
 function CampoEtiquetadoDiseno({ etiqueta, children, w }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 3, width: w }}>
@@ -13513,6 +13720,17 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         <CampoEtiquetadoDiseno etiqueta={etiquetaModo[tarea.modo]} w={44}>
           <input value={tarea.cantidad} onChange={(e) => onCambiar({ ...tarea, cantidad: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
         </CampoEtiquetadoDiseno>
+        {Number(tarea.series) > 1 && (
+          <CampoEtiquetadoDiseno etiqueta="DESC. (s)" w={52}>
+            <input
+              value={tarea.descanso ?? ""}
+              onChange={(e) => onCambiar({ ...tarea, descanso: e.target.value.replace(/[^0-9]/g, "") })}
+              placeholder={String(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core"))}
+              title="Descanso entre series en segundos. En blanco = el recomendado según la intensidad (el número gris)."
+              style={campoStyleDiseno("100%")}
+            />
+          </CampoEtiquetadoDiseno>
+        )}
         {mostrarCarga && (
           <>
             {/* Alternativa al RIR: pautar por % directo del 1RM estimado del
@@ -13594,6 +13812,14 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         )}
         <SelectorMaterialReal seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
       </div>
+      {tarea.alternaCon && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "5px 9px" }}>
+          <span style={{ flex: 1 }}>↔ En el descanso, alterna con <strong>{tarea.alternaConNombre || "otro ejercicio"}</strong></span>
+          <button type="button" onClick={() => onCambiar({ ...tarea, alternaCon: "", alternaConNombre: "" })} style={{ background: "none", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 11.5, textDecoration: "underline", padding: 0 }}>
+            quitar
+          </button>
+        </div>
+      )}
       <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
     </div>
   );
@@ -14374,11 +14600,40 @@ function tareaEsParaJugador(t, jugadorId) {
   }
 }
 
-function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
+function ListaJugadoresCheckReal({ players, seleccionados, onCambiar, grupos = [] }) {
   const alternar = (id) => {
     onCambiar(seleccionados.includes(id) ? seleccionados.filter((x) => x !== id) : [...seleccionados, id]);
   };
+  // Atajo por equipo: marca o desmarca de golpe a los jugadores activos del grupo.
+  const equipos = grupos
+    .map((g) => ({ g, ids: players.filter((p) => p.estado === "activo" && (p.gruposIds || []).includes(g.id)).map((p) => p.id) }))
+    .filter((e) => e.ids.length);
+  const alternarEquipo = (ids) => {
+    const todos = ids.every((id) => seleccionados.includes(id));
+    onCambiar(todos ? seleccionados.filter((id) => !ids.includes(id)) : [...new Set([...seleccionados, ...ids])]);
+  };
   return (
+    <div>
+      {equipos.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 5 }}>Elegir por equipo</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {equipos.map(({ g, ids }) => {
+              const todos = ids.every((id) => seleccionados.includes(id));
+              return (
+                <button
+                  key={g.id}
+                  type="button"
+                  onClick={() => alternarEquipo(ids)}
+                  style={{ fontSize: 12, padding: "5px 10px", borderRadius: 999, cursor: "pointer", border: `1px solid ${todos ? ds.accent : ds.border}`, background: todos ? ds.accentSubtle : "transparent", color: todos ? ds.accent : ds.inkSecondary, fontWeight: todos ? 700 : 500 }}
+                >
+                  {todos ? "✓ " : ""}{g.nombre || g.name || "Equipo"} ({ids.length})
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 260, overflowY: "auto", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 8 }}>
       {players.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted, padding: "8px 4px" }}>No hay jugadores para elegir.</div>}
       {players.map((p) => {
@@ -14429,6 +14684,7 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
         );
       })}
     </div>
+    </div>
   );
 }
 
@@ -14436,7 +14692,141 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar }) {
 // abrir este editor para una fecha y un ámbito (equipo/grupo/jugador) ya
 // elegidos allí — ningún otro punto de entrada (Diseñar sesión, Reutilizar)
 // los pasa nunca, así que su comportamiento de siempre no cambia en nada.
+// Panel de resumen del diseñador (columna derecha). Solo muestra datos que
+// salen del borrador; el tiempo es una estimación orientativa (ver
+// estimarTareaSeg: 4 s por repetición + descansos + 30 s por cambio).
+function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloque, onAplicarAlternancia, readOnly, avisoCmj }) {
+  const { bloques, totalSeg, fuerza, filasDescanso, sugerencias, avisos } = resumen;
+  const titulo = (txt) => (
+    <div style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.06em", color: ds.inkMuted, textTransform: "uppercase", marginBottom: 7 }}>{txt}</div>
+  );
+  const caja = { borderTop: `1px solid ${ds.border}`, paddingTop: 12, marginTop: 12 };
+  const fmtSeg = (n) => (n >= 60 && n % 60 === 0 ? `${n / 60} min` : `${n} s`);
+  return (
+    <aside
+      style={{
+        width: anchoDesktop ? 330 : "100%",
+        flexShrink: 0,
+        boxSizing: "border-box",
+        background: ds.surface,
+        border: `1px solid ${ds.border}`,
+        borderRadius: 12,
+        padding: 14,
+        position: anchoDesktop ? "sticky" : "static",
+        top: 12,
+        maxHeight: anchoDesktop ? "calc(100dvh - 24px)" : undefined,
+        overflowY: anchoDesktop ? "auto" : "visible",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>Resumen de la sesión</div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 20, fontWeight: 700, color: ds.accent, lineHeight: 1 }}>{formatearDuracionDiseno(totalSeg)}</div>
+          <div style={{ fontSize: 9.5, color: ds.inkMuted, marginTop: 2 }}>tiempo estimado</div>
+        </div>
+      </div>
+
+      <div style={caja}>
+        {titulo("Estructura y tiempo")}
+        {bloques.map((b) => (
+          <div
+            key={b.id}
+            onClick={() => onIrBloque(b.id)}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", background: bloqueActivo === b.id ? ds.accentSubtle : "transparent", opacity: b.vacio ? 0.55 : 1 }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 600, width: 84, flexShrink: 0 }}>{b.nombre}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: b.sinDato ? ds.danger : ds.inkMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {b.sinDato ? "faltan series/reps" : b.detalle}
+            </span>
+            <span style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary }}>{b.seg ? formatearDuracionDiseno(b.seg) : "—"}</span>
+          </div>
+        ))}
+      </div>
+
+      <div style={caja}>
+        {titulo("Carga de fuerza programada")}
+        {fuerza.n === 0 ? (
+          <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Sin ejercicios de fuerza todavía.</div>
+        ) : (
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {[
+              ["Ejercicios", fuerza.n],
+              ["Series", fuerza.series || "—"],
+              ["%1RM medio", fuerza.pct != null ? `${Math.round(fuerza.pct)} %` : "—"],
+              ["RIR medio", fuerza.rir != null ? fuerza.rir.toFixed(1) : "—"],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <div style={{ fontFamily: dsF.mono, fontSize: 15, fontWeight: 700 }}>{v}</div>
+                <div style={{ fontSize: 9.5, color: ds.inkMuted }}>{k}</div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={caja}>
+        {titulo("Recuperación recomendada")}
+        {filasDescanso.length === 0 ? (
+          <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Aparecerá cuando haya ejercicios de fuerza con más de una serie. Es el descanso entre series según el %1RM o el RIR; puedes cambiarlo en cada ejercicio (campo DESC.).</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {filasDescanso.map(({ t, seg, propio }) => (
+              <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}>
+                <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.nombre}</span>
+                {t.alternaCon && <span title={`Alterna con ${t.alternaConNombre || "otro ejercicio"}`} style={{ color: ds.accent, fontSize: 10.5 }}>↔</span>}
+                <span style={{ fontFamily: dsF.mono, color: propio ? ds.ink : ds.inkSecondary }}>{fmtSeg(seg)}</span>
+                <span style={{ fontSize: 9.5, color: ds.inkMuted, width: 52, textAlign: "right" }}>{propio ? "tuyo" : "recomend."}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {sugerencias.length > 0 && !readOnly && (
+          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Para ganar tiempo, alterna series con un ejercicio de otra zona mientras se recupera el primero:</div>
+            {sugerencias.map(({ a, b, ahorro, bloque }) => (
+              <div key={`${a.key}-${b.key}`} style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 8, padding: "7px 9px" }}>
+                <div style={{ fontSize: 11.5, lineHeight: 1.4 }}>
+                  <strong>{a.nombre}</strong> ↔ <strong>{b.nombre}</strong>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
+                  <span style={{ flex: 1, fontSize: 10.5, color: ds.inkSecondary }}>ahorra ~{Math.round(ahorro / 60)} min</span>
+                  <button
+                    type="button"
+                    onClick={() => onAplicarAlternancia(a, b, bloque)}
+                    style={{ fontSize: 11, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}
+                  >
+                    Alternar
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {!readOnly && avisoCmj && <div style={caja}>{avisoCmj}</div>}
+
+      {avisos.length > 0 && (
+        <div style={caja}>
+          {titulo("Revisar antes de enviar")}
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {avisos.map((a) => (
+              <div key={a} style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.45, paddingLeft: 10, borderLeft: `2px solid ${ds.danger}` }}>
+                {a}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      <div style={{ fontSize: 9.5, color: ds.inkMuted, marginTop: 12, lineHeight: 1.5 }}>
+        Tiempo orientativo: 4 s por repetición, descansos entre series, 30 s por cambio de ejercicio. Movilidad (5 min), preventivo (3 min por ejercicio) y CMJ (5 min) son valores fijos.
+      </div>
+    </aside>
+  );
+}
+
 function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
+  const [gruposDestino] = useEntityList("grupos");
   const parcialRef = useRef(nuevoEstadoParcial());
   const isEditing = !!sesionExistente;
   // Reutilizar: misma configuración base que editar (destinatarios, objetivo,
@@ -14904,6 +15294,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       setError("Añade al menos una fecha.");
       return;
     }
+    // Salvaguarda: "Todos los jugadores" llega a los activos de TODOS los
+    // equipos. Si hay varios equipos, se pide confirmar antes de publicar.
+    if (!comoBorrador && targetPlayerIds === null && gruposDestino.length > 1) {
+      const n = players.filter((p) => p.estado === "activo").length;
+      if (!window.confirm(`Esta sesión se enviará a los ${n} jugadores activos de todos los equipos. ¿Continuar?\n\nSi solo es para un equipo, cancela y elígelo en Detalles → Jugadores concretos → "Elegir por equipo".`)) return;
+    }
     setGuardando(true);
     try {
       const sesionRecord = {
@@ -14988,6 +15384,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           material: JSON.stringify(t.materiales || []), // el material se guarda siempre, aunque el bloque no muestre carga (antes se perdía en Core)
           lateralidad: t.lateralidad || "bilateral",
           nota: t.nota || "",
+          descanso_seg: t.descanso ?? "",
+          alterna_con: t.alternaCon || "",
           circuito_id: "",
           orden_en_circuito: "",
         });
@@ -15016,6 +15414,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               material: JSON.stringify(t.materiales || []), // idem: antes se perdía en Core al ir dentro de un circuito
               lateralidad: t.lateralidad || "bilateral",
               nota: t.nota || "",
+              descanso_seg: t.descanso ?? "",
+              alterna_con: "",
               circuito_id: savedCircuito.id,
               orden_en_circuito: i + 1,
             });
@@ -15317,165 +15717,62 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     return "";
   };
 
-  // ---- Vista previa en vivo (columna derecha): traduce las tareas/
-  // circuitos del bloque activo al mismo formato que ve el jugador,
-  // reutilizando TareaVisualReal y formatearDetalleTareaCoach (ya usados en
-  // el resumen de sesión de Programación, ver ~L7340-7373) — nunca se
-  // reimplementa esa traducción aquí. Solo hace falta adaptar el objeto
-  // "tarea" del borrador (camelCase, en memoria, aún sin guardar) al shape
-  // que esas funciones esperan (snake_case, el mismo que devuelve el
-  // backend), igual que ya hace tareaADraft() a la inversa.
-  const serializarResistenciaPreview = (t) =>
-    JSON.stringify({
-      tipo: t.tipoResistenciaCardio || "",
-      capacidad: t.capacidad || "",
-      modalidad: t.modalidad || "carrera",
-      estructuraManual: !!t.estructuraManual,
-      bloques: t.bloques || "",
-      series: t.series || "",
-      intervalos: t.intervalos || "",
-      tiempo: t.tiempo || "",
-      tiempoUnidad: t.tiempoUnidad || "",
-      intensidad: t.intensidad || "",
-      distancia: t.distancia || "",
-      duracion: t.duracion || "",
-      rpe: t.rpe || "",
-      recuperacion: t.recuperacion || "",
-      recuperacionUnidad: t.recuperacionUnidad || "",
-    });
-
-  const tareaDraftAVisual = (t, bloqueNombre) => {
-    const ej = ejercicios.find((e) => e.id === t.ejercicioId) || {};
-    const esResistencia = bloqueNombre === "Resistencia";
-    const tareaFake = {
-      bloque_sesion: bloqueNombre,
-      modo: esResistencia ? "" : t.modo,
-      series: esResistencia ? "" : t.series,
-      cantidad: esResistencia ? "" : t.cantidad,
-      rir: esResistencia ? "" : t.rir,
-      modo_carga: esResistencia ? "" : t.modoCarga || "rir",
-      pct1rm: esResistencia ? "" : t.pct1rm || "",
-      resistencia_data: esResistencia ? serializarResistenciaPreview(t) : "",
-      sin_lateralidad: ej.sin_lateralidad || "",
-      lateralidad: t.lateralidad || "bilateral",
-    };
-    return {
-      nombre: t.nombre || ej.nombre || "(ejercicio eliminado)",
-      detalle: formatearDetalleTareaCoach(tareaFake),
-      gif: ej.gif_url || "",
-      nota: t.nota || "",
-      materiales: t.materiales || [],
-    };
-  };
-
-  const previewTarea = (t, bloqueNombre, prefijo) => {
-    const v = tareaDraftAVisual(t, bloqueNombre);
-    return <TareaVisualReal key={t.key} tarea={prefijo ? { ...v, nombre: `${prefijo}${v.nombre}` } : v} />;
-  };
-
-  const previewCircuitoStyle = { border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: `${ds.surface}40`, width: "100%", boxSizing: "border-box" };
-  const previewCircuitoBadge = { fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px", alignSelf: "flex-start" };
-
-  const PreviewVacio = ({ texto }) => (
-    <div style={{ fontSize: 10.5, color: ds.inkMuted, textAlign: "center", padding: "20px 6px", lineHeight: 1.5 }}>{texto}</div>
-  );
-
-  const previewContenido = () => {
-    if (bloqueActivo === "activacion") {
-      if (!activacionActiva) return <PreviewVacio texto="Activación desactivada — no aparecerá en la sesión del jugador." />;
-      const ej = ejercicios.find((e) => e.id === activacionEjercicioId);
-      return (
-        <TareaVisualReal
-          tarea={{
-            nombre: activacionEjercicioNombre || "Bici estática",
-            detalle: `${duracionActivacion || "—"} ${unidadActivacion === "minutos" ? "min" : "seg"}`,
-            gif: ej?.gif_url || "",
-            nota: "",
-            materiales: activacionMateriales,
-          }}
-        />
-      );
-    }
-    if (bloqueActivo === "movilidad") {
-      if (modoMovilidad === "no_incluir") return <PreviewVacio texto="Bloque desactivado — no se incluirá en esta sesión." />;
-      if (modoMovilidad === "automatico") return <PreviewVacio texto="La app elegirá el ejercicio del pool rotativo al guardar — no hay uno fijo que previsualizar todavía." />;
-      if (!tareaMovilidadManual) return <PreviewVacio texto="Elige un ejercicio para ver cómo lo verá el jugador." />;
-      return previewTarea(tareaMovilidadManual, "Movilidad");
-    }
-    if (bloqueActivo === "preventivo") {
-      if (modoPreventivo === "no_incluir") return <PreviewVacio texto="Bloque desactivado — no se incluirá en esta sesión." />;
-      if (modoPreventivo === "automatico") {
-        return <PreviewVacio texto={preventivoCantidad > 0 ? "La app elegirá los ejercicios de la categoría preventiva al guardar." : "Cantidad en 0 — no se aplicará hoy."} />;
-      }
-      if (!tareasPreventivoManual.length) return <PreviewVacio texto="Añade ejercicios para ver cómo los verá el jugador." />;
-      return <>{tareasPreventivoManual.map((t) => previewTarea(t, "Preventivo"))}</>;
-    }
-    if (bloqueActivo === "core") {
-      if (!tareasCore.length && !circuitosCore.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
-      return (
-        <>
-          {tareasCore.map((t) => previewTarea(t, "Core"))}
-          {circuitosCore.map((c) => (
-            <div key={c.key} style={previewCircuitoStyle}>
-              <span style={previewCircuitoBadge}>CIRCUITO</span>
-              {c.tareas.map((t, i) => previewTarea(t, "Core", `${i + 1}. `))}
-            </div>
-          ))}
-        </>
-      );
-    }
-    if (bloqueActivo === "resistencia") {
-      if (!tareasResistencia.length && !circuitosResistencia.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
-      return (
-        <>
-          {tareasResistencia.map((t) => previewTarea(t, "Resistencia"))}
-          {circuitosResistencia.map((c) => (
-            <div key={c.key} style={previewCircuitoStyle}>
-              <span style={previewCircuitoBadge}>CIRCUITO</span>
-              {c.tareas.map((t, i) => previewTarea(t, "Resistencia", `${i + 1}. `))}
-            </div>
-          ))}
-        </>
-      );
-    }
-    if (bloqueActivo === "cmj") {
-      return (
-        <div
-          style={{
-            fontSize: 11.5,
-            color: cmjActiva ? ds.accent : ds.inkMuted,
-            textAlign: "center",
-            padding: "24px 8px",
-            lineHeight: 1.5,
-            border: `1px dashed ${cmjActiva ? ds.accentBorderSubtle : ds.border}`,
-            borderRadius: dsR.md,
-          }}
-        >
-          {cmjActiva ? "Hoy toca medición CMJ — el jugador verá un aviso en su sesión." : "Sin medición CMJ esta sesión."}
-        </div>
-      );
-    }
-    if (bloqueActivo === "fuerza") {
-      if (!tareasFuerza.length && !circuitosFuerza.length) return <PreviewVacio texto="Añade tareas para ver cómo las verá el jugador." />;
-      return (
-        <>
-          {tareasFuerza.map((t) => previewTarea(t, "Fuerza"))}
-          {circuitosFuerza.map((c) => (
-            <div key={c.key} style={previewCircuitoStyle}>
-              <span style={previewCircuitoBadge}>CIRCUITO</span>
-              {c.tareas.map((t, i) => previewTarea(t, "Fuerza", `${i + 1}. `))}
-            </div>
-          ))}
-        </>
-      );
-    }
-    return null;
-  };
 
   const loaded = playersLoaded && categoriasLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
   if (!loaded) return <LoadingBlock />;
 
   const bloqueInfo = BLOQUES_DISENO.find((x) => x.id === bloqueActivo) || BLOQUES_DISENO[0];
+
+  // ---- Resumen de la sesión (panel derecho): todo derivado del borrador.
+  const zonaDe = (t) => ((ejercicios.find((e) => e.id === t.ejercicioId)?.tags_descriptivos || [])[0] || "");
+  const aplicarAlternancia = (a, b, bloque) => {
+    const marcar = (arr) => arr.map((t) => (t.key === a.key ? { ...t, alternaCon: b.ejercicioId, alternaConNombre: b.nombre } : t));
+    if (bloque === "Fuerza") setTareasFuerza(marcar);
+    else setTareasCore(marcar);
+  };
+  const resumenDiseno = (() => {
+    const segActivacion = activacionActiva ? aSegundosDiseno(duracionActivacion, unidadActivacion === "minutos" ? "min" : "seg") : 0;
+    const segMovilidad = modoMovilidad === "no_incluir" ? 0 : modoMovilidad === "automatico" ? 300 : tareaMovilidadManual ? 300 : 0;
+    const nPrev = modoPreventivo === "no_incluir" ? 0 : modoPreventivo === "automatico" ? Number(preventivoCantidad) || 0 : tareasPreventivoManual.length;
+    const segPreventivo = nPrev * 180;
+    const segCore = estimarBloqueTareasSeg(tareasCore, circuitosCore.map((c) => ({ ...c })), "Core");
+    const segResistencia = [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].reduce((sum, t) => sum + estimarResistenciaSeg(t), 0);
+    const segFuerza = estimarBloqueTareasSeg(tareasFuerza, circuitosFuerza, "Fuerza");
+    const segCmj = cmjActiva ? 300 : 0;
+    const nTareasDe = (tareas, circuitos) => tareas.length + circuitos.reduce((a, c) => a + (c.tareas?.length || 0), 0);
+    const bloques = [
+      { id: "activacion", nombre: "Activación", seg: segActivacion, detalle: activacionActiva ? "" : "no incluida", vacio: !activacionActiva },
+      { id: "movilidad", nombre: "Movilidad", seg: segMovilidad, detalle: segMovilidad ? "estimado" : "no incluida", vacio: !segMovilidad },
+      { id: "preventivo", nombre: "Preventivo", seg: segPreventivo, detalle: nPrev ? `${nPrev} ejercicio(s) · estimado` : "no incluido", vacio: !nPrev },
+      { id: "core", nombre: "Core", seg: segCore, detalle: nTareasDe(tareasCore, circuitosCore) ? `${nTareasDe(tareasCore, circuitosCore)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasCore, circuitosCore), sinDato: nTareasDe(tareasCore, circuitosCore) > 0 && !segCore },
+      { id: "resistencia", nombre: "Resistencia", seg: segResistencia, detalle: nTareasDe(tareasResistencia, circuitosResistencia) ? `${nTareasDe(tareasResistencia, circuitosResistencia)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasResistencia, circuitosResistencia), sinDato: nTareasDe(tareasResistencia, circuitosResistencia) > 0 && !segResistencia },
+      { id: "cmj", nombre: "CMJ", seg: segCmj, detalle: cmjActiva ? "estimado" : "no incluido", vacio: !cmjActiva },
+      { id: "fuerza", nombre: "Fuerza", seg: segFuerza, detalle: nTareasDe(tareasFuerza, circuitosFuerza) ? `${nTareasDe(tareasFuerza, circuitosFuerza)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasFuerza, circuitosFuerza), sinDato: nTareasDe(tareasFuerza, circuitosFuerza) > 0 && !segFuerza },
+    ];
+    const totalSeg = bloques.reduce((sum, b) => sum + b.seg, 0);
+
+    const fuerzaTareas = [...tareasFuerza, ...circuitosFuerza.flatMap((c) => c.tareas || [])];
+    const seriesFuerza = tareasFuerza.reduce((sum, t) => sum + (Number(t.series) || 0), 0) + circuitosFuerza.reduce((sum, c) => sum + (Number(c.rondas) || 1) * (c.tareas?.length || 0), 0);
+    const pcts = fuerzaTareas.filter((t) => t.modoCarga === "pct1rm" && Number(t.pct1rm) > 0).map((t) => Number(t.pct1rm));
+    const rirs = fuerzaTareas.filter((t) => t.modoCarga !== "pct1rm" && t.rir !== "" && t.rir != null && !Number.isNaN(Number(t.rir))).map((t) => Number(t.rir));
+    const media = (arr) => (arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null);
+    const sinCarga = fuerzaTareas.filter((t) => (t.modoCarga === "pct1rm" ? !(Number(t.pct1rm) > 0) : t.rir === "" || t.rir == null));
+    const sinSeries = fuerzaTareas.filter((t) => !(Number(t.series) > 0) || !(Number(t.cantidad) > 0));
+
+    const filasDescanso = tareasFuerza
+      .filter((t) => (Number(t.series) || 0) > 1)
+      .map((t) => ({ t, seg: descansoEfectivoSeg(t, "Fuerza"), propio: Number(t.descanso) > 0 }));
+    const sugerencias = [
+      ...sugerirAlternancias(tareasFuerza, "Fuerza", zonaDe).map((o) => ({ ...o, bloque: "Fuerza" })),
+      ...sugerirAlternancias(tareasCore, "Core", zonaDe).map((o) => ({ ...o, bloque: "Core" })),
+    ];
+    const avisos = [];
+    if (!fechas.length) avisos.push("Sin fechas: no se podrá enviar.");
+    if (targetPlayerIds !== null && !(targetPlayerIds || []).length) avisos.push("Sin jugadores destinatarios: no se podrá enviar.");
+    if (sinCarga.length) avisos.push(`${sinCarga.length} ejercicio(s) de Fuerza sin %1RM ni RIR (${sinCarga.slice(0, 2).map((t) => t.nombre).join(", ")}${sinCarga.length > 2 ? "…" : ""}).`);
+    if (sinSeries.length) avisos.push(`${sinSeries.length} ejercicio(s) de Fuerza sin series o repeticiones: no cuentan en el tiempo estimado.`);
+    return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs) }, filasDescanso, sugerencias, avisos };
+  })();
 
   return (
     <>
@@ -15490,7 +15787,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             Un jugador ya envió esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
-        {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
         {esReutilizacion && !isEditing && (
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.inkSecondary }}>
             <span style={{ fontWeight: 700, color: ds.ink }}>Progresión de carga</span>
@@ -15524,7 +15820,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             <ChevronDown size={15} style={{ color: ds.inkMuted, flexShrink: 0, transition: "transform .15s", transform: detallesAbiertos ? "rotate(180deg)" : "none" }} />
             <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 800, color: ds.ink, flexShrink: 0 }}>{nombre || (isEditing ? "Sesión sin nombre" : "Nueva sesión")}</span>
             <span style={{ fontSize: 11, color: ds.inkMuted, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {(targetPlayerIds === null ? "Todo el equipo" : `${(targetPlayerIds || []).length} jugador(es) concretos`)} · {fechas.length} fecha{fechas.length === 1 ? "" : "s"} · {md || "sin MD"}
+              {(targetPlayerIds === null ? "Todos los jugadores" : `${(targetPlayerIds || []).length} jugador(es) concretos`)} · {fechas.length} fecha{fechas.length === 1 ? "" : "s"} · {md || "sin MD"}
             </span>
           </div>
           {detallesAbiertos && (
@@ -15554,7 +15850,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                   onChange={(e) => setTargetPlayerIds(e.target.value === "equipo" ? null : targetPlayerIds || [])}
                   style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, fontWeight: 600, padding: "7px 9px" }}
                 >
-                  <option value="equipo">Todo el equipo</option>
+                  <option value="equipo">Todos los jugadores</option>
                   <option value="concretos">Jugadores concretos</option>
                 </select>
               </label>
@@ -15571,7 +15867,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               </label>
               {targetPlayerIds !== null && (
                 <div style={{ gridColumn: "1 / -1" }}>
-                  <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
+                  <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} grupos={gruposDestino} />
                 </div>
               )}
               <div style={{ gridColumn: "1 / -1" }}>
@@ -15601,19 +15897,18 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
           )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start", pointerEvents: readOnly ? "none" : undefined }}>
-          {/* Nav de pasos — en escritorio, columna estrecha fija a la izquierda;
-              en móvil, fila horizontal con scroll encima del constructor
-              (mismo patrón responsive que PantallaEntrenadorAncha: una sola
-              condición de layout, sin duplicar el componente). */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14, pointerEvents: readOnly ? "none" : undefined }}>
+          {/* Pasos como pestañas horizontales sobre el constructor (con scroll
+              si no caben): el constructor gana todo el ancho que antes ocupaba
+              la columna de pasos. */}
           <nav
             style={{
               display: "flex",
-              flexDirection: anchoDesktop ? "column" : "row",
+              flexDirection: "row",
               gap: 3,
-              overflowX: anchoDesktop ? "visible" : "auto",
+              overflowX: "auto",
               flexShrink: 0,
-              width: anchoDesktop ? 210 : "100%",
+              width: "100%",
               boxSizing: "border-box",
               background: ds.surface,
               border: `1px solid ${ds.border}`,
@@ -15637,7 +15932,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     border: `1px solid ${activo ? ds.accentBorderSubtle : "transparent"}`,
                     background: activo ? ds.accentSubtle : "transparent",
                     flexShrink: 0,
-                    minWidth: anchoDesktop ? undefined : 150,
+                    minWidth: 150,
                   }}
                 >
                   <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: activo ? ds.accent : ds.inkMuted, width: 14, flexShrink: 0 }}>{String(b.numero).padStart(2, "0")}</span>
@@ -15653,6 +15948,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             })}
           </nav>
 
+          <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start" }}>
           {/* Constructor — solo el contenido del bloque activo. */}
           <div style={{ flex: 1, minWidth: 0, width: anchoDesktop ? undefined : "100%", boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
@@ -16058,35 +16354,19 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               </div>
           </div>
 
-          {/* Vista previa en vivo — mini "teléfono" con exactamente lo que
-              vería el jugador del bloque activo, reutilizando TareaVisualReal
-              (ver previewContenido más arriba). Nunca datos de relleno: si el
-              bloque no tiene nada cargado todavía, se dice así. */}
-          <aside
-            style={{
-              width: anchoDesktop ? 230 : "100%",
-              flexShrink: 0,
-              boxSizing: "border-box",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              background: ds.bgElevated,
-              border: `1px solid ${ds.border}`,
-              borderRadius: 12,
-              padding: 14,
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.06em", color: ds.inkMuted, textTransform: "uppercase", marginBottom: 10, alignSelf: "flex-start" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: ds.success, boxShadow: `0 0 0 3px ${ds.successBorderSubtle}` }} />
-              Vista jugador · en vivo
-            </div>
-            <div style={{ width: "100%", maxWidth: 230, background: ds.canvas, border: "5px solid #030812", borderRadius: 26, boxShadow: dsSh.elevation2, overflow: "hidden", boxSizing: "border-box" }}>
-              <div style={{ padding: "13px 11px", minHeight: 320, display: "flex", flexDirection: "column", gap: 8 }}>{previewContenido()}</div>
-            </div>
-            <div style={{ fontSize: 9.5, color: ds.inkMuted, textAlign: "center", marginTop: 8, lineHeight: 1.5 }}>
-              Se actualiza al momento mientras diseñas — sin guardar ni cambiar de pantalla.
-            </div>
-          </aside>
+          {/* Resumen de la sesión — sustituye a la antigua vista previa del
+              móvil: estructura, tiempo estimado, carga de fuerza, descansos y
+              alternancias recomendadas, estado CMJ y avisos de diseño. */}
+          <ResumenSesionDisenoReal
+            resumen={resumenDiseno}
+            anchoDesktop={anchoDesktop}
+            bloqueActivo={bloqueActivo}
+            onIrBloque={setBloqueActivo}
+            onAplicarAlternancia={aplicarAlternancia}
+            readOnly={readOnly}
+            avisoCmj={<AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
+          />
+          </div>
         </div>
 
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
@@ -16134,403 +16414,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       </div>
     )}
     </>
-  );
-}
-
-// ---------- DINÁMICAS COMPLEMENTARIAS ----------
-// Sesión "de pleno derecho" pero con tipo:"complementaria" y un único bloque
-// de nombre libre (en vez de los 6 fijos de Diseñar sesión) — pensada para
-// programas puntuales (ej. "Miembro Superior") que se activan solo los días
-// concretos que elijas, para el equipo entero o para jugadores concretos.
-// Al guardarse como una Sesión más, la pantalla del jugador la fusiona sola
-// junto a lo que tenga programado ese día (o la muestra sola si no hay nada
-// más), sin ningún cambio en PantallaJugadorReal — ya agrupa por bloque_sesion
-// cualquier sesión que coincida con la fecha y el jugador.
-function DinamicaComplementariaReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
-  const parcialRef = useRef(nuevoEstadoParcial());
-  const isEditing = !!sesionExistente;
-  const esReutilizacion = !!plantilla;
-  const base = sesionExistente || plantilla;
-  const [players, , playersLoaded] = usePlayers();
-  const [ejercicios, , ejerciciosLoaded, , , addEjercicioLocal] = useEntityList("ejercicios");
-  const [materialesDisponibles, materialesLoaded, agregarMaterial] = useMaterialesDisponibles();
-  const asignarZonaYActualizar = async (ejercicio, zona) => {
-    const actualizado = await actualizarZonaEjercicio(ejercicio, zona);
-    addEjercicioLocal(actualizado);
-    return actualizado;
-  };
-  const referenciasPorEjercicio = useReferenciasPorEjercicio(sesionExistente?.id || null);
-
-  const [nombreBloque, setNombreBloque] = useState("");
-  const [fechas, setFechas] = useState(
-    sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
-  );
-  const [nuevaFecha, setNuevaFecha] = useState("");
-  const [targetPlayerIds, setTargetPlayerIds] = useState(base?.jugadores_destino ?? destinatariosSugeridos ?? null);
-  const [tareasBloque, setTareasBloque] = useState([]);
-  const [circuitosBloque, setCircuitosBloque] = useState([]);
-
-  const [previousTareaIds, setPreviousTareaIds] = useState([]);
-  const [previousCircuitoIds, setPreviousCircuitoIds] = useState([]);
-  const [cargandoExistente, setCargandoExistente] = useState(isEditing || esReutilizacion);
-  const [guardando, setGuardando] = useState(false);
-  const [error, setError] = useState("");
-  const [ok, setOk] = useState(false);
-  // Solo se bloquea si algún jugador ya registró datos reales sobre esta
-  // dinámica — se determina de forma asíncrona en el efecto de carga.
-  const [readOnly, setReadOnly] = useState(false);
-  // Mismo guard que en Diseñar sesión: reparte el borrador una sola vez,
-  // para que crear un ejercicio nuevo durante la edición (que refresca la
-  // lista de ejercicios) no vuelva a machacar lo ya añadido.
-  const borradorCargadoRef = useRef(false);
-
-  // Reutilizar: mismo nombre de dinámica y tareas, generadas como registros
-  // nuevos — la sesión original no se toca al guardar.
-  useEffect(() => {
-    if (!esReutilizacion || !ejerciciosLoaded || borradorCargadoRef.current) return;
-    borradorCargadoRef.current = true;
-    const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-    const tareas = plantilla.tareas || [];
-    const nombreDetectado = tareas[0]?.bloque_sesion || "";
-    setNombreBloque(nombreDetectado);
-    setTareasBloque(tareas.filter((t) => !t.circuito_id).map((t) => tareaADraft(t, ejerciciosById, { nuevo: true })));
-    setCircuitosBloque(nombreDetectado ? agruparCircuitosDeTareas(tareas, ejerciciosById, nombreDetectado, { nuevo: true }) : []);
-    setCargandoExistente(false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [esReutilizacion, ejerciciosLoaded]);
-
-  useEffect(() => {
-    if (!isEditing || !ejerciciosLoaded || borradorCargadoRef.current) return;
-    borradorCargadoRef.current = true;
-    let cancelled = false;
-    (async () => {
-      const todasLasTareas = await api.list("tareas", { sesion_id: sesionExistente.id });
-      const tareas = todasLasTareas.filter((t) => t.sesion_id === sesionExistente.id);
-      const todosLosCircuitos = await api.list("circuitos", { sesion_id: sesionExistente.id });
-      const circuitos = todosLosCircuitos.filter((c) => c.sesion_id === sesionExistente.id);
-      const tareaIds = new Set(tareas.map((t) => t.id));
-      const todosLosRegistros = tareaIds.size ? await api.list("registros", {}) : [];
-      // Igual que en Diseñar sesión: un progreso guardado sin enviar no bloquea.
-      const hayRegistro = todosLosRegistros.some((r) => tareaIds.has(r.tarea_id) && r.enviado !== false);
-      if (cancelled) return;
-      setReadOnly(hayRegistro);
-      const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-      const toDraft = (t) => {
-        let materiales = [];
-        try {
-          materiales = t.material ? JSON.parse(t.material) : [];
-        } catch {
-          materiales = [];
-        }
-        const e = ejerciciosById.get(t.ejercicio_id) || {};
-        return {
-          key: t.id,
-          tareaId: t.id,
-          nombre: e.nombre || "(ejercicio eliminado)",
-          ejercicioId: t.ejercicio_id,
-          gif: e.gif_url || "",
-          modo: t.modo || "reps",
-          series: t.series ?? "",
-          cantidad: t.cantidad ?? "",
-          rir: t.rir ?? "",
-          modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
-          pct1rm: t.pct1rm ?? "",
-          tipoResistencia: t.tipo_resistencia || "Peso libre",
-          materiales,
-          lateralidad: t.lateralidad || "bilateral",
-          nota: t.nota || "",
-          circuito_id: t.circuito_id || "",
-          orden_en_circuito: t.orden_en_circuito || "",
-        };
-      };
-      // El nombre del bloque no se guarda aparte — se lee directamente de
-      // bloque_sesion de sus propias tareas, así no hace falta ninguna
-      // columna nueva en Sesiones solo para esto.
-      const nombreDetectado = tareas[0]?.bloque_sesion || circuitos[0]?.bloque_sesion || "";
-      setNombreBloque(nombreDetectado);
-      setTareasBloque(tareas.filter((t) => !t.circuito_id).map(toDraft));
-      setCircuitosBloque(
-        circuitos.map((c) => ({
-          key: c.id,
-          circuitoId: c.id,
-          rondas: c.rondas || 1,
-          nombre: c.nombre || "",
-          tipo: c.tipo === "grupo" ? "grupo" : "circuito",
-          tareas: tareas
-            .filter((t) => t.circuito_id === c.id)
-            .sort((a, b) => (Number(a.orden_en_circuito) || 0) - (Number(b.orden_en_circuito) || 0))
-            .map(toDraft),
-        }))
-      );
-      setPreviousTareaIds(tareas.map((t) => t.id));
-      setPreviousCircuitoIds(circuitos.map((c) => c.id));
-      setCargandoExistente(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isEditing, ejerciciosLoaded]);
-
-  const addFecha = () => {
-    if (!nuevaFecha) return;
-    if (!fechas.includes(nuevaFecha)) setFechas((prev) => [...prev, nuevaFecha].sort());
-    setNuevaFecha("");
-  };
-  const removeFecha = (f) => setFechas((prev) => prev.filter((d) => d !== f));
-
-  const agregarTarea = (bloqueSetter) => async (ejercicioOClic) => {
-    let ejercicioId = ejercicioOClic.id;
-    let nombre = ejercicioOClic.nombre;
-    let gifUrl = ejercicioOClic.gif_url || "";
-    if (!ejercicioId) {
-      try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
-        ejercicioId = creado.id;
-        gifUrl = creado.gif_url || "";
-        addEjercicioLocal(creado);
-      } catch (e) {
-        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
-        return;
-      }
-    }
-    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl })]);
-  };
-
-  const guardar = async () => {
-    setError("");
-    setOk(false);
-    if (!fechas.length) {
-      setError("Añade al menos una fecha.");
-      return;
-    }
-    if (!nombreBloque.trim()) {
-      setError("Ponle un nombre a esta dinámica (ej. Miembro Superior).");
-      return;
-    }
-    setGuardando(true);
-    try {
-      const sesionRecord = {
-        id: sesionExistente?.id,
-        tipo: "complementaria",
-        fechas,
-        md: "",
-        objetivo: "",
-        jugadores_destino: targetPlayerIds,
-        preventivo_activo: 0,
-        activacion_activa: false,
-        lote_origen_id: "",
-        enviada: true,
-      };
-      const enviadaFinal = sesionRecord.enviada;
-      const enviadaInicial = isEditing ? !!sesionExistente?.enviada : false;
-      if (!sesionRecord.id) {
-        if (!parcialRef.current.sesionId) parcialRef.current.sesionId = genId(ID_PREFIX.sesiones);
-        sesionRecord.id = parcialRef.current.sesionId;
-      }
-      sesionRecord.enviada = enviadaInicial;
-      const savedSesion = await api.save("sesiones", sesionRecord);
-
-      const keepTareaIds = new Set();
-      const keepCircuitoIds = new Set();
-      const nombre = nombreBloque.trim();
-
-      const guardarTareaSuelta = async (t) => {
-        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
-          id: t.tareaId,
-          sesion_id: savedSesion.id,
-          bloque_sesion: nombre,
-          ejercicio_id: t.ejercicioId,
-          modo: t.modo,
-          series: t.series,
-          cantidad: t.cantidad,
-          rir: t.rir,
-          tipo_resistencia: t.tipoResistencia || "",
-          material: JSON.stringify(t.materiales || []),
-          lateralidad: t.lateralidad || "bilateral",
-          nota: t.nota || "",
-          circuito_id: "",
-          orden_en_circuito: "",
-        });
-        keepTareaIds.add(saved.id);
-      };
-
-      const guardarCircuito = async (c) => {
-        const savedCircuito = await guardarFilaConParcial(parcialRef.current, "circuitos", { id: c.circuitoId, sesion_id: savedSesion.id, bloque_sesion: nombre, rondas: c.rondas || 1, nombre: c.nombre || "", tipo: c.tipo || "circuito" });
-        keepCircuitoIds.add(savedCircuito.id);
-        await Promise.all(
-          c.tareas.map(async (t, i) => {
-            const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
-              id: t.tareaId,
-              sesion_id: savedSesion.id,
-              bloque_sesion: nombre,
-              ejercicio_id: t.ejercicioId,
-              modo: t.modo,
-              series: t.series,
-              cantidad: t.cantidad,
-              rir: t.rir,
-              tipo_resistencia: t.tipoResistencia || "",
-              material: JSON.stringify(t.materiales || []),
-              lateralidad: t.lateralidad || "bilateral",
-              nota: t.nota || "",
-              circuito_id: savedCircuito.id,
-              orden_en_circuito: i + 1,
-            });
-            keepTareaIds.add(saved.id);
-          })
-        );
-      };
-
-      await Promise.all(tareasBloque.map(guardarTareaSuelta));
-      await Promise.all(circuitosBloque.map(guardarCircuito));
-
-      const tareasABorrar = [...new Set([...previousTareaIds, ...parcialRef.current.tareas])].filter((id) => !keepTareaIds.has(id));
-      const circuitosABorrar = [...new Set([...previousCircuitoIds, ...parcialRef.current.circuitos])].filter((id) => !keepCircuitoIds.has(id));
-      await Promise.all(tareasABorrar.map((id) => api.delete("tareas", id)));
-      await Promise.all(circuitosABorrar.map((id) => api.delete("circuitos", id)));
-
-      // Todo guardado: ahora sí se publica la sesión si tocaba.
-      if (enviadaFinal !== enviadaInicial) await api.save("sesiones", { ...sesionRecord, id: savedSesion.id, enviada: enviadaFinal });
-      parcialRef.current = nuevoEstadoParcial();
-
-      invalidateEntityCache("sesiones");
-      invalidateEntityCache("tareas");
-      invalidateEntityCache("circuitos");
-      invalidateBootstrapCache();
-
-      setOk(true);
-      onGuardado?.();
-    } catch (e) {
-      setError("No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.");
-    } finally {
-      setGuardando(false);
-    }
-  };
-
-  const loaded = playersLoaded && ejerciciosLoaded && materialesLoaded && !cargandoExistente;
-  if (!loaded) return <LoadingBlock />;
-
-  return (
-    <PantallaBase rol="entrenador" maxWidth={640}>
-      <div>
-        <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Volver a Dashboard
-        </button>
-        {readOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
-            <Lock size={13} style={{ flexShrink: 0 }} />
-            Un jugador ya envió esta dinámica — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
-          </div>
-        )}
-        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR DINÁMICA") : "NUEVA DINÁMICA"}</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Dinámica complementaria</h1>
-          <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 10 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE DE LA DINÁMICA</span>
-            <input value={nombreBloque} onChange={(e) => setNombreBloque(e.target.value)} placeholder="Ej. Miembro Superior" style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 13, padding: "8px 10px" }} />
-            <span style={{ fontSize: 11, color: ds.inkMuted }}>Es lo que verá el jugador como título de este bloque en su pantalla.</span>
-          </label>
-          <div style={{ marginBottom: 4 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>PARA</div>
-            <div style={{ marginBottom: 8 }}>
-              <select
-                value={targetPlayerIds === null ? "equipo" : "concretos"}
-                onChange={(e) => setTargetPlayerIds(e.target.value === "equipo" ? null : targetPlayerIds || [])}
-                style={{ width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, fontWeight: 600, padding: "8px 10px" }}
-              >
-                <option value="equipo">Todo el equipo</option>
-                <option value="concretos">Jugadores concretos</option>
-              </select>
-            </div>
-            {targetPlayerIds !== null && (
-              <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} />
-            )}
-          </div>
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 6 }}>DÍAS EN LOS QUE SE ACTIVA</div>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-              {fechas.map((f) => (
-                <span key={f} style={{ display: "flex", alignItems: "center", gap: 6, fontFamily: dsF.mono, fontSize: 11.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "4px 8px" }}>
-                  {f}
-                  <span onClick={() => removeFecha(f)} style={{ cursor: "pointer", color: ds.inkMuted }}>
-                    ×
-                  </span>
-                </span>
-              ))}
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <input type="date" value={nuevaFecha} onChange={(e) => setNuevaFecha(e.target.value)} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px" }} />
-              <button onClick={addFecha} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 7, padding: "0 12px", cursor: "pointer", fontSize: 13 }}>
-                + Añadir fecha
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 14, pointerEvents: readOnly ? "none" : undefined }}>
-          <div style={{ fontSize: 14.5, fontWeight: 600, marginBottom: 10 }}>Tareas</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {tareasBloque.map((t) => (
-              <FilaTareaReal
-                key={t.key}
-                tarea={t}
-                mostrarCarga={true}
-                materialesDisponibles={materialesDisponibles}
-                onAgregarMaterial={agregarMaterial}
-                referenciasPorEjercicio={referenciasPorEjercicio}
-                onCambiar={(nuevo) => setTareasBloque((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
-                onEliminar={() => setTareasBloque((prev) => prev.filter((x) => x.key !== t.key))}
-              />
-            ))}
-            {circuitosBloque.map((c) => (
-              <CajaCircuitoReal
-                key={c.key}
-                circuito={c}
-                bloque={nombreBloque || "Complementaria"}
-                mostrarCarga={true}
-                ejercicios={ejercicios}
-                        onEjercicioCreado={addEjercicioLocal}
-                        onAsignarZona={asignarZonaYActualizar}
-                        onError={setError}
-                materialesDisponibles={materialesDisponibles}
-                onAgregarMaterial={agregarMaterial}
-                referenciasPorEjercicio={referenciasPorEjercicio}
-                onCambiarTareas={(nuevas) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
-                onCambiarRondas={(r) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
-                onCambiarCircuito={(patch) => setCircuitosBloque((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
-                onEliminarCircuito={() => setCircuitosBloque((prev) => prev.filter((x) => x.key !== c.key))}
-              />
-            ))}
-            <div style={{ display: "flex", gap: 8 }}>
-              <SelectorEjercicioReal ejercicios={ejercicios} bloque={null} onAdd={agregarTarea(setTareasBloque)} onAsignarZona={asignarZonaYActualizar} />
-              <button
-                onClick={() => setCircuitosBloque((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
-              >
-                + Añadir circuito
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
-        {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>Guardado y enviado.</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
-          <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
-            {readOnly ? "Volver" : "Cancelar"}
-          </button>
-          {!readOnly && (
-            <button
-              onClick={guardar}
-              disabled={guardando}
-              style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
-            >
-              {guardando ? "Guardando..." : "Guardar y enviar"}
-            </button>
-          )}
-        </div>
-      </div>
-    </PantallaBase>
   );
 }
 
@@ -16645,9 +16528,6 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
   }
   if (coachModulo === "diseno") {
     return <DisenoSesionReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
-  }
-  if (coachModulo === "complementarias") {
-    return <DinamicaComplementariaReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
   }
   if (coachModulo === "programacion") {
     return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
@@ -16956,6 +16836,13 @@ function ResumenFichaJugadorReal({ jugador, onNavigateTab, onGuardarObjetivo }) 
           sub={variacionPct == null ? "sin datos suficientes" : variacionPct <= -8 ? "caída relevante" : variacionPct < -3 ? "algo por debajo" : "dentro de lo normal"}
         />
       </div>
+
+      {cambiosE1rmSemana.length > 0 && (
+        <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "12px 14px", marginBottom: 18 }}>
+          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 8 }}>Fuerza esta semana · ejercicio a ejercicio</div>
+          <ListaCambiosEjerciciosReal cambios={[...cambiosE1rmSemana].sort((a, b) => a.pct - b.pct)} />
+        </div>
+      )}
 
       <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, marginBottom: 10 }}>Últimos registros</div>
       {ultimosRegistros.length === 0 ? (
@@ -17987,7 +17874,7 @@ ${tabla(["Fecha", "Altura (cm)", "Potencia rel. (W/kg)", "Fuerza rel. (N/kg)", "
 function construirCsvRegistros(items, refItems) {
   const cab = ["fecha", "ejercicio", "material", "series_pautadas", "series_hechas", "reps", "carga_kg", "rir", "e1rm_estimado_kg", "tipo", "ignorado"];
   const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const filas = [...items.filter((it) => it.done && !it.esResistencia && it.bloque === "Fuerza"), ...refItems].map((it) => {
+  const filas = [...items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque === "Fuerza"), ...refItems].map((it) => {
     const e1 = e1rmDeValores(it.cargaOriginal ?? it.cargaReal, it.repsOriginal ?? it.repsReal, it.rirOriginal ?? it.rirReal);
     return [
       it.date,
@@ -18275,7 +18162,7 @@ function ProgresoFichaJugadorReal({ jugador }) {
   });
   const puntosVolumen = semanas.map((s) => {
     const series = items
-      .filter((it) => it.done && !it.esResistencia && it.bloque !== "CMJ" && it.date >= s.inicio && it.date <= s.fin)
+      .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.date >= s.inicio && it.date <= s.fin)
       .reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0);
     return { label: s.esActual ? "Actual" : fmtDateShort(s.inicio), valor: series };
   });
