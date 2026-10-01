@@ -1796,11 +1796,13 @@ function formatearObjetivoResistencia(r) {
       .filter(Boolean)
       .join(" · ");
   }
+  const sinImpacto = (r.modalidad || "carrera") !== "carrera";
   if (r.tipo === "hiit") {
     return [
       r.bloques && `${r.bloques} bloques`,
       r.intervalos && `${r.intervalos} intervalos`,
       conUnidad(r.tiempo, r.tiempoUnidad),
+      sinImpacto && r.rpe && `RPE ${r.rpe}`,
       conUnidad(r.recuperacion, r.recuperacionUnidad) && `${conUnidad(r.recuperacion, r.recuperacionUnidad)} recuperación`,
     ]
       .filter(Boolean)
@@ -1810,7 +1812,8 @@ function formatearObjetivoResistencia(r) {
     return [
       r.bloques && `${r.bloques} bloques`,
       r.series && `${r.series} series`,
-      r.distancia && `${r.distancia} m`,
+      sinImpacto ? r.duracion && `${r.duracion} s` : r.distancia && `${r.distancia} m`,
+      sinImpacto && r.rpe && `RPE ${r.rpe}`,
       conUnidad(r.recuperacion, r.recuperacionUnidad) && `${conUnidad(r.recuperacion, r.recuperacionUnidad)} recuperación`,
     ]
       .filter(Boolean)
@@ -1942,6 +1945,33 @@ function objetivoJugadorResistencia(tipo, intensidadVal, distancia, jugador) {
 // sugerido) para un campo de una tarea de Resistencia. Sin rango/sugerido
 // publicado (p. ej. R0, o un campo sin referencia) no se evalúa — el
 // campo se queda sin indicador, nunca con uno inventado.
+// Las pautas de cada capacidad (R0-R6) se expresan en % de VAM / velocidad
+// máxima, que solo existen corriendo. Fuera de la carrera (bici, elíptica,
+// piscina, otro) se muestran solo las referencias que sí valen allí (%VO2máx,
+// %FCmáx) y el RPE, y la pauta sugerida se traduce a duración + RPE.
+function rangoResistenciaModalidad(capacidadObj, sinImpacto) {
+  if (!capacidadObj) return "";
+  if (!sinImpacto) return capacidadObj.rango;
+  const partes = (capacidadObj.rango || "").split(" · ").filter((p) => !/VAM|velocidad/i.test(p));
+  if (capacidadObj.rpe) partes.push(`RPE ${capacidadObj.rpe.min}-${capacidadObj.rpe.max}`);
+  return partes.join(" · ");
+}
+
+function pautaSugeridaModalidad(capacidadObj, sinImpacto) {
+  const s = { ...(capacidadObj?.sugerido || {}) };
+  if (!sinImpacto || (capacidadObj?.tipo === "continuo")) return s;
+  // Sin velocidad de referencia: la duración equivale al tiempo que tardaría
+  // un futbolista medio en cubrir la distancia sugerida a esa intensidad.
+  if (capacidadObj.tipo === "rsa" && s.distancia && s.intensidad) {
+    const ms = (ESTIMACION_POBLACIONAL_RESISTENCIA.vam.valor * s.intensidad) / 100 / 3.6;
+    s.duracion = Math.max(5, Math.round(s.distancia / ms));
+  }
+  s.distancia = "";
+  s.intensidad = "";
+  if (capacidadObj.rpe) s.rpe = Math.round((capacidadObj.rpe.min + capacidadObj.rpe.max) / 2);
+  return s;
+}
+
 function evaluarIndicadorResistencia(key, valor, capacidadObj) {
   if (valor === "" || valor == null || isNaN(Number(valor))) return null;
   const v = Number(valor);
@@ -2187,7 +2217,7 @@ async function resolveEjercicio(ejercicios, def) {
   const record = {
     id: match?.id,
     nombre,
-    bloque: match?.bloque || "",
+    bloque: match?.bloque || def.bloque || "",
     categoria_preventiva_id: match?.categoria_preventiva_id || "",
     tags_descriptivos: def.tags_descriptivos || [],
     gif_url: def.gif_url !== undefined ? def.gif_url : match?.gif_url || "",
@@ -11667,7 +11697,14 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 // Máquina y un Trineo cargan de forma distinta) — cuando una tarea tiene dos
 // o más de estos seleccionados a la vez, se le pregunta al jugador cuál usó
 // de verdad, en vez de asumir uno.
-const EQUIPOS_AMBIGUOS = ["Barra", "Multipower", "Kettlebell", "Mancuerna", "Máquina", "Trineo"];
+// Un material cuenta como "equipo" (distinto del resto a efectos de comparar
+// cargas y de preguntar al jugador cuál usa) salvo que sea un accesorio sin
+// carga. Antes era una lista cerrada (Barra, Mancuerna...) y materiales como
+// Polea nunca disparaban la pregunta de "¿con qué material?".
+const ACCESORIOS_SIN_CARGA = ["ninguno", "std", "banco", "step", "cajón", "caja", "colchoneta", "suelo", "pared", "banda", "goma", "bosu", "fitball", "foam roller", "rodillo", "valla", "cono", "aro", "escalera"].map((x) => x.toLowerCase());
+const EQUIPOS_AMBIGUOS = {
+  includes: (m) => !!m && !ACCESORIOS_SIN_CARGA.includes(String(m).trim().toLowerCase()),
+};
 
 // Define qué hace que dos tareas sean "la misma" a efectos de comparar
 // carga entre sesiones: mismo ejercicio, mismo equipo efectivamente usado,
@@ -13715,7 +13752,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             ))}
           </select>
         </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="LADO" w={92}>
+        <CampoEtiquetadoDiseno etiqueta="LADO" w={108}>
           <select
             value={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"}
             onChange={(e) => onCambiar({ ...tarea, lateralidad: e.target.value })}
@@ -14012,7 +14049,7 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   };
   const aplicarPautaSugerida = () => {
     if (!capacidadObj) return;
-    const s = capacidadObj.sugerido || {};
+    const s = pautaSugeridaModalidad(capacidadObj, sinImpacto);
     onCambiar({
       ...tarea,
       ...camposVacios,
@@ -14025,6 +14062,8 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
       tiempoUnidad: s.tiempoUnidad || tarea.tiempoUnidad || "seg",
       intensidad: s.intensidad ?? "",
       distancia: s.distancia ?? "",
+      duracion: s.duracion ?? "",
+      rpe: s.rpe ?? "",
       recuperacion: s.recuperacion ?? "",
       recuperacionUnidad: s.recuperacionUnidad || tarea.recuperacionUnidad || "seg",
     });
@@ -14138,7 +14177,7 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
             </div>
             <div style={{ fontFamily: dsF.sans, fontSize: 12, fontWeight: 600, color: ds.ink }}>{capacidadObj.metodo}</div>
             <div style={{ fontFamily: dsF.sans, fontSize: 12, fontWeight: 600, color: ds.ink }}>
-              {capacidadObj.rango}
+              {rangoResistenciaModalidad(capacidadObj, sinImpacto)}
               {capacidadObj.lactato !== "—" ? ` · Lactato ${capacidadObj.lactato}` : ""}
             </div>
             <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>{capacidadObj.nota}</div>
@@ -14232,7 +14271,9 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   // que ningún ejercicio pasa de aquí sin ella.
   const [pendienteZona, setPendienteZona] = useState(null);
   const [guardandoZona, setGuardandoZona] = useState(false);
-  const coincideBloque = (e) => !bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
+  // Los ejercicios sin bloque (creados desde el diseñador antes de este arreglo)
+  // también se ofrecen: antes quedaban invisibles y había que volver a crearlos.
+  const coincideBloque = (e) => !bloque || !e.bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
   const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
 
   // Igual que en la Biblioteca: la matriz aparece primero, y justo debajo,
@@ -14274,7 +14315,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
       if (pendienteZona.nuevo) {
         // Todavía no existe en la base de datos — la zona viaja junto con
         // el resto de datos hasta el sitio donde de verdad se crea.
-        onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: [zona] });
+        onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: [zona], bloque: bloque || "" });
       } else {
         // Ya existe: se actualiza ese ejercicio en tu biblioteca para
         // siempre, y se añade a la sesión con la zona ya puesta.
@@ -14295,8 +14336,12 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
         + Añadir tarea desde biblioteca
       </button>
       {abierto && (
-        <CerrablePorFuera onCerrar={cerrarTodo}>
-        <div style={{ position: "absolute", zIndex: 10, top: "110%", left: 0, width: 260, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 10, boxShadow: "0 12px 28px rgba(0,0,0,0.45)", padding: 8 }}>
+        <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+        <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: 440, maxHeight: "82dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+            <span style={{ fontFamily: dsF.display, fontSize: 13.5, fontWeight: 700 }}>Añadir ejercicio{bloque ? ` · ${bloque}` : ""}</span>
+            <button type="button" onClick={cerrarTodo} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
+          </div>
           {!pendienteZona && (
             <>
               <input
@@ -14306,7 +14351,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
                 placeholder="Buscar ejercicio..."
                 style={{ width: "100%", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
               />
-              <div style={{ maxHeight: 220, overflowY: "auto" }}>
+              <div style={{ flex: 1, minHeight: 0, maxHeight: "min(58dvh, 440px)", overflowY: "auto" }}>
                 {opciones.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
                 {opciones.map((e) => (
                   <div
@@ -14361,7 +14406,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
             </div>
           )}
         </div>
-        </CerrablePorFuera>
+        </div>
       )}
     </div>
   );
@@ -14400,7 +14445,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
       // tarea con un ejercicioId vacío, sin decir nada, y quedaba con el
       // nombre perdido para siempre.
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: ejercicioOClic.bloque || "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         gifUrl = creado.gif_url || "";
         onEjercicioCreado?.(creado);
@@ -14716,6 +14761,55 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar, grupos = [
 // abrir este editor para una fecha y un ámbito (equipo/grupo/jugador) ya
 // elegidos allí — ningún otro punto de entrada (Diseñar sesión, Reutilizar)
 // los pasa nunca, así que su comportamiento de siempre no cambia en nada.
+// Resumen compacto en una sola franja bajo las pestañas: tiempo total, tiempo
+// por bloque y avisos. El detalle completo (tareas de cada bloque, datos de
+// fuerza) se abre solo si lo pides, en un panel lateral que no empuja nada.
+function BarraResumenDisenoReal({ resumen, bloqueActivo, onIrBloque }) {
+  const [abierto, setAbierto] = useState(false);
+  const { bloques, totalSeg, fuerza, avisos } = resumen;
+  const activos = bloques.filter((b) => b.seg > 0 || b.sinDato);
+  const stats = [fuerza.series ? `${fuerza.series} series` : null, fuerza.pct != null ? `${Math.round(fuerza.pct)} % 1RM` : null, fuerza.rir != null ? `RIR ${fuerza.rir.toFixed(1)}` : null].filter(Boolean);
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 10, padding: "6px 10px" }}>
+        <span title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 15, fontWeight: 700, color: ds.accent, flexShrink: 0 }}>
+          ~{formatearDuracionDiseno(totalSeg)}
+        </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflowX: "auto" }}>
+          {activos.map((b) => (
+            <span
+              key={b.id}
+              onClick={() => onIrBloque(b.id)}
+              style={{ flexShrink: 0, cursor: "pointer", fontSize: 11, padding: "2px 8px", borderRadius: 999, border: `1px solid ${bloqueActivo === b.id ? ds.accentBorderSubtle : ds.border}`, background: bloqueActivo === b.id ? ds.accentSubtle : "transparent", color: ds.inkSecondary, whiteSpace: "nowrap" }}
+            >
+              {b.nombre} <span style={{ fontFamily: dsF.mono, color: b.sinDato ? ds.danger : ds.ink }}>{b.sinDato ? "!" : formatearDuracionDiseno(b.seg)}</span>
+            </span>
+          ))}
+          {stats.length > 0 && <span style={{ flexShrink: 0, fontSize: 10.5, color: ds.inkMuted, whiteSpace: "nowrap" }}>· Fuerza {stats.join(" · ")}</span>}
+        </div>
+        {avisos.length > 0 && (
+          <span title={avisos.join("\n")} style={{ flexShrink: 0, fontSize: 11, color: ds.danger, border: `1px solid ${ds.danger}`, borderRadius: 999, padding: "1px 8px", cursor: "pointer" }} onClick={() => setAbierto(true)}>
+            ⚠ {avisos.length}
+          </span>
+        )}
+        <button type="button" onClick={() => setAbierto(true)} style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "3px 10px", cursor: "pointer" }}>
+          Detalle
+        </button>
+      </div>
+      {abierto && (
+        <div onClick={() => setAbierto(false)} style={{ position: "fixed", inset: 0, zIndex: 58, background: "rgba(0,0,0,0.5)", display: "flex", justifyContent: "flex-end" }}>
+          <div onClick={(ev) => ev.stopPropagation()} style={{ width: "min(360px, 100%)", height: "100%", overflowY: "auto", background: ds.bgElevated, borderLeft: `1px solid ${ds.border}`, padding: 12, boxSizing: "border-box" }}>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 6 }}>
+              <button type="button" onClick={() => setAbierto(false)} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
+            </div>
+            <ResumenSesionDisenoReal resumen={resumen} anchoDesktop={false} bloqueActivo={bloqueActivo} onIrBloque={(id) => { onIrBloque(id); setAbierto(false); }} />
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // Panel de resumen del diseñador (columna derecha), deliberadamente compacto:
 // tiempo total estimado, una fila por bloque, una línea de carga de fuerza y
 // los avisos pendientes. El tiempo es orientativo (ver estimarTareaSeg).
@@ -15261,7 +15355,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: ejercicioOClic.bloque || "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         gifUrl = creado.gif_url || "";
         addEjercicioLocal(creado);
@@ -15299,7 +15393,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     let gifUrl = ejercicioOClic.gif_url || "";
     if (!ejercicioId) {
       try {
-        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: ejercicioOClic.bloque || "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
         ejercicioId = creado.id;
         gifUrl = creado.gif_url || "";
         addEjercicioLocal(creado);
@@ -15876,6 +15970,12 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             </span>
           </div>
           {detallesAbiertos && (
+            <div onClick={() => setDetallesAbiertos(false)} style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "56px 16px 16px" }}>
+            <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: 900, maxHeight: "calc(100dvh - 72px)", overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px 4px" }}>
+              <span style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>Configuración de la sesión</span>
+              <button type="button" onClick={() => setDetallesAbiertos(false)} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 7, padding: "5px 14px", fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>Listo</button>
+            </div>
             <div style={{ padding: "4px 14px 15px", display: "grid", gridTemplateColumns: anchoDesktop ? "repeat(4, 1fr)" : "1fr 1fr", gap: 14 }}>
               <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 <span style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Nombre de plantilla</span>
@@ -15946,6 +16046,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 </div>
               </div>
             </div>
+            </div>
+            </div>
           )}
         </div>
         </div>
@@ -16001,9 +16103,10 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             })}
           </nav>
 
-          <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start", flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
+          <BarraResumenDisenoReal resumen={resumenDiseno} bloqueActivo={bloqueActivo} onIrBloque={setBloqueActivo} />
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
           {/* Constructor — solo el contenido del bloque activo. */}
-          <div style={{ flex: 1, minWidth: 0, width: anchoDesktop ? undefined : "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
+          <div style={{ flex: "0 0 auto", width: "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
                 <div style={{ width: 26, height: 26, borderRadius: 7, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
                   <IconoBloqueDiseno id={bloqueInfo.id} />
@@ -16410,15 +16513,6 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               </div>
           </div>
 
-          {/* Resumen de la sesión — sustituye a la antigua vista previa del
-              móvil: estructura, tiempo estimado, carga de fuerza, descansos y
-              alternancias recomendadas, estado CMJ y avisos de diseño. */}
-          <ResumenSesionDisenoReal
-            resumen={resumenDiseno}
-            anchoDesktop={anchoDesktop}
-            bloqueActivo={bloqueActivo}
-            onIrBloque={setBloqueActivo}
-          />
           </div>
         </div>
 
