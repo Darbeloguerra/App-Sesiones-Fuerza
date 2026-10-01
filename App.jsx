@@ -2092,7 +2092,7 @@ function useAnchoVentana() {
   return ancho;
 }
 
-function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido = false }) {
+function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido = false, layoutFijo = false }) {
   const alto = useAlturaVentana();
   const anchoMax = maxWidth || (rol === "jugador" ? 420 : 640);
   return (
@@ -2112,7 +2112,9 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
         // Capa 1: SOLO scroll. No lleva justifyContent ni ninguna alineación —
         // mezclar overflow:auto con centrado flex en el mismo elemento es
         // justo lo que causaba que el centrado se ignorase.
-        overflowY: "auto",
+        // layoutFijo: la pantalla no hace scroll; lo hace solo una zona
+        // interna (cabecera y botones quedan siempre visibles).
+        overflowY: layoutFijo ? "hidden" : "auto",
       }}
     >
       <GlobalStyles />
@@ -2126,10 +2128,11 @@ function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido
           // pantalla, esta capa crece y es la de fuera la que hace scroll,
           // en vez de recortar nada) y no tiene overflow propio.
           minHeight: centrarContenido ? alto : undefined,
-          display: centrarContenido ? "flex" : "block",
+          display: centrarContenido || layoutFijo ? "flex" : "block",
           flexDirection: "column",
           justifyContent: centrarContenido ? "center" : "flex-start",
-          padding: centrarContenido ? "24px" : rol === "jugador" ? "22px 20px 40px" : "24px 16px 40px",
+          height: layoutFijo ? "100%" : undefined,
+          padding: centrarContenido ? "24px" : layoutFijo ? "14px 16px 12px" : rol === "jugador" ? "22px 20px 40px" : "24px 16px 40px",
         }}
       >
         {children}
@@ -14692,136 +14695,87 @@ function ListaJugadoresCheckReal({ players, seleccionados, onCambiar, grupos = [
 // abrir este editor para una fecha y un ámbito (equipo/grupo/jugador) ya
 // elegidos allí — ningún otro punto de entrada (Diseñar sesión, Reutilizar)
 // los pasa nunca, así que su comportamiento de siempre no cambia en nada.
-// Panel de resumen del diseñador (columna derecha). Solo muestra datos que
-// salen del borrador; el tiempo es una estimación orientativa (ver
-// estimarTareaSeg: 4 s por repetición + descansos + 30 s por cambio).
-function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloque, onAplicarAlternancia, readOnly, avisoCmj }) {
-  const { bloques, totalSeg, fuerza, filasDescanso, sugerencias, avisos } = resumen;
-  const titulo = (txt) => (
-    <div style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.06em", color: ds.inkMuted, textTransform: "uppercase", marginBottom: 7 }}>{txt}</div>
-  );
-  const caja = { borderTop: `1px solid ${ds.border}`, paddingTop: 12, marginTop: 12 };
-  const fmtSeg = (n) => (n >= 60 && n % 60 === 0 ? `${n / 60} min` : `${n} s`);
+// Panel de resumen del diseñador (columna derecha), deliberadamente compacto:
+// tiempo total estimado, una fila por bloque, una línea de carga de fuerza y
+// los avisos pendientes. El tiempo es orientativo (ver estimarTareaSeg).
+function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloque }) {
+  const { bloques, totalSeg, fuerza, avisos } = resumen;
+  const stats = [
+    fuerza.n ? `${fuerza.n} ej.` : null,
+    fuerza.series ? `${fuerza.series} series` : null,
+    fuerza.pct != null ? `${Math.round(fuerza.pct)} % 1RM` : null,
+    fuerza.rir != null ? `RIR ${fuerza.rir.toFixed(1)}` : null,
+  ].filter(Boolean);
   return (
     <aside
       style={{
-        width: anchoDesktop ? 330 : "100%",
+        width: anchoDesktop ? 250 : "100%",
         flexShrink: 0,
         boxSizing: "border-box",
         background: ds.surface,
         border: `1px solid ${ds.border}`,
         borderRadius: 12,
-        padding: 14,
+        padding: "10px 12px",
         position: anchoDesktop ? "sticky" : "static",
-        top: 12,
-        maxHeight: anchoDesktop ? "calc(100dvh - 24px)" : undefined,
-        overflowY: anchoDesktop ? "auto" : "visible",
+        top: 0,
       }}
     >
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
-        <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>Resumen de la sesión</div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 20, fontWeight: 700, color: ds.accent, lineHeight: 1 }}>{formatearDuracionDiseno(totalSeg)}</div>
-          <div style={{ fontSize: 9.5, color: ds.inkMuted, marginTop: 2 }}>tiempo estimado</div>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 6 }}>
+        <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 700 }}>Resumen</span>
+        <span title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 16, fontWeight: 700, color: ds.accent }}>
+          ~{formatearDuracionDiseno(totalSeg)}
+        </span>
+      </div>
+      {bloques.map((b) => (
+        <div
+          key={b.id}
+          onClick={() => onIrBloque(b.id)}
+          title={b.sinDato ? "Faltan series o repeticiones para estimar el tiempo" : b.detalle}
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", borderRadius: 5, cursor: "pointer", background: bloqueActivo === b.id ? ds.accentSubtle : "transparent", opacity: b.vacio ? 0.5 : 1 }}
+        >
+          <span style={{ flex: 1, fontSize: 11.5, fontWeight: 600 }}>{b.nombre}</span>
+          {b.sinDato && <span style={{ color: ds.danger, fontSize: 11 }}>!</span>}
+          <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>{b.seg ? formatearDuracionDiseno(b.seg) : "—"}</span>
         </div>
-      </div>
-
-      <div style={caja}>
-        {titulo("Estructura y tiempo")}
-        {bloques.map((b) => (
-          <div
-            key={b.id}
-            onClick={() => onIrBloque(b.id)}
-            style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 6px", borderRadius: 6, cursor: "pointer", background: bloqueActivo === b.id ? ds.accentSubtle : "transparent", opacity: b.vacio ? 0.55 : 1 }}
-          >
-            <span style={{ fontSize: 12, fontWeight: 600, width: 84, flexShrink: 0 }}>{b.nombre}</span>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 10.5, color: b.sinDato ? ds.danger : ds.inkMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {b.sinDato ? "faltan series/reps" : b.detalle}
-            </span>
-            <span style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary }}>{b.seg ? formatearDuracionDiseno(b.seg) : "—"}</span>
-          </div>
-        ))}
-      </div>
-
-      <div style={caja}>
-        {titulo("Carga de fuerza programada")}
-        {fuerza.n === 0 ? (
-          <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Sin ejercicios de fuerza todavía.</div>
-        ) : (
-          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-            {[
-              ["Ejercicios", fuerza.n],
-              ["Series", fuerza.series || "—"],
-              ["%1RM medio", fuerza.pct != null ? `${Math.round(fuerza.pct)} %` : "—"],
-              ["RIR medio", fuerza.rir != null ? fuerza.rir.toFixed(1) : "—"],
-            ].map(([k, v]) => (
-              <div key={k}>
-                <div style={{ fontFamily: dsF.mono, fontSize: 15, fontWeight: 700 }}>{v}</div>
-                <div style={{ fontSize: 9.5, color: ds.inkMuted }}>{k}</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={caja}>
-        {titulo("Recuperación recomendada")}
-        {filasDescanso.length === 0 ? (
-          <div style={{ fontSize: 11.5, color: ds.inkMuted }}>Aparecerá cuando haya ejercicios de fuerza con más de una serie. Es el descanso entre series según el %1RM o el RIR; puedes cambiarlo en cada ejercicio (campo DESC.).</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {filasDescanso.map(({ t, seg, propio }) => (
-              <div key={t.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5 }}>
-                <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.nombre}</span>
-                {t.alternaCon && <span title={`Alterna con ${t.alternaConNombre || "otro ejercicio"}`} style={{ color: ds.accent, fontSize: 10.5 }}>↔</span>}
-                <span style={{ fontFamily: dsF.mono, color: propio ? ds.ink : ds.inkSecondary }}>{fmtSeg(seg)}</span>
-                <span style={{ fontSize: 9.5, color: ds.inkMuted, width: 52, textAlign: "right" }}>{propio ? "tuyo" : "recomend."}</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {sugerencias.length > 0 && !readOnly && (
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Para ganar tiempo, alterna series con un ejercicio de otra zona mientras se recupera el primero:</div>
-            {sugerencias.map(({ a, b, ahorro, bloque }) => (
-              <div key={`${a.key}-${b.key}`} style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 8, padding: "7px 9px" }}>
-                <div style={{ fontSize: 11.5, lineHeight: 1.4 }}>
-                  <strong>{a.nombre}</strong> ↔ <strong>{b.nombre}</strong>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-                  <span style={{ flex: 1, fontSize: 10.5, color: ds.inkSecondary }}>ahorra ~{Math.round(ahorro / 60)} min</span>
-                  <button
-                    type="button"
-                    onClick={() => onAplicarAlternancia(a, b, bloque)}
-                    style={{ fontSize: 11, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 9px", cursor: "pointer" }}
-                  >
-                    Alternar
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {!readOnly && avisoCmj && <div style={caja}>{avisoCmj}</div>}
-
-      {avisos.length > 0 && (
-        <div style={caja}>
-          {titulo("Revisar antes de enviar")}
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            {avisos.map((a) => (
-              <div key={a} style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.45, paddingLeft: 10, borderLeft: `2px solid ${ds.danger}` }}>
-                {a}
-              </div>
-            ))}
-          </div>
+      ))}
+      {stats.length > 0 && (
+        <div style={{ borderTop: `1px solid ${ds.border}`, marginTop: 6, paddingTop: 6, fontSize: 10.5, color: ds.inkSecondary, lineHeight: 1.5 }}>
+          <span style={{ color: ds.inkMuted }}>Fuerza: </span>
+          {stats.join(" · ")}
         </div>
       )}
-      <div style={{ fontSize: 9.5, color: ds.inkMuted, marginTop: 12, lineHeight: 1.5 }}>
-        Tiempo orientativo: 4 s por repetición, descansos entre series, 30 s por cambio de ejercicio. Movilidad (5 min), preventivo (3 min por ejercicio) y CMJ (5 min) son valores fijos.
-      </div>
+      {avisos.length > 0 && (
+        <div style={{ borderTop: `1px solid ${ds.border}`, marginTop: 6, paddingTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          {avisos.map((a) => (
+            <div key={a} style={{ fontSize: 10.5, color: ds.inkSecondary, lineHeight: 1.4, paddingLeft: 7, borderLeft: `2px solid ${ds.danger}` }}>
+              {a}
+            </div>
+          ))}
+        </div>
+      )}
     </aside>
+  );
+}
+
+// Sugerencias de alternancia dentro del constructor de un bloque: dos
+// ejercicios de zonas distintas se alternan durante el descanso del otro.
+function SugerenciasAlternanciaReal({ sugerencias, bloque, onAplicar }) {
+  const lista = sugerencias.filter((x) => x.bloque === bloque);
+  if (!lista.length) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.inkMuted, textTransform: "uppercase" }}>Ahorra tiempo alternando</div>
+      {lista.map(({ a, b, ahorro }) => (
+        <div key={`${a.key}-${b.key}`} style={{ display: "flex", alignItems: "center", gap: 8, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 8, padding: "6px 10px" }}>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 12, lineHeight: 1.4 }}>
+            <strong>{a.nombre}</strong> ↔ <strong>{b.nombre}</strong> <span style={{ color: ds.inkSecondary }}>· ahorra ~{Math.round(ahorro / 60)} min</span>
+          </span>
+          <button type="button" onClick={() => onAplicar(a, b, bloque)} style={{ fontSize: 11.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 10px", cursor: "pointer", flexShrink: 0 }}>
+            Alternar
+          </button>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -15776,8 +15730,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
 
   return (
     <>
-    <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640}>
-      <div>
+    <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640} layoutFijo>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+        <div style={{ flexShrink: 0, maxHeight: "44%", overflowY: "auto" }}>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
           ← Volver a Dashboard
         </button>
@@ -15806,13 +15761,15 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             </span>
           </div>
         )}
-        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</div>
-        <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 600, margin: "0 0 6px", letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
+          <span style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.08em", color: ds.inkSecondary }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</span>
+        </div>
         {/* Barra de configuración plegable — mismo patrón que .details-bar
             del mockup: cabecera con chevron + resumen de una línea, cuerpo
             en rejilla que se despliega al clicar. Ahorra el espacio vertical
             que antes se comía siempre, incluso una vez ya rellenada. */}
-        <div style={{ marginBottom: 22, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ marginBottom: 10, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden" }}>
           <div
             onClick={() => setDetallesAbiertos((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", cursor: "pointer" }}
@@ -15896,8 +15853,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             </div>
           )}
         </div>
+        </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 14, pointerEvents: readOnly ? "none" : undefined }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
           {/* Pasos como pestañas horizontales sobre el constructor (con scroll
               si no caben): el constructor gana todo el ancho que antes ocupaba
               la columna de pasos. */}
@@ -15948,9 +15906,9 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             })}
           </nav>
 
-          <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", flexDirection: anchoDesktop ? "row" : "column", gap: 14, alignItems: "flex-start", flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
           {/* Constructor — solo el contenido del bloque activo. */}
-          <div style={{ flex: 1, minWidth: 0, width: anchoDesktop ? undefined : "100%", boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
+          <div style={{ flex: 1, minWidth: 0, width: anchoDesktop ? undefined : "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
                 <div style={{ width: 26, height: 26, borderRadius: 7, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
                   <IconoBloqueDiseno id={bloqueInfo.id} />
@@ -16201,6 +16159,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                         onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
+                    {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Core" onAplicar={aplicarAlternancia} />}
                     <div style={{ display: "flex", gap: 8 }}>
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
                       <button
@@ -16286,6 +16245,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 )}
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
@@ -16340,6 +16300,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                         onAmpliarVideo={setVideoAmpliado}
                       />
                     ))}
+                    {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Fuerza" onAplicar={aplicarAlternancia} />}
                     <div style={{ display: "flex", gap: 8 }}>
                       <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
                       <button
@@ -16362,16 +16323,14 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
             anchoDesktop={anchoDesktop}
             bloqueActivo={bloqueActivo}
             onIrBloque={setBloqueActivo}
-            onAplicarAlternancia={aplicarAlternancia}
-            readOnly={readOnly}
-            avisoCmj={<AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} />}
           />
           </div>
         </div>
 
+        <div style={{ flexShrink: 0, borderTop: `1px solid ${ds.border}`, paddingTop: 10, marginTop: 8 }}>
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
         {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 22 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
           <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
           </button>
@@ -16394,6 +16353,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
               </button>
             </>
           )}
+        </div>
         </div>
       </div>
     </PantallaBase>
