@@ -9305,7 +9305,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </span>
         )}
         <div onClick={(e) => e.stopPropagation()}>
-          <DsToggle on={hecho} onClick={onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
+          <DsToggle on={hecho} onClick={tarea.eligeEquipo && !hecho && !(registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo)) ? () => setExpandido(true) : onToggle} label={`Marcar "${tarea.nombre}" como hecha`} />
         </div>
       </div>
       {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (() => {
@@ -9352,12 +9352,25 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
           </div>
         );
       })()}
-      {tarea.materiales && tarea.materiales.length > 0 && (
-        <div style={{ marginLeft: 55, display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {tarea.materiales.map((m) => (
-            <DsBadge key={m} tone="accent">{m}</DsBadge>
-          ))}
+      {tarea.eligeEquipo && !hecho && mostrarRegistro ? (
+        <div style={{ marginLeft: 55, display: "flex", flexDirection: "column", gap: 5 }}>
+          <EtiquetaCampoReal color={registro.subtipo && tarea.equiposElegibles?.includes(registro.subtipo) ? ds.inkMuted : ds.accent}>¿QUÉ MATERIAL VAS A UTILIZAR?</EtiquetaCampoReal>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(tarea.equiposElegibles || []).map((op) => (
+              <ChipSeleccionableReal key={op} activo={registro.subtipo === op} onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}>
+                {op}
+              </ChipSeleccionableReal>
+            ))}
+          </div>
         </div>
+      ) : (
+        tarea.materiales && tarea.materiales.length > 0 && (
+          <div style={{ marginLeft: 55, display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {(tarea.eligeEquipo && registro.subtipo ? [registro.subtipo] : tarea.materiales).map((m) => (
+              <DsBadge key={m} tone="accent">{m}</DsBadge>
+            ))}
+          </div>
+        )
       )}
       {tarea.nota && (
         <div style={{ marginLeft: 55, display: "flex", gap: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
@@ -9392,18 +9405,6 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
       )}
       {mostrarFormulario && !tarea.esResistencia && !tarea.esCmj && (
         <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingLeft: 55 }}>
-          {tarea.eligeEquipo && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-              <EtiquetaCampoReal color={ds.accent}>¿QUÉ MATERIAL VAS A UTILIZAR?</EtiquetaCampoReal>
-              <div style={{ display: "flex", gap: 6 }}>
-                {(tarea.equiposElegibles || []).map((op) => (
-                  <ChipSeleccionableReal key={op} activo={registro.subtipo === op} onClick={() => onCambiarRegistro({ ...registro, subtipo: op })}>
-                    {op}
-                  </ChipSeleccionableReal>
-                ))}
-              </div>
-            </div>
-          )}
           {tarea.esCorporal && (
             <div style={{ display: "flex", gap: 6 }}>
               {[
@@ -10728,7 +10729,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       mostrarLateralidad: e.sin_lateralidad !== "si",
       eligeEquipo,
       equiposElegibles: eligeEquipo ? equiposEnTarea : null,
-      subtipoDefault: esCorporal || eligeEquipo ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
+      subtipoDefault: esCorporal ? lastSubtipoByName[nombre.toLowerCase()] || "" : "",
       // Si la tarea deja elegir entre varios equipos, se lleva una referencia
       // por cada uno por separado — la que se muestre depende de qué elija
       // el jugador en pantalla, no de una sola fija de antemano.
@@ -10806,6 +10807,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const registroIncompleto = (t) => {
     if (t.esResistencia || t.esCmj || t.esCore || t.esElastica) return false;
     const r = getRegistro(t.id);
+    if (t.eligeEquipo && !(r.subtipo && t.equiposElegibles?.includes(r.subtipo))) return true; // aún no ha dicho con qué material
     if (t.esCorporal) {
       if (r.subtipo === "lastre") return !r.carga || !r.reps;
       return !r.reps;
