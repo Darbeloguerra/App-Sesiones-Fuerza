@@ -1189,7 +1189,29 @@ function useReferenciasFuerza(jugadorId, { todos = false } = {}) {
 // más pesa para el rendimiento (Fuerza) cuenta más que lo accesorio. CMJ no
 // pesa (es una medición, no trabajo). Si la sesión no tiene tareas con peso
 // (o no se cargaron), se cae a la regla antigua: algo registrado = cumplida.
-const PESO_BLOQUE_ADHERENCIA = { Fuerza: 3, Resistencia: 2, Core: 1, Preventivo: 1, Movilidad: 0.5, "Activación": 0.5, CMJ: 0 };
+// Peso de una tarea = su duración estimada en segundos (mismo cálculo que el
+// tiempo de sesión del diseñador). Así 40 min de carrera pesan mucho más que
+// dos tareas de core, en vez de contar cada tarea como "una".
+const SEG_ADHERENCIA_POR_DEFECTO = { Fuerza: 600, Resistencia: 1200, Core: 300, Preventivo: 180, Movilidad: 300, "Activación": 300 };
+function pesoTareaAdherencia(t) {
+  const bloque = t.bloque_sesion;
+  if (bloque === "CMJ") return 0;
+  let seg = 0;
+  try {
+    if (bloque === "Resistencia") {
+      const r = parseResistenciaData(t.resistencia_data) || {};
+      seg = estimarResistenciaSeg({ ...r, tipoResistenciaCardio: r.tipo || "" });
+    } else {
+      seg = estimarTareaSeg(
+        { modo: t.modo || "reps", series: t.series, cantidad: t.cantidad, lateralidad: t.lateralidad, descanso: t.descanso_seg, modoCarga: t.modo_carga, pct1rm: t.pct1rm, rir: t.rir },
+        bloque === "Fuerza" ? "Fuerza" : "Core"
+      );
+    }
+  } catch {
+    seg = 0;
+  }
+  return seg > 0 ? seg : SEG_ADHERENCIA_POR_DEFECTO[bloque] ?? 180;
+}
 function crearFraccionCumplida(tareas) {
   const porSesion = new Map();
   (tareas || []).forEach((t) => {
@@ -1200,7 +1222,7 @@ function crearFraccionCumplida(tareas) {
   return (sesionId, fecha, idsHechos, jugadorId) => {
     const hechos = idsHechos || new Set();
     const relevantes = (porSesion.get(sesionId) || []).filter((t) => (!t.fecha || normalizarFecha(t.fecha) === fecha) && (jugadorId == null || tareaEsParaJugador(t, jugadorId)));
-    const pesoDe = (t) => PESO_BLOQUE_ADHERENCIA[t.bloque_sesion] ?? 1;
+    const pesoDe = (t) => pesoTareaAdherencia(t);
     const total = relevantes.reduce((sum, t) => sum + pesoDe(t), 0);
     if (total <= 0) return hechos.size > 0 ? 1 : 0;
     const hecho = relevantes.reduce((sum, t) => sum + (hechos.has(t.id) ? pesoDe(t) : 0), 0);
@@ -10715,6 +10737,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // Resistencia elástica (gomas/bandas): no hay un peso que anotar ni se
       // pide nada al jugador, igual que en Core — solo marcarla como hecha.
       esElastica: (t.tipo_resistencia || "") === "Elástica",
+      pesoAdherencia: pesoTareaAdherencia(t),
       // El MD de la sesión de hoy no importa aquí — se recuerda el último
       // test CMJ del CSV, sea de cuando sea, con su día de medida entre
       // paréntesis. Ya no es un dato que metiera el jugador: es solo
@@ -10789,6 +10812,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     .flatMap((item) => (item.tipo === "circuito" ? item.tareas : [item.tarea]));
   const totalTareas = todasLasTareas.length;
   const totalHechas = todasLasTareas.filter((t) => !!hechoDraft[t.id]).length;
+  // Progreso ponderado por duración estimada de cada tarea (ver pesoTareaAdherencia).
+  const pesoTotal = todasLasTareas.reduce((sum, t) => sum + (t.pesoAdherencia || 0), 0);
+  const pesoHecho = todasLasTareas.reduce((sum, t) => sum + (hechoDraft[t.id] ? t.pesoAdherencia || 0 : 0), 0);
+  const progresoPonderado = pesoTotal > 0 ? (pesoHecho / pesoTotal) * 100 : totalTareas ? (totalHechas / totalTareas) * 100 : 0;
 
   const tareasVisualesById = new Map(todasLasTareas.map((t) => [t.id, t]));
   const getRegistro = (id) => {
@@ -11461,11 +11488,16 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
           )}
           {totalTareas > 0 && (
             <div style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 16 }}>
-              <DsProgressRing value={totalTareas ? (totalHechas / totalTareas) * 100 : 0} size={72} strokeWidth={7} />
+              <DsProgressRing value={progresoPonderado} size={72} strokeWidth={7} />
               <div>
                 <div style={{ fontSize: 13.5, fontWeight: 600 }}>
                   {totalHechas} de {totalTareas} tarea{totalTareas === 1 ? "" : "s"} completada{totalTareas === 1 ? "" : "s"}
                 </div>
+                {pesoTotal > 0 && (
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 2 }}>
+                    {formatearDuracionDiseno(pesoHecho)} de {formatearDuracionDiseno(pesoTotal)} de trabajo
+                  </div>
+                )}
                 {(sesionActual?.objetivo || sesionActual?.md) && (
                   <div style={{ marginTop: 6 }}>
                     <DsBadge tone="accent">
