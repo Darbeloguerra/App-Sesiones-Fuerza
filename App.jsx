@@ -8723,6 +8723,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   // la app) — se piden todas (sin filtrar por estado) porque aquí también
   // hace falta poder "Descartar" una ya vista, no solo listar las nuevas.
   const [solicitudes, saveSolicitudes, solicitudesLoaded] = useEntityList("solicitudesSesion");
+  // Registros enviados por los jugadores: para ver en cada día quién cumplió.
+  const [registrosCal] = useEntityList("registros");
+  const [pendientesAbiertos, setPendientesAbiertos] = useState({});
+  const anchoVentanaCal = useAnchoVentana();
 
   const [editingSesion, setEditingSesion] = useState(null);
   const [plantillaSesion, setPlantillaSesion] = useState(null);
@@ -8928,6 +8932,53 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     const mds = [...new Set(sesSemana.map(({ x }) => x.md).filter(Boolean))];
     return { n: sesSemana.length, dias: diasConSesion, fuerzaSeries, mds };
   })();
+  // Cumplimiento de una sesión en una fecha: quién envió todo, quién algo y quién nada.
+  const enviadosSet = new Set(registrosCal.filter((r) => r.enviado === true || r.enviado === "true").map((r) => `${r.jugador_id}::${r.tarea_id}::${r.fecha}`));
+  const cumplimientoSesion = (s, f) => {
+    if (f > hoy) return null;
+    let destinos = destinatariosEfectivosSesion(s, activos);
+    if (scope.tipo === "jugador") destinos = destinos.filter((id) => id === scope.jugadorId);
+    const jugadoresDest = destinos.map((id) => players.find((p) => p.id === id)).filter((p) => p && p.estado === "activo");
+    const tareasDia = (s.tareas || []).filter((t) => !t.fecha || t.fecha === f);
+    if (!jugadoresDest.length || !tareasDia.length) return null;
+    const completos = [];
+    const parciales = [];
+    const ninguno = [];
+    let hechasTotal = 0;
+    jugadoresDest.forEach((p) => {
+      const n = tareasDia.filter((t) => enviadosSet.has(`${p.id}::${t.id}::${f}`)).length;
+      hechasTotal += n;
+      if (n === tareasDia.length) completos.push(p);
+      else if (n > 0) parciales.push(p);
+      else ninguno.push(p);
+    });
+    return { total: jugadoresDest.length, completos, parciales, ninguno, pct: Math.round((hechasTotal / (jugadoresDest.length * tareasDia.length)) * 100) };
+  };
+  // Estado de un jugador concreto en una sesión/fecha: hecho | parcial | falta | futuro
+  const estadoJugadorSesion = (s, f, p) => {
+    const tareasDia = (s.tareas || []).filter((t) => !t.fecha || t.fecha === f);
+    if (f > hoy || !tareasDia.length) return "futuro";
+    const n = tareasDia.filter((t) => enviadosSet.has(`${p.id}::${t.id}::${f}`)).length;
+    if (n === tareasDia.length) return "hecho";
+    if (n > 0) return "parcial";
+    return f === hoy ? "hoy" : "falta";
+  };
+  const jugadoresMatriz = activos
+    .filter((p) => scope.tipo === "equipo" || (scope.tipo === "grupo" && (p.gruposIds || []).includes(scope.grupoId)) || (scope.tipo === "jugador" && p.id === scope.jugadorId))
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const sesionesDeJugadorEnFecha = (p, f) => conTareas.filter((x) => (x.fechas || []).includes(f) && x.enviada && destinatariosEfectivosSesion(x, activos).includes(p.id));
+  const resumenJugadorSemana = (p) => {
+    const items = diasSemana.flatMap((f) => sesionesDeJugadorEnFecha(p, f).map((x) => ({ f, x, e: estadoJugadorSesion(x, f, p) })));
+    const pasadas = items.filter((i) => i.e !== "futuro" && i.e !== "hoy");
+    const hechas = pasadas.filter((i) => i.e === "hecho").length;
+    return { n: items.length, pasadas: pasadas.length, hechas, pct: pasadas.length ? Math.round((hechas / pasadas.length) * 100) : null };
+  };
+  const cumplimientoSemana = (() => {
+    const lista = diasSemana.flatMap((f) => sesionesEnFecha(f).map((x) => cumplimientoSesion(x, f))).filter(Boolean);
+    if (!lista.length) return null;
+    return Math.round(lista.reduce((a, c) => a + c.pct, 0) / lista.length);
+  })();
   const copiarSemanaAnterior = () => {
     const nuevas = {};
     diasSemana.forEach((f) => {
@@ -9090,31 +9141,50 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         </div>
 
           <div style={{ display: "inline-flex", border: `1px solid ${ds.border}`, borderRadius: 999, overflow: "hidden" }}>
-            {[["semana", "Semana"], ["mes", "Mes"]].map(([id, lab]) => (
+            {[["semana", "Semana"], ["mes", "Mes"], ["jugadores", "Jugadores"]].map(([id, lab]) => (
               <button key={id} type="button" onClick={() => setVista(id)} style={{ border: "none", padding: "7px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: vista === id ? ds.accent : "transparent", color: vista === id ? ds.accentInk : ds.inkSecondary }}>{lab}</button>
             ))}
           </div>
-          {vista === "semana" && (
+          {(vista === "semana" || vista === "jugadores") && (
             <>
               <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, -7))} style={navMesBtnCalendarioStyle} aria-label="Semana anterior"><ChevronLeft size={16} /></button>
               <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700, minWidth: 150, textAlign: "center" }}>{etiquetaSemana()}</span>
               <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, 7))} style={navMesBtnCalendarioStyle} aria-label="Semana siguiente"><ChevronRight size={16} /></button>
               <button onClick={() => { setLunesRef(inicioSemanaCalendario(hoy)); setDiaSel(hoy); }} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, color: ds.ink, cursor: "pointer" }}>Hoy</button>
               <span style={{ flex: 1 }} />
-              <button type="button" onClick={() => setModoPlan((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
+              {vista === "semana" && <button type="button" onClick={() => setModoPlan((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
                 {modoPlan ? "Cerrar planificación" : "Planificar semana"}
-              </button>
+              </button>}
             </>
           )}
         </div>
 
         {vista === "semana" && (
           <>
+            {scope.tipo === "jugador" && (() => {
+              const idx = jugadoresOrdenados.findIndex((p) => p.id === scope.jugadorId);
+              const jug = players.find((p) => p.id === scope.jugadorId);
+              const nombresGrupos = (jug?.gruposIds || []).map((g) => grupos.find((x) => x.id === g)?.nombre).filter(Boolean);
+              const irA = (d) => { const n = jugadoresOrdenados[(idx + d + jugadoresOrdenados.length) % jugadoresOrdenados.length]; if (n) setScopeId(`j:${n.id}`); };
+              return (
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "10px 14px", marginBottom: 12 }}>
+                  <button type="button" onClick={() => irA(-1)} style={navMesBtnCalendarioStyle} aria-label="Jugador anterior"><ChevronLeft size={16} /></button>
+                  <span style={{ width: 38, height: 38, borderRadius: "50%", background: ds.accentSubtle, color: ds.accent, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800 }}>{(jug?.name || "?").split(" ").map((x) => x[0]).slice(0, 2).join("")}</span>
+                  <div style={{ flex: 1, minWidth: 140 }}>
+                    <div style={{ fontFamily: dsF.display, fontSize: 16, fontWeight: 700 }}>{scope.label}</div>
+                    <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{nombresGrupos.length ? nombresGrupos.join(" · ") : "Independiente"} · {idx + 1} de {jugadoresOrdenados.length}</div>
+                  </div>
+                  <button type="button" onClick={() => setScopeId("equipo")} style={{ fontSize: 12, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "5px 12px", cursor: "pointer" }}>Ver equipo</button>
+                  <button type="button" onClick={() => irA(1)} style={navMesBtnCalendarioStyle} aria-label="Jugador siguiente"><ChevronRight size={16} /></button>
+                </div>
+              );
+            })()}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               {[
                 [`${resumenSemana.n}`, resumenSemana.n === 1 ? "sesión" : "sesiones"],
                 [`${resumenSemana.dias}/7`, "días con sesión"],
                 [`${resumenSemana.fuerzaSeries}`, "series de fuerza"],
+                ...(cumplimientoSemana !== null ? [[`${cumplimientoSemana} %`, "cumplimiento"]] : []),
               ].map(([v, l]) => (
                 <span key={l} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "5px 12px" }}>
                   <b style={{ fontFamily: dsF.display, fontSize: 15 }}>{v}</b>
@@ -9158,6 +9228,38 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                       {ses.map((s) => (
                         <div key={s.id}>
                           <TarjetaSesionReal sesion={s} esHoy={esHoy} compacta abiertaInicial={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                          {(() => {
+                            const c = cumplimientoSesion(s, f);
+                            if (!c) return null;
+                            const clave = `${s.id}|${f}`;
+                            const abierto = !!pendientesAbiertos[clave];
+                            const color = c.pct >= 80 ? ds.success : c.pct >= 50 ? ds.warning : ds.danger;
+                            const faltan = [...c.ninguno.map((p) => ({ p, e: "sin enviar" })), ...c.parciales.map((p) => ({ p, e: "parcial" }))];
+                            return (
+                              <div style={{ marginTop: 8, paddingLeft: 2 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                                  <div style={{ flex: "0 1 160px", minWidth: 90, height: 6, borderRadius: 999, background: ds.border, overflow: "hidden", display: "flex" }}>
+                                    <div style={{ width: `${(c.completos.length / c.total) * 100}%`, background: color }} />
+                                    <div style={{ width: `${(c.parciales.length / c.total) * 100}%`, background: `${color}66` }} />
+                                  </div>
+                                  <span style={{ fontSize: 12, color: ds.ink, fontWeight: 600 }}>{c.completos.length}/{c.total} completa{c.parciales.length ? ` · ${c.parciales.length} parcial` : ""}</span>
+                                  <span style={{ fontSize: 11.5, color: ds.inkMuted }}>{c.pct} % de las tareas</span>
+                                  {faltan.length > 0 && (
+                                    <button type="button" onClick={() => setPendientesAbiertos((a) => ({ ...a, [clave]: !a[clave] }))} style={{ fontSize: 11.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 600 }}>
+                                      {abierto ? "Ocultar" : `Ver quién falta (${faltan.length})`}
+                                    </button>
+                                  )}
+                                </div>
+                                {abierto && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
+                                    {faltan.map(({ p, e }) => (
+                                      <span key={p.id} style={{ fontSize: 11.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "2px 9px" }}>{p.name} · {e}</span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6, paddingLeft: 2 }}>
                             <span style={{ fontSize: 11.5, color: ds.inkMuted }}>Para: {etiquetaDestinoSesion(s, players, grupos)}</span>
                             {resumenSesionTarjeta(s).map((r) => (
@@ -9219,6 +9321,60 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           </>
         )}
 
+        {vista === "jugadores" && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginBottom: 10 }}>
+              Quién tiene qué esta semana — {scope.label}. Pulsa un nombre para abrir su semana.
+            </div>
+            <div style={{ overflowX: "auto", border: `1px solid ${ds.border}`, borderRadius: 14, background: ds.surface }}>
+              <div style={{ minWidth: 760 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "170px repeat(7, minmax(0, 1fr)) 62px", borderBottom: `1px solid ${ds.border}`, background: ds.surfaceRaised }}>
+                  <div style={{ padding: "8px 12px", fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>JUGADOR</div>
+                  {diasSemana.map((f, i) => (
+                    <div key={f} style={{ padding: "8px 6px", textAlign: "center", fontSize: 11.5, fontWeight: 700, color: f === hoy ? ds.accent : ds.inkSecondary }}>
+                      {NOMBRES_DIA[i]} {Number(f.slice(8))}
+                    </div>
+                  ))}
+                  <div style={{ padding: "8px 6px", textAlign: "center", fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>CUMPL.</div>
+                </div>
+                {jugadoresMatriz.length === 0 && <div style={{ padding: 16, fontSize: 13, color: ds.inkMuted }}>No hay jugadores activos en este ámbito.</div>}
+                {jugadoresMatriz.map((p) => {
+                  const r = resumenJugadorSemana(p);
+                  return (
+                    <div key={p.id} style={{ display: "grid", gridTemplateColumns: "170px repeat(7, minmax(0, 1fr)) 62px", borderBottom: `1px solid ${ds.border}`, alignItems: "stretch" }}>
+                      <button type="button" onClick={() => { setScopeId(`j:${p.id}`); setVista("semana"); }} style={{ textAlign: "left", background: "transparent", border: "none", padding: "10px 12px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}>
+                        {p.name}
+                        <span style={{ display: "block", fontSize: 10.5, color: ds.inkMuted, fontWeight: 400 }}>{r.n} sesión{r.n === 1 ? "" : "es"} esta semana</span>
+                      </button>
+                      {diasSemana.map((f) => {
+                        const ses = sesionesDeJugadorEnFecha(p, f);
+                        return (
+                          <div key={f} style={{ padding: 4, display: "flex", flexDirection: "column", gap: 3, justifyContent: "center", background: f === hoy ? `${ds.accent}0d` : "transparent" }}>
+                            {ses.map((x) => {
+                              const e = estadoJugadorSesion(x, f, p);
+                              const col = e === "hecho" ? ds.success : e === "parcial" ? ds.warning : e === "falta" ? ds.danger : e === "hoy" ? ds.accent : ds.inkMuted;
+                              const marca = e === "hecho" ? "✓" : e === "parcial" ? "~" : e === "falta" ? "✕" : "·";
+                              return (
+                                <button key={x.id} type="button" title={`${x.nombre || "Sesión"} — ${e === "hecho" ? "completada" : e === "parcial" ? "parcial" : e === "falta" ? "sin enviar" : e === "hoy" ? "toca hoy" : "pendiente"}`} onClick={() => { setScopeId(`j:${p.id}`); setVista("semana"); setDiaSel(f); }} style={{ textAlign: "left", fontSize: 10.5, color: col, background: `${col}14`, border: `1px solid ${col}55`, borderRadius: 6, padding: "3px 5px", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {marca} {x.nombre || "Sesión"}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: r.pct === null ? ds.inkMuted : r.pct >= 80 ? ds.success : r.pct >= 50 ? ds.warning : ds.danger }}>{r.pct === null ? "—" : `${r.pct} %`}</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 11.5, color: ds.inkSecondary }}>
+              <span style={{ color: ds.success }}>✓ completada</span><span style={{ color: ds.warning }}>~ parcial</span><span style={{ color: ds.danger }}>✕ sin enviar</span><span style={{ color: ds.accent }}>· toca hoy</span><span>· pendiente</span>
+            </div>
+          </div>
+        )}
+
         {vista === "mes" && (
           <>
         {/* Navegación de mes */}
@@ -9244,51 +9400,52 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         )}
 
         {/* Cuadrícula del mes */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 4 }}>
-          {["L", "M", "X", "J", "V", "S", "D"].map((d) => (
-            <div key={d} style={{ textAlign: "center", fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, padding: "2px 0" }}>
-              {d}
-            </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, marginBottom: 6 }}>
+          {NOMBRES_DIA.map((d) => (
+            <div key={d} style={{ textAlign: "center", fontSize: 11, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", padding: "2px 0" }}>{anchoVentanaCal < 560 ? d[0] : d}</div>
           ))}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: 4, marginBottom: 18 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, marginBottom: 18 }}>
           {dias.map((d) => {
             const sesionesDia = sesionesEnFecha(d.fecha);
-            const estado = estadoDiaCalendario(sesionesDia, d.fecha, hoy);
             const esHoy = d.fecha === hoy;
             const esSel = d.fecha === diaSel;
             const tieneSolicitud = solicitudesEnFecha(d.fecha).length > 0;
-            const colorDot = estado === "ok" ? ds.success : estado === "pending" ? ds.accent : "transparent";
+            const estrecho = anchoVentanaCal < 560;
+            const colorDe = (x) => {
+              if (!x.enviada) return ds.inkMuted;
+              const c = cumplimientoSesion(x, d.fecha);
+              if (!c) return ds.accent;
+              return c.pct >= 80 ? ds.success : c.pct >= 50 ? ds.warning : ds.danger;
+            };
             return (
               <button
                 key={d.fecha}
                 onClick={() => { setDiaSel(d.fecha); setLunesRef(inicioSemanaCalendario(d.fecha)); }}
-                style={{
-                  position: "relative",
-                  aspectRatio: "1",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: 3,
-                  borderRadius: dsR.md,
-                  border: esSel ? `1.5px solid ${ds.accent}` : tieneSolicitud ? `1px solid ${ds.warning}` : esHoy ? `1px solid ${ds.accentBorderSubtle}` : "1px solid transparent",
-                  background: esSel ? ds.accentSubtle : ds.surface,
-                  opacity: d.fuera ? 0.35 : 1,
-                  color: ds.ink,
-                  cursor: "pointer",
-                  fontSize: 12,
-                  fontWeight: esHoy ? 800 : 500,
-                }}
+                style={{ position: "relative", minHeight: estrecho ? 54 : 98, display: "flex", flexDirection: "column", alignItems: "stretch", justifyContent: "flex-start", gap: 4, textAlign: "left", borderRadius: 10, padding: estrecho ? 4 : 7, border: esSel ? `1.5px solid ${ds.accent}` : tieneSolicitud ? `1px solid ${ds.warning}` : `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, background: esSel ? ds.accentSubtle : ds.surface, opacity: d.fuera ? 0.35 : 1, color: ds.ink, cursor: "pointer", fontSize: 12 }}
               >
-                {tieneSolicitud && <span style={{ position: "absolute", top: 3, right: 3, width: 6, height: 6, borderRadius: dsR.full, background: ds.warning }} />}
-                <span>{d.dayNum}</span>
-                <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: colorDot }} />
+                <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ width: 22, height: 22, borderRadius: "50%", background: esHoy ? ds.accent : "transparent", color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: esHoy ? 800 : 600, fontSize: 12 }}>{d.dayNum}</span>
+                  {tieneSolicitud && <span title="Petición de jugador" style={{ width: 7, height: 7, borderRadius: "50%", background: ds.warning }} />}
+                </span>
+                {estrecho ? (
+                  <span style={{ display: "flex", gap: 3, flexWrap: "wrap" }}>
+                    {sesionesDia.slice(0, 4).map((x) => <span key={x.id} style={{ width: 7, height: 7, borderRadius: "50%", background: colorDe(x) }} />)}
+                  </span>
+                ) : (
+                  <>
+                    {sesionesDia.slice(0, 2).map((x) => (
+                      <span key={x.id} style={{ fontSize: 10.5, lineHeight: 1.25, color: colorDe(x), background: `${colorDe(x)}14`, border: `1px solid ${colorDe(x)}55`, borderRadius: 5, padding: "2px 5px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {x.md ? `${x.md} · ` : ""}{x.nombre || "Sesión"}
+                      </span>
+                    ))}
+                    {sesionesDia.length > 2 && <span style={{ fontSize: 10.5, color: ds.inkMuted }}>+{sesionesDia.length - 2} más</span>}
+                  </>
+                )}
               </button>
             );
           })}
         </div>
-
           </>
         )}
 
@@ -9298,6 +9455,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8, textTransform: "uppercase" }}>
             {fmtDateLabel(diaSel)}
             {diaSel === hoy ? " · hoy" : ""}
+            <button type="button" onClick={() => { setLunesRef(inicioSemanaCalendario(diaSel)); setVista("semana"); }} style={{ marginLeft: 12, fontSize: 11.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", fontWeight: 700, textTransform: "none", letterSpacing: 0 }}>Abrir esta semana →</button>
           </div>
           {solicitudesDiaSel.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 10 }}>
