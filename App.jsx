@@ -8390,169 +8390,6 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
   );
 }
 
-// Planificador semanal: una cuadrícula L-D donde cada día lleva una sesión de
-// la biblioteca (o una nueva) para el equipo o para jugadores concretos. «Publicar
-// semana» crea una sesión publicada por día con esa fecha, y cada jugador la
-// verá activarse el día que toca. No toca la carga: las sesiones se copian tal cual.
-function PlanSemanaReal({ players, sesiones, onBack, onRefrescar, onAbrirModulo, onCerrarSesion }) {
-  const [grupos] = useEntityList("grupos");
-  const hoyStr = todayStr();
-  const [lunes, setLunes] = useState(() => inicioSemanaCalendario(hoyStr));
-  const [destino, setDestino] = useState(null); // null = todo el equipo
-  const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
-  const [disenandoFecha, setDisenandoFecha] = useState(null);
-  const [cola, setCola] = useState(null); // [{ fecha, sesion }] mientras se publica
-  const [idx, setIdx] = useState(0);
-  const [fallos, setFallos] = useState([]);
-  const [resultado, setResultado] = useState("");
-
-  const dias = Array.from({ length: 7 }, (_, i) => sumarDiasFecha(lunes, i));
-  const etiqueta = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
-  const sesionPorId = new Map(sesiones.map((s) => [s.id, s]));
-  const opciones = sesiones.filter((s) => (s.nombre || "").trim() && (s.tareas || []).length).sort((a, b) => a.nombre.localeCompare(b.nombre));
-  const idsOpciones = new Set(opciones.map((s) => s.id));
-  const llegaA = (s) => destino === null || !s.jugadores_destino || !s.jugadores_destino.length || s.jugadores_destino.some((id) => destino.includes(id));
-  const yaEnDia = (f) => sesiones.filter((s) => s.enviada && (s.fechas || []).includes(f) && llegaA(s));
-  const destinoOk = destino === null || destino.length > 0;
-  const pendientes = dias.filter((f) => asignadas[f] && sesionPorId.get(asignadas[f]));
-
-  const copiarSemanaAnterior = () => {
-    const nuevas = {};
-    dias.forEach((f) => {
-      const previa = sesiones.find((s) => s.enviada && (s.tareas || []).length && (s.fechas || []).includes(sumarDiasFecha(f, -7)) && llegaA(s));
-      if (previa) nuevas[f] = previa.id;
-    });
-    setAsignadas(nuevas);
-  };
-
-  const publicar = () => {
-    // Misma salvaguarda que el diseñador: «Todos» llega a los activos de TODOS los equipos.
-    if (destino === null && grupos.length > 1) {
-      const n = players.filter((p) => p.estado === "activo").length;
-      if (!window.confirm(`Esta planificación se enviará a los ${n} jugadores activos de todos los equipos. ¿Continuar?\n\nSi es solo para un equipo, cancela y elígelo en «Jugadores concretos» → «Elegir por equipo».`)) return;
-    }
-    setFallos([]);
-    setResultado("");
-    setIdx(0);
-    setCola(pendientes.map((f) => ({ fecha: f, sesion: sesionPorId.get(asignadas[f]) })));
-  };
-  const siguiente = (huboFallo) => {
-    const nuevo = idx + 1;
-    if (nuevo >= cola.length) {
-      const nFallos = fallos.length + (huboFallo ? 1 : 0);
-      const n = cola.length - nFallos;
-      setCola(null);
-      setAsignadas({});
-      setResultado(`${n} día${n === 1 ? "" : "s"} publicado${n === 1 ? "" : "s"}${nFallos ? ` · ${nFallos} con error` : ""}.`);
-      invalidateEntityCache("sesiones");
-      invalidateEntityCache("tareas");
-      invalidateEntityCache("circuitos");
-      invalidateBootstrapCache();
-      onRefrescar();
-    } else setIdx(nuevo);
-  };
-
-  if (disenandoFecha) {
-    return (
-      <DisenoSesionReal
-        fechasSugeridas={[disenandoFecha]}
-        destinatariosSugeridos={destino}
-        forzarDestino
-        onBack={() => setDisenandoFecha(null)}
-        onGuardado={() => { setDisenandoFecha(null); onRefrescar(); }}
-      />
-    );
-  }
-
-  const actual = cola ? cola[idx] : null;
-  return (
-    <PantallaEntrenadorAncha activo="programacion" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
-      <div>
-        <button onClick={onBack} style={{ background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 12 }}>← Volver a Programación</button>
-        <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Planificar semana</h1>
-        <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginBottom: 14 }}>Elige la sesión de cada día. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga de las sesiones.</div>
-
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginBottom: 12 }}>
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-            <button type="button" onClick={() => setLunes(sumarDiasFecha(lunes, -7))} style={{ border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>‹</button>
-            <span style={{ fontSize: 13.5, fontWeight: 700, minWidth: 190, textAlign: "center" }}>{etiqueta(dias[0])} – {etiqueta(dias[6])}</span>
-            <button type="button" onClick={() => setLunes(sumarDiasFecha(lunes, 7))} style={{ border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, borderRadius: 8, padding: "6px 10px", cursor: "pointer" }}>›</button>
-          </div>
-          <select value={destino === null ? "equipo" : "concretos"} onChange={(e) => setDestino(e.target.value === "equipo" ? null : [])} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, fontWeight: 600, padding: "8px 10px" }}>
-            <option value="equipo">Todos los jugadores</option>
-            <option value="concretos">Jugadores concretos</option>
-          </select>
-          <button type="button" onClick={copiarSemanaAnterior} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "8px 12px", cursor: "pointer" }}>Copiar la semana anterior</button>
-          {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
-        </div>
-        {destino !== null && (
-          <div style={{ marginBottom: 12 }}><ListaJugadoresCheckReal players={players} seleccionados={destino} onCambiar={setDestino} grupos={grupos} /></div>
-        )}
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 10 }}>
-          {dias.map((f) => {
-            const existentes = yaEnDia(f);
-            const pasado = f < hoyStr;
-            return (
-              <div key={f} style={{ background: ds.surface, border: `1px solid ${f === hoyStr ? ds.accent : ds.border}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 8, opacity: pasado ? 0.6 : 1 }}>
-                <div style={{ fontSize: 12.5, fontWeight: 800, textTransform: "capitalize" }}>{etiqueta(f)}{f === hoyStr ? " · hoy" : ""}</div>
-                {existentes.map((s) => (
-                  <div key={s.id} style={{ fontSize: 11.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "4px 8px" }}>✓ Ya publicada: <b style={{ color: ds.ink }}>{s.nombre || "Sesión sin nombre"}</b></div>
-                ))}
-                <select
-                  value={asignadas[f] || ""}
-                  disabled={pasado}
-                  onChange={(e) => setAsignadas((a) => { const n = { ...a }; if (e.target.value) n[f] = e.target.value; else delete n[f]; return n; })}
-                  style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "7px 8px" }}
-                >
-                  <option value="">— Sin sesión nueva —</option>
-                  {opciones.map((s) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
-                  {asignadas[f] && !idsOpciones.has(asignadas[f]) && <option value={asignadas[f]}>{sesionPorId.get(asignadas[f])?.nombre || "Sesión de la semana anterior"}</option>}
-                </select>
-                <button type="button" onClick={() => setDisenandoFecha(f)} style={{ fontSize: 12, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "6px 8px", cursor: "pointer" }}>+ Diseñar nueva</button>
-              </div>
-            );
-          })}
-        </div>
-
-        {resultado && <div style={{ marginTop: 14, fontSize: 13, color: ds.success }}>{resultado}</div>}
-        {fallos.length > 0 && !cola && <div style={{ marginTop: 6, fontSize: 12.5, color: ds.danger }}>{fallos.join(" · ")}</div>}
-        <div style={{ position: "sticky", bottom: 0, background: ds.canvas, paddingTop: 12, marginTop: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-          <button type="button" disabled={!pendientes.length || !destinoOk || !!cola} onClick={publicar} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: !pendientes.length || !destinoOk || cola ? 0.5 : 1 }}>
-            Publicar semana{pendientes.length ? ` (${pendientes.length} día${pendientes.length === 1 ? "" : "s"})` : ""}
-          </button>
-          <span style={{ fontSize: 12, color: ds.inkMuted }}>{destinoOk ? "Cada sesión se publica con la fecha de su día." : "Elige al menos un jugador."}</span>
-        </div>
-      </div>
-
-      {cola && actual && (
-        <>
-          <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <div style={{ background: ds.bgElevated, color: ds.ink, border: `1px solid ${ds.border}`, borderRadius: 12, padding: "18px 22px", minWidth: 260, textAlign: "center" }}>
-              <div style={{ fontWeight: 700, marginBottom: 6 }}>Publicando la semana…</div>
-              <div style={{ fontSize: 13, color: ds.inkSecondary }}>Día {idx + 1} de {cola.length} · {etiqueta(actual.fecha)}</div>
-            </div>
-          </div>
-          <div style={{ display: "none" }}>
-            <DisenoSesionReal
-              key={actual.fecha}
-              plantilla={actual.sesion}
-              fechasSugeridas={[actual.fecha]}
-              destinatariosSugeridos={destino}
-              forzarDestino
-              sinProgresion
-              autoEnviar
-              onBack={() => {}}
-              onFallo={(msg) => { setFallos((f) => [...f, `${etiqueta(actual.fecha)}: ${msg}`]); siguiente(true); }}
-              onGuardado={() => siguiente(false)}
-            />
-          </div>
-        </>
-      )}
-    </PantallaEntrenadorAncha>
-  );
-}
-
 function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
   // Antes: sesiones -> tareas en cadena (ejercicios en paralelo) — 2
   // peticiones encadenadas. Ahora: 1 sola, con las 3 cosas ya juntas.
@@ -8564,7 +8401,6 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
   const [verHistorial, setVerHistorial] = useState(false);
   const [historialVisible, setHistorialVisible] = useState(15);
   const [verBiblioteca, setVerBiblioteca] = useState(false);
-  const [verPlanSemana, setVerPlanSemana] = useState(false);
   const [busquedaBiblioteca, setBusquedaBiblioteca] = useState("");
   const [errorBorrado, setErrorBorrado] = useState("");
 
@@ -8635,10 +8471,6 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
     .filter((s) => !busquedaBiblioteca.trim() || s.nombre.toLowerCase().includes(busquedaBiblioteca.trim().toLowerCase()))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  if (verPlanSemana) {
-    return <PlanSemanaReal players={players || []} sesiones={conTareas} onBack={() => setVerPlanSemana(false)} onRefrescar={retry} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />;
-  }
-
   const editar = (s) => {
     setEditingSesion(s);
     setShowEditor(true);
@@ -8686,9 +8518,6 @@ function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>PROGRAMACIÓN</div>
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
-          <button type="button" onClick={() => setVerPlanSemana(true)} style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, fontSize: 13, fontWeight: 700, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>
-            <CalendarClock size={15} /> Planificar semana
-          </button>
         </div>
         <AvisoCmjProgramacionReal estado={estadoCmjProg} players={players || []} sesiones={sesiones} hoy={today} onEditar={editar} />
         {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
@@ -8908,6 +8737,16 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [diaSel, setDiaSel] = useState(hoy);
   const [scopeDdAbierto, setScopeDdAbierto] = useState(false);
   const [buscarScope, setBuscarScope] = useState("");
+  // Vista semanal (por defecto) o mensual + modo «Planificar semana»: cada día
+  // admite una sesión de la biblioteca y «Publicar semana» las activa todas.
+  const [vista, setVista] = useState("semana");
+  const [lunesRef, setLunesRef] = useState(() => inicioSemanaCalendario(todayStr()));
+  const [modoPlan, setModoPlan] = useState(false);
+  const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
+  const [cola, setCola] = useState(null); // [{ fecha, sesion }] mientras se publica
+  const [idxCola, setIdxCola] = useState(0);
+  const [fallosCola, setFallosCola] = useState([]);
+  const [resultadoCola, setResultadoCola] = useState("");
 
   if (showEditor) {
     const EditorComponent = DisenoSesionReal;
@@ -9048,6 +8887,88 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     }
   };
 
+  // ----- Planificación semanal -----
+  // Destino de lo que se publique desde aquí: el ámbito que se está mirando.
+  const destinoScope =
+    scope.tipo === "jugador"
+      ? [scope.jugadorId]
+      : scope.tipo === "grupo"
+      ? activos.filter((p) => (p.gruposIds || []).includes(scope.grupoId)).map((p) => p.id)
+      : null;
+  const diasSemana = Array.from({ length: 7 }, (_, i) => sumarDiasFecha(lunesRef, i));
+  const NOMBRES_DIA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
+  const sesionPorId = new Map(conTareas.map((s) => [s.id, s]));
+  const opcionesBiblioteca = conTareas.filter((s) => (s.nombre || "").trim() && (s.tareas || []).length).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const idsOpcionesBib = new Set(opcionesBiblioteca.map((s) => s.id));
+  const pendientesPlan = diasSemana.filter((f) => asignadas[f] && sesionPorId.get(asignadas[f]));
+  const destinoVacio = destinoScope !== null && destinoScope.length === 0;
+  const etiquetaDiaLarga = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
+  const etiquetaSemana = () => {
+    const a = new Date(diasSemana[0] + "T00:00:00");
+    const z = new Date(diasSemana[6] + "T00:00:00");
+    const mes = (d) => d.toLocaleDateString("es-ES", { month: "long" });
+    return a.getMonth() === z.getMonth() ? `${a.getDate()}–${z.getDate()} de ${mes(z)}` : `${a.getDate()} ${mes(a).slice(0, 3)} – ${z.getDate()} ${mes(z).slice(0, 3)}`;
+  };
+  // Resumen compacto de lo que lleva una sesión (por bloque) para las tarjetas.
+  const resumenSesionTarjeta = (s) => {
+    const por = {};
+    (s.tareas || []).forEach((t) => {
+      const b = t.bloque_sesion || "Otro";
+      por[b] = por[b] || { n: 0, series: 0 };
+      por[b].n += 1;
+      por[b].series += Number(t.series) || 0;
+    });
+    const orden = ["Activación", "Movilidad", "Preventivo", "Core", "Resistencia", "CMJ", "Fuerza"];
+    return orden.filter((b) => por[b]).map((b) => ({ bloque: b, ...por[b] }));
+  };
+  const resumenSemana = (() => {
+    const sesSemana = diasSemana.flatMap((f) => sesionesEnFecha(f).map((x) => ({ f, x })));
+    const fuerzaSeries = sesSemana.reduce((a, { x }) => a + resumenSesionTarjeta(x).filter((r) => r.bloque === "Fuerza").reduce((b, r) => b + r.series, 0), 0);
+    const diasConSesion = new Set(sesSemana.map(({ f }) => f)).size;
+    const mds = [...new Set(sesSemana.map(({ x }) => x.md).filter(Boolean))];
+    return { n: sesSemana.length, dias: diasConSesion, fuerzaSeries, mds };
+  })();
+  const copiarSemanaAnterior = () => {
+    const nuevas = {};
+    diasSemana.forEach((f) => {
+      const previa = conTareas.find((s) => s.enviada && (s.tareas || []).length && (s.fechas || []).includes(sumarDiasFecha(f, -7)) && sesionVisibleEnScope(s, scope, players, activos));
+      if (previa && f >= hoy) nuevas[f] = previa.id;
+    });
+    setAsignadas(nuevas);
+  };
+  // Publica una lista de { fecha, sesion } reutilizando el guardado del
+  // diseñador (montado oculto): sortea movilidad/preventivo por fecha, copia
+  // tareas y circuitos... y nunca toca la carga (sin progresión).
+  const lanzarCola = (items) => {
+    if (destinoScope === null && grupos.length > 1) {
+      if (!window.confirm(`Esto se enviará a los ${activos.length} jugadores activos de todos los equipos. ¿Continuar?\n\nSi es solo para un equipo, cámbialo arriba a ese grupo.`)) return;
+    }
+    setFallosCola([]);
+    setResultadoCola("");
+    setIdxCola(0);
+    setCola(items);
+  };
+  const siguienteCola = (huboFallo) => {
+    const nuevo = idxCola + 1;
+    if (nuevo >= cola.length) {
+      const nFallos = fallosCola.length + (huboFallo ? 1 : 0);
+      const n = cola.length - nFallos;
+      setCola(null);
+      setAsignadas({});
+      setResultadoCola(`${n} día${n === 1 ? "" : "s"} publicado${n === 1 ? "" : "s"}${nFallos ? ` · ${nFallos} con error` : ""}.`);
+      invalidateEntityCache("sesiones");
+      invalidateEntityCache("tareas");
+      invalidateEntityCache("circuitos");
+      invalidateBootstrapCache();
+      retry();
+    } else setIdxCola(nuevo);
+  };
+  const actualCola = cola ? cola[idxCola] : null;
+  const irADia = (f) => {
+    setDiaSel(f);
+    setLunesRef(inicioSemanaCalendario(f));
+  };
+
   const sesionesDiaSel = sesionesEnFecha(diaSel);
   const solicitudesDiaSel = solicitudesEnFecha(diaSel);
   const yaEsIndividualDeEsteJugador = (s) => scope.tipo === "jugador" && s.jugadores_destino && s.jugadores_destino.length === 1 && s.jugadores_destino[0] === scope.jugadorId;
@@ -9058,7 +8979,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
       <div>
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>CALENDARIO</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Planifica sesiones futuras</h1>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Calendario</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>Por equipo, por grupo o por jugador individual</div>
         </div>
 
@@ -9103,7 +9024,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         )}
 
         {/* Selector de ámbito: equipo / grupo / jugador */}
-        <div style={{ position: "relative", marginBottom: 16 }}>
+        <div style={{ position: "relative", marginBottom: 14, width: "min(100%, 360px)" }}>
           <button
             onClick={() => setScopeDdAbierto((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13.5, fontWeight: 600 }}
@@ -9166,6 +9087,126 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           )}
         </div>
 
+        {/* Barra: vista semana/mes, navegación y modo planificar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+          <div style={{ display: "inline-flex", border: `1px solid ${ds.border}`, borderRadius: 999, overflow: "hidden" }}>
+            {[["semana", "Semana"], ["mes", "Mes"]].map(([id, lab]) => (
+              <button key={id} type="button" onClick={() => setVista(id)} style={{ border: "none", padding: "7px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: vista === id ? ds.accent : "transparent", color: vista === id ? ds.accentInk : ds.inkSecondary }}>{lab}</button>
+            ))}
+          </div>
+          {vista === "semana" && (
+            <>
+              <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, -7))} style={navMesBtnCalendarioStyle} aria-label="Semana anterior"><ChevronLeft size={16} /></button>
+              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700, minWidth: 150, textAlign: "center" }}>{etiquetaSemana()}</span>
+              <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, 7))} style={navMesBtnCalendarioStyle} aria-label="Semana siguiente"><ChevronRight size={16} /></button>
+              <button onClick={() => { setLunesRef(inicioSemanaCalendario(hoy)); setDiaSel(hoy); }} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, color: ds.ink, cursor: "pointer" }}>Hoy</button>
+              <span style={{ flex: 1 }} />
+              <button type="button" onClick={() => setModoPlan((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
+                {modoPlan ? "Cerrar planificación" : "Planificar semana"}
+              </button>
+            </>
+          )}
+        </div>
+
+        {vista === "semana" && (
+          <>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {[
+                [`${resumenSemana.n}`, resumenSemana.n === 1 ? "sesión" : "sesiones"],
+                [`${resumenSemana.dias}/7`, "días con sesión"],
+                [`${resumenSemana.fuerzaSeries}`, "series de fuerza"],
+              ].map(([v, l]) => (
+                <span key={l} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "5px 12px" }}>
+                  <b style={{ fontFamily: dsF.display, fontSize: 15 }}>{v}</b>
+                  <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{l}</span>
+                </span>
+              ))}
+              {resumenSemana.mds.length > 0 && <span style={{ fontSize: 11.5, color: ds.inkSecondary, alignSelf: "center" }}>MD: {resumenSemana.mds.join(" · ")}</span>}
+              {resumenSemana.dias === 0 && <span style={{ fontSize: 12, color: ds.inkMuted, alignSelf: "center" }}>Semana vacía — pulsa «Planificar semana» para montarla.</span>}
+            </div>
+            {modoPlan && (
+              <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 12, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: ds.ink, flex: 1, minWidth: 220 }}>
+                  Elige la sesión de cada día para <b>{scope.label}</b>. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga.
+                </span>
+                <button type="button" onClick={copiarSemanaAnterior} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>Copiar la semana anterior</button>
+                {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", gap: 8, marginBottom: 8 }}>
+              {diasSemana.map((f, i) => {
+                const ses = sesionesEnFecha(f);
+                const esHoy = f === hoy;
+                const esSel = f === diaSel;
+                const pasado = f < hoy;
+                const nSol = solicitudesEnFecha(f).length;
+                return (
+                  <div key={f} style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, opacity: pasado && modoPlan ? 0.55 : 1 }}>
+                    <button onClick={() => setDiaSel(f)} aria-pressed={esSel} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: esSel ? ds.accentSubtle : ds.surface, border: `1.5px solid ${esSel ? ds.accent : esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 14, padding: "8px 10px", cursor: "pointer", color: ds.ink }}>
+                      <span style={{ width: 34, height: 34, borderRadius: "50%", background: esHoy ? ds.accent : ds.surfaceRaised, color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0 }}>{Number(f.slice(8))}</span>
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: "block", fontWeight: 800, fontSize: 13 }}>{NOMBRES_DIA[i]}</span>
+                        <span style={{ display: "block", fontSize: 11, color: ds.inkMuted }}>{ses.length ? `${ses.length} sesión${ses.length === 1 ? "" : "es"}` : "sin sesión"}{nSol ? ` · ${nSol} petición` : ""}</span>
+                      </span>
+                    </button>
+                    {ses.map((s) => (
+                      <div key={s.id} onClick={() => setDiaSel(f)} style={{ cursor: "pointer", background: ds.surface, border: `1px solid ${ds.border}`, borderLeft: `4px solid ${s.enviada ? ds.success : ds.accent}`, borderRadius: 12, padding: "8px 10px" }}>
+                        <div style={{ fontSize: 12.5, fontWeight: 700, color: ds.ink, lineHeight: 1.3 }}>{s.nombre || "Sesión sin nombre"}</div>
+                        <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{[s.md, etiquetaDestinoSesion(s, players, grupos)].filter(Boolean).join(" · ")}{s.enviada ? "" : " · borrador"}</div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+                          {resumenSesionTarjeta(s).map((r) => (
+                            <span key={r.bloque} title={`${r.bloque}: ${r.n} tarea(s)${r.series ? ` · ${r.series} series` : ""}`} style={{ fontSize: 10, color: COLOR_BLOQUE_DISENO[r.bloque.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")] || ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 6px" }}>
+                              {r.bloque} {r.series ? `${r.series} s` : r.n}
+                            </span>
+                          ))}
+                        </div>
+                        {!pasado && (
+                          <div onClick={(ev) => ev.stopPropagation()} style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
+                            <button type="button" onClick={() => editar(s)} style={{ fontSize: 10.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 600 }}>Editar</button>
+                            <select
+                              value=""
+                              onChange={(e) => { if (e.target.value) lanzarCola([{ fecha: e.target.value, sesion: s }]); }}
+                              style={{ fontSize: 10.5, background: "transparent", border: "none", color: ds.inkSecondary, padding: 0, maxWidth: 90, cursor: "pointer" }}
+                              title="Copiar esta sesión a otro día de la semana"
+                            >
+                              <option value="">Copiar a…</option>
+                              {diasSemana.filter((d) => d >= hoy && d !== f).map((d) => <option key={d} value={d}>{etiquetaDiaLarga(d)}</option>)}
+                            </select>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                    {modoPlan && !pasado && (
+                      <select
+                        value={asignadas[f] || ""}
+                        onChange={(e) => setAsignadas((a) => { const n = { ...a }; if (e.target.value) n[f] = e.target.value; else delete n[f]; return n; })}
+                        style={{ marginTop: "auto", background: ds.surfaceRaised, border: `1px dashed ${asignadas[f] ? ds.accent : ds.accentBorderSubtle}`, borderRadius: 10, color: ds.ink, fontSize: 12, padding: "7px 8px", minWidth: 0 }}
+                      >
+                        <option value="">+ Sesión…</option>
+                        {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                        {asignadas[f] && !idsOpcionesBib.has(asignadas[f]) && <option value={asignadas[f]}>{sesionPorId.get(asignadas[f])?.nombre || "Sesión de la semana anterior"}</option>}
+                      </select>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 14 }}>Pulsa un día para ver y gestionar lo que tiene.</div>
+            {resultadoCola && <div style={{ marginBottom: 10, fontSize: 13, color: ds.success }}>{resultadoCola}</div>}
+            {fallosCola.length > 0 && !cola && <div style={{ marginBottom: 10, fontSize: 12.5, color: ds.danger }}>{fallosCola.join(" · ")}</div>}
+            {modoPlan && (
+              <div style={{ position: "sticky", bottom: 0, zIndex: 5, background: ds.canvas, padding: "10px 0", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", borderTop: `1px solid ${ds.border}` }}>
+                <button type="button" disabled={!pendientesPlan.length || destinoVacio || !!cola} onClick={() => lanzarCola(pendientesPlan.map((f) => ({ fecha: f, sesion: sesionPorId.get(asignadas[f]) })))} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: !pendientesPlan.length || destinoVacio || cola ? 0.5 : 1 }}>
+                  Publicar semana{pendientesPlan.length ? ` (${pendientesPlan.length} día${pendientesPlan.length === 1 ? "" : "s"})` : ""}
+                </button>
+                <span style={{ fontSize: 12, color: ds.inkMuted }}>{destinoVacio ? "Este grupo no tiene jugadores activos." : `Para ${scope.label} · cada sesión se publica con la fecha de su día.`}</span>
+              </div>
+            )}
+          </>
+        )}
+
+        {vista === "mes" && (
+          <>
         {/* Navegación de mes */}
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <button onClick={() => setMesRef((m) => sumarMeses(m, -1))} style={navMesBtnCalendarioStyle} aria-label="Mes anterior">
@@ -9207,7 +9248,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             return (
               <button
                 key={d.fecha}
-                onClick={() => setDiaSel(d.fecha)}
+                onClick={() => { setDiaSel(d.fecha); setLunesRef(inicioSemanaCalendario(d.fecha)); }}
                 style={{
                   position: "relative",
                   aspectRatio: "1",
@@ -9233,6 +9274,9 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             );
           })}
         </div>
+
+          </>
+        )}
 
         {/* Panel del día seleccionado */}
         <div>
@@ -9284,9 +9328,43 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             <DsButton size="sm" onClick={() => nuevaSesionEnFecha(diaSel)}>
               + Diseñar sesión
             </DsButton>
+            {diaSel >= hoy && !destinoVacio && (
+              <select
+                value=""
+                onChange={(e) => { const ses = sesionPorId.get(e.target.value); if (ses) lanzarCola([{ fecha: diaSel, sesion: ses }]); }}
+                style={{ background: ds.surfaceRaised, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, color: ds.accent, fontSize: 12.5, fontWeight: 600, padding: "6px 10px" }}
+              >
+                <option value="">+ Sesión de mi biblioteca…</option>
+                {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+              </select>
+            )}
           </div>
         </div>
       </div>
+      {cola && actualCola && (
+        <>
+          <div style={{ position: "fixed", inset: 0, zIndex: 80, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ background: ds.bgElevated, color: ds.ink, border: `1px solid ${ds.border}`, borderRadius: 12, padding: "18px 22px", minWidth: 260, textAlign: "center" }}>
+              <div style={{ fontWeight: 700, marginBottom: 6 }}>Publicando…</div>
+              <div style={{ fontSize: 13, color: ds.inkSecondary }}>Día {idxCola + 1} de {cola.length} · {etiquetaDiaLarga(actualCola.fecha)}</div>
+            </div>
+          </div>
+          <div style={{ display: "none" }}>
+            <DisenoSesionReal
+              key={actualCola.fecha}
+              plantilla={actualCola.sesion}
+              fechasSugeridas={[actualCola.fecha]}
+              destinatariosSugeridos={destinoScope}
+              forzarDestino
+              sinProgresion
+              autoEnviar
+              onBack={() => {}}
+              onFallo={(msg) => { setFallosCola((f) => [...f, `${etiquetaDiaLarga(actualCola.fecha)}: ${msg}`]); siguienteCola(true); }}
+              onGuardado={() => siguienteCola(false)}
+            />
+          </div>
+        </>
+      )}
     </PantallaEntrenadorAncha>
   );
 }
