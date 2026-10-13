@@ -12981,6 +12981,58 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   );
 }
 
+// Lista del prototipo: una fila por ejercicio (variantes indentadas) con el
+// enlace de vídeo editable en la propia fila, favorito y «+ variante».
+function FilasEjerciciosReal({ familias, onEditar, onToggleFavorito, onGuardarVideo, onCrearVariante }) {
+  const [borradores, setBorradores] = useState({});
+  const [errorId, setErrorId] = useState("");
+  const guardar = async (e) => {
+    const url = (borradores[e.id] ?? "").trim();
+    if (borradores[e.id] === undefined || url === (e.gif_url || "")) return;
+    const ok = await onGuardarVideo(e, url);
+    setErrorId(ok ? "" : e.id);
+    if (ok) setBorradores((b) => { const n = { ...b }; delete n[e.id]; return n; });
+  };
+  const fila = (e, matriz, esVariante) => {
+    const color = BLOQUE_COLOR_REAL[e.bloque] || ds.chart2;
+    const valor = borradores[e.id] ?? e.gif_url ?? "";
+    const meta = [e.bloque, (e.tags_descriptivos || []).join(", "), e.lateralidad].filter(Boolean).join(" · ");
+    return (
+      <div key={e.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: esVariante ? "9px 16px 9px 34px" : "11px 16px", borderTop: `1px solid ${ds.border}`, background: esVariante ? ds.surfaceRaised : "transparent", flexWrap: "wrap" }}>
+        <span style={{ width: 9, height: 9, borderRadius: "50%", background: color, flexShrink: 0 }} />
+        <div onClick={() => onEditar(e)} style={{ flex: "1 1 220px", minWidth: 0, cursor: "pointer" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: ds.ink }}>{esVariante ? "↳ " : ""}{e.nombre}</div>
+          <div style={{ fontSize: 11.5, color: ds.inkSecondary }}>{meta}</div>
+        </div>
+        <input
+          value={valor}
+          onChange={(ev) => setBorradores((b) => ({ ...b, [e.id]: ev.target.value }))}
+          onBlur={() => guardar(e)}
+          onKeyDown={(ev) => ev.key === "Enter" && ev.currentTarget.blur()}
+          placeholder="Pega aquí el enlace del vídeo"
+          style={{ flex: "2 1 260px", background: "transparent", border: `1px solid ${errorId === e.id ? ds.danger : ds.border}`, borderRadius: 999, color: ds.ink, fontSize: 12.5, padding: "8px 14px" }}
+        />
+        {!esVariante ? (
+          <button type="button" onClick={() => onCrearVariante(matriz)} style={{ background: "none", border: "none", color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, cursor: "pointer" }}>+ variante</button>
+        ) : <span style={{ width: 62 }} />}
+        <button type="button" onClick={() => onToggleFavorito(e)} title={e.favorito ? "Quitar de favoritos" : "Marcar como favorito"} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}>
+          <Heart size={17} color={e.favorito ? ds.accent : ds.inkMuted} fill={e.favorito ? ds.accent : "none"} />
+        </button>
+      </div>
+    );
+  };
+  return (
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, overflow: "hidden" }}>
+      {familias.map(({ matriz, variantes }) => (
+        <React.Fragment key={matriz.id}>
+          {fila(matriz, matriz, false)}
+          {variantes.map((v) => fila(v, matriz, true))}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 const tieneVideoEjercicio = (e) => !!(e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean));
 
 // Vista rápida: solo los ejercicios sin vídeo, con un campo para pegar el
@@ -13175,16 +13227,7 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
           <div>
             <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Ejercicios</h1>
             <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-              {ejercicios.length} ejercicios · {totalPersonalizados} personalizados · {totalFavoritos} favoritos
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, maxWidth: 340 }} title="Ejercicios con vídeo de demostración">
-              <div style={{ flex: 1, height: 6, borderRadius: 999, background: ds.border, overflow: "hidden" }}>
-                <div style={{ width: `${pctVideo}%`, height: "100%", background: pctVideo >= 90 ? ds.success || ds.accent : ds.accent }} />
-              </div>
-              <span style={{ fontSize: 11.5, color: ds.inkSecondary, whiteSpace: "nowrap" }}>{totalConVideo}/{ejercicios.length} con vídeo ({pctVideo}%)</span>
-              {totalConVideo < ejercicios.length && (
-                <button type="button" onClick={() => setVista("videos")} style={{ fontSize: 11.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" }}>Completar →</button>
-              )}
+              {ejercicios.length} ejercicios · {totalConVideo} con vídeo · {totalFavoritos} favoritos
             </div>
           </div>
           <button
@@ -13354,6 +13397,23 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
                 </>
               )}
             </div>
+            <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "14px 16px", marginBottom: 14 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 800 }}>{totalConVideo} de {ejercicios.length}</span>
+                  <span style={{ fontSize: 13, color: ds.inkSecondary, fontWeight: 600 }}>ejercicios con vídeo</span>
+                </div>
+                {totalConVideo < ejercicios.length && (
+                  <button type="button" onClick={() => setLibTab(libTab === "sinvideo" ? "todos" : "sinvideo")} style={{ fontSize: 12.5, fontWeight: 700, color: ds.ink, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "8px 14px", cursor: "pointer" }}>
+                    {libTab === "sinvideo" ? "Ver todos" : `Ver los ${ejercicios.length - totalConVideo} sin vídeo`}
+                  </button>
+                )}
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: ds.border, overflow: "hidden", margin: "10px 0 8px" }}>
+                <div style={{ width: `${pctVideo}%`, height: "100%", background: ds.accent }} />
+              </div>
+              <div style={{ fontSize: 12, color: ds.inkSecondary }}>Los jugadores ven el vídeo dentro de su sesión. Pega el enlace en cada fila y se guarda al instante.</div>
+            </div>
             {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 12 }}>{errorBorrado}</div>}
             {(() => {
               // Agrupa matriz + variantes para que la rejilla deje de ser
@@ -13379,23 +13439,17 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
                 return <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin resultados</div>;
               }
               return (
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
-                  {familias.map(({ matriz, variantes }) => (
-                    <TarjetaFamiliaEjercicioReal
-                      key={matriz.id}
-                      matriz={matriz}
-                      variantes={variantes}
-                      categorias={categorias}
-                      onEditar={abrirEdicion}
-                      onToggleFavorito={toggleFavorito}
-                      onCrearVariante={() => {
-                        setMatrizParaVariante(matriz);
-                        setEjercicioEditando(null);
-                        setPanelAbierto(true);
-                      }}
-                    />
-                  ))}
-                </div>
+                <FilasEjerciciosReal
+                  familias={familias}
+                  onEditar={abrirEdicion}
+                  onToggleFavorito={toggleFavorito}
+                  onGuardarVideo={(ej, url) => saveEjercicios(ejercicios.map((e) => (e.id === ej.id ? { ...e, gif_url: url } : e)))}
+                  onCrearVariante={(matriz) => {
+                    setMatrizParaVariante(matriz);
+                    setEjercicioEditando(null);
+                    setPanelAbierto(true);
+                  }}
+                />
               );
             })()}
           </>
@@ -15114,6 +15168,30 @@ function SugerenciasAlternanciaReal({ sugerencias, bloque, onAplicar }) {
 // Paso 2 del diseñador: antes de publicar, el entrenador ve la sesión como la
 // verá el jugador, los avisos pendientes (clicables, llevan al sitio a
 // corregir) y a quién y cuándo llega. Enviar solo ocurre desde aquí.
+const COLOR_BLOQUE_DISENO = { activacion: "#7C6FB0", movilidad: "#5FA87A", preventivo: "#A9B53A", core: "#E08A3C", resistencia: "#B8872B", cmj: "#C25B6B", fuerza: "#5B8DB8" };
+
+// Tarjeta desplegable de un bloque del diseñador (estilo del prototipo):
+// barra de color a la izquierda, icono, nombre · resumen, y el contenido
+// del bloque solo cuando está abierta.
+function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children }) {
+  const info = BLOQUES_DISENO.find((x) => x.id === id) || { nombre: id };
+  return (
+    <div style={{ background: abierto ? ds.surfaceRaised : ds.surface, border: `1px solid ${abierto ? color : ds.border}`, borderLeft: `4px solid ${color}`, borderRadius: 12, overflow: "hidden" }}>
+      <div onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer" }}>
+        <span style={{ width: 28, height: 28, borderRadius: 8, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <IconoBloqueDiseno id={id} />
+        </span>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 13.5, fontWeight: 800, color: ds.ink }}>
+          {info.nombre}
+          <span style={{ fontWeight: 600, fontSize: 12, color: vacio ? ds.inkMuted : ds.inkSecondary }}> · {resumen || (vacio ? "Vacío" : "")}</span>
+        </span>
+        <ChevronDown size={16} style={{ color: ds.inkMuted, transition: "transform .15s", transform: abierto ? "rotate(180deg)" : "none", flexShrink: 0 }} />
+      </div>
+      {abierto && <div style={{ padding: "4px 14px 14px" }}>{children}</div>}
+    </div>
+  );
+}
+
 function PasoRevisarEnviarReal({ resumen, destinatarios, fechas, md, nombre, onEditarConfig, onIrBloque, onEnviar, onCerrar, guardando }) {
   const bloquesConContenido = resumen.bloques.filter((b) => !b.vacio && (b.items || []).length);
   const irAviso = (txt) => {
@@ -15124,7 +15202,7 @@ function PasoRevisarEnviarReal({ resumen, destinatarios, fechas, md, nombre, onE
   const hayBloqueante = resumen.avisos.some((a) => /^Sin (fechas|jugadores)/.test(a));
   return (
     <div onClick={onCerrar} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "88dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "88dvh", display: "flex", flexDirection: "column", color: ds.ink, fontFamily: dsF.sans, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px 6px" }}>
           <span style={{ fontFamily: dsF.display, fontSize: 14.5, fontWeight: 700 }}>Revisar y enviar</span>
           <button type="button" onClick={onCerrar} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
@@ -15226,7 +15304,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   // arranca abierta porque el entrenador todavía tiene que rellenarla; al
   // editar una ya guardada arranca plegada — casi siempre solo se quiere
   // tocar el contenido de los bloques, no volver a repasar fechas/PARA/MD.
-  const [detallesAbiertos, setDetallesAbiertos] = useState(!isEditing);
+  const [detallesAbiertos, setDetallesAbiertos] = useState(false);
   const [microciclosDiseno, microsCargados] = useCmjMicrociclos();
   const estadoCmjDiseno = useEstadoCmjEquipo(players);
   const ventanasDiseno = useMemo(() => cmjVentanasMicrociclo(microciclosDiseno), [microciclosDiseno]);
@@ -16198,21 +16276,26 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
           <h1 style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 600, margin: 0, letterSpacing: "-0.01em" }}>Diseño de sesión</h1>
           <span style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.08em", color: ds.inkSecondary }}>{isEditing ? (readOnly ? "YA REGISTRADA" : "EDITAR SESIÓN") : "NUEVA SESIÓN"}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ display: "inline-flex", gap: 6 }}>
+            <span style={{ fontSize: 12, fontWeight: 700, padding: "5px 12px", borderRadius: 999, background: ds.accentSubtle, border: `1px solid ${ds.accent}`, color: ds.accent }}>1 Diseño</span>
+            {!readOnly && <button type="button" onClick={() => setRevisandoEnvio(true)} style={{ fontSize: 12, fontWeight: 600, padding: "5px 12px", borderRadius: 999, background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, cursor: "pointer" }}>2 Asignar</button>}
+          </span>
         </div>
         {/* Barra de configuración plegable — mismo patrón que .details-bar
             del mockup: cabecera con chevron + resumen de una línea, cuerpo
             en rejilla que se despliega al clicar. Ahorra el espacio vertical
             que antes se comía siempre, incluso una vez ya rellenada. */}
         <div style={{ marginBottom: 10, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden" }}>
-          <div
-            onClick={() => setDetallesAbiertos((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 10, padding: "11px 14px", cursor: "pointer" }}
-          >
-            <ChevronDown size={15} style={{ color: ds.inkMuted, flexShrink: 0, transition: "transform .15s", transform: detallesAbiertos ? "rotate(180deg)" : "none" }} />
-            <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 800, color: ds.ink, flexShrink: 0 }}>{nombre || (isEditing ? "Sesión sin nombre" : "Nueva sesión")}</span>
-            <span style={{ fontSize: 11, color: ds.inkMuted, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {(targetPlayerIds === null ? "Todos los jugadores" : `${(targetPlayerIds || []).length} jugador(es) concretos`)} · {fechas.length} fecha{fechas.length === 1 ? "" : "s"} · {md || "sin MD"}
-            </span>
+          <div style={{ display: "grid", gridTemplateColumns: anchoDesktop ? "2fr 1fr" : "1fr", gap: 12, padding: "12px 14px" }}>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Nombre de la sesión</span>
+              <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Fuerza tren inferior" style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 14, fontWeight: 600, padding: "9px 11px" }} />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Objetivo (opcional)</span>
+              <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 14, padding: "9px 11px" }} />
+            </label>
           </div>
           {detallesAbiertos && (
             <div onClick={() => setDetallesAbiertos(false)} style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "56px 16px 16px" }}>
@@ -16298,71 +16381,13 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
-          {/* Pasos como pestañas horizontales sobre el constructor (con scroll
-              si no caben): el constructor gana todo el ancho que antes ocupaba
-              la columna de pasos. */}
-          <nav
-            style={{
-              display: "flex",
-              flexDirection: "row",
-              gap: 3,
-              overflowX: "auto",
-              flexShrink: 0,
-              width: "100%",
-              boxSizing: "border-box",
-              background: ds.surface,
-              border: `1px solid ${ds.border}`,
-              borderRadius: 12,
-              padding: 8,
-            }}
-          >
-            {BLOQUES_DISENO.map((b) => {
-              const activo = bloqueActivo === b.id;
-              return (
-                <div
-                  key={b.id}
-                  onClick={() => setBloqueActivo(b.id)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 8,
-                    padding: "8px 8px",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    border: `1px solid ${activo ? ds.accentBorderSubtle : "transparent"}`,
-                    background: activo ? ds.accentSubtle : "transparent",
-                    flexShrink: 0,
-                    minWidth: 150,
-                  }}
-                >
-                  <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: activo ? ds.accent : ds.inkMuted, width: 14, flexShrink: 0 }}>{String(b.numero).padStart(2, "0")}</span>
-                  <span style={{ width: 20, height: 20, borderRadius: 6, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: activo ? ds.accent : ds.inkSecondary, flexShrink: 0 }}>
-                    <IconoBloqueDiseno id={b.id} />
-                  </span>
-                  <span style={{ flex: 1, minWidth: 0 }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: ds.ink, display: "block" }}>{b.nombre}</span>
-                    <span style={{ fontSize: 9.5, color: activo ? ds.accent : ds.inkMuted, display: "block", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{resumenBloque(b.id)}</span>
-                  </span>
-                </div>
-              );
-            })}
-          </nav>
 
           <BarraResumenDisenoReal resumen={resumenDiseno} bloqueActivo={bloqueActivo} onIrBloque={setBloqueActivo} />
           <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
-          {/* Constructor — solo el contenido del bloque activo. */}
-          <div style={{ flex: "0 0 auto", width: "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12 }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 14px", borderBottom: `1px solid ${ds.border}` }}>
-                <div style={{ width: 26, height: 26, borderRadius: 7, background: ds.bgElevated, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
-                  <IconoBloqueDiseno id={bloqueInfo.id} />
-                </div>
-                <div style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkMuted, width: 14 }}>{String(bloqueInfo.numero).padStart(2, "0")}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: 14.5, fontWeight: 600 }}>{bloqueInfo.nombre}</div>
-                  <div style={{ fontSize: 11.5, color: ds.inkMuted }}>{bloqueInfo.descripcion}</div>
-                </div>
-              </div>
-              <div style={{ padding: 14 }}>
+          {/* Constructor: una tarjeta desplegable por bloque. */}
+          <div style={{ flex: "0 0 auto", width: "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <TarjetaBloqueDiseno id="activacion" abierto={bloqueActivo === "activacion"} onToggle={() => setBloqueActivo((p) => (p === "activacion" ? null : "activacion"))} resumen={resumenBloque("activacion")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "activacion")?.vacio} color={COLOR_BLOQUE_DISENO["activacion"]}>
                 {bloqueActivo === "activacion" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div onClick={() => setActivacionActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
@@ -16421,6 +16446,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     )}
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="movilidad" abierto={bloqueActivo === "movilidad"} onToggle={() => setBloqueActivo((p) => (p === "movilidad" ? null : "movilidad"))} resumen={resumenBloque("movilidad")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "movilidad")?.vacio} color={COLOR_BLOQUE_DISENO["movilidad"]}>
                 {bloqueActivo === "movilidad" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <select value={modoMovilidad} onChange={(e) => { setModoMovilidad(e.target.value); setConservarMovilidad(false); }} style={campoSelectReal({ maxWidth: 220 })}>
@@ -16461,6 +16488,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     )}
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="preventivo" abierto={bloqueActivo === "preventivo"} onToggle={() => setBloqueActivo((p) => (p === "preventivo" ? null : "preventivo"))} resumen={resumenBloque("preventivo")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "preventivo")?.vacio} color={COLOR_BLOQUE_DISENO["preventivo"]}>
                 {bloqueActivo === "preventivo" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <select value={modoPreventivo} onChange={(e) => { setModoPreventivo(e.target.value); setConservarPreventivo(false); }} style={campoSelectReal({ maxWidth: 220 })}>
@@ -16569,6 +16598,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     )}
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
                 {bloqueActivo === "core" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasCore.map((t) => (
@@ -16614,6 +16645,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     </div>
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="resistencia" abierto={bloqueActivo === "resistencia"} onToggle={() => setBloqueActivo((p) => (p === "resistencia" ? null : "resistencia"))} resumen={resumenBloque("resistencia")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "resistencia")?.vacio} color={COLOR_BLOQUE_DISENO["resistencia"]}>
                 {bloqueActivo === "resistencia" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasResistencia.map((t) => (
@@ -16678,6 +16711,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     </div>
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="cmj" abierto={bloqueActivo === "cmj"} onToggle={() => setBloqueActivo((p) => (p === "cmj" ? null : "cmj"))} resumen={resumenBloque("cmj")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "cmj")?.vacio} color={COLOR_BLOQUE_DISENO["cmj"]}>
                 {bloqueActivo === "cmj" && (
                   <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
@@ -16686,6 +16721,8 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     <span style={{ fontSize: 13, color: cmjActiva ? ds.ink : ds.inkMuted }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
+                <TarjetaBloqueDiseno id="fuerza" abierto={bloqueActivo === "fuerza"} onToggle={() => setBloqueActivo((p) => (p === "fuerza" ? null : "fuerza"))} resumen={resumenBloque("fuerza")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "fuerza")?.vacio} color={COLOR_BLOQUE_DISENO["fuerza"]}>
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
@@ -16755,6 +16792,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                     </div>
                   </div>
                 )}
+                </TarjetaBloqueDiseno>
               </div>
           </div>
 
@@ -16764,7 +16802,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         <div style={{ flexShrink: 0, borderTop: `1px solid ${ds.border}`, paddingTop: 10, marginTop: 8 }}>
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
         {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8 }}>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
           <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
           </button>
@@ -16774,20 +16812,21 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 onClick={() => guardar(true)}
                 disabled={guardando}
                 title={isEditing && sesionExistente?.enviada ? "Guarda los cambios sin cambiar el estado: la sesión sigue publicada para los jugadores" : "Se guarda tal cual está, sin fecha obligatoria, y no se envía al jugador hasta que la publiques"}
-                style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+                style={{ flex: "1 1 200px", display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 8, background: ds.ink, border: `1px solid ${ds.ink}`, color: ds.bg || ds.canvas, borderRadius: 10, padding: "11px 16px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
-                {guardando ? "Guardando..." : isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar borrador"}
+                <BookOpen size={15} />{guardando ? "Guardando..." : isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar en biblioteca"}
               </button>
               <button
                 onClick={() => setRevisandoEnvio(true)}
                 disabled={guardando}
-                style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
+                style={{ flex: "1 1 240px", background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "11px 18px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
-                {guardando ? "Guardando..." : "Revisar y enviar →"}
+                Siguiente: asignar →
               </button>
             </>
           )}
         </div>
+        {!readOnly && <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 8 }}>Guardar en biblioteca no envía nada a los jugadores. La asignación (para quién y cuándo) se hace en el paso 2.</div>}
         </div>
       </div>
     </PantallaBase>
