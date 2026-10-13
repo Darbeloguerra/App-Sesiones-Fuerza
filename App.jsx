@@ -8714,6 +8714,57 @@ function CalendarioModuloReal({ onBack, onAbrirModulo, onCerrarSesion, scopeInic
   return <CalendarioReal players={players} grupos={grupos} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} scopeInicial={scopeInicial} />;
 }
 
+// ---------- MICROCICLO TIPO (MD-x) ----------
+// Se guarda en el navegador del entrenador (una clave por ámbito: equipo,
+// grupo o jugador). No toca la base de datos ni la carga de las sesiones.
+const MICRO_KEY = "microciclos_v1";
+const MICRO_TAGS_ORDEN = ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1", "MD", "MD+1", "MD+2"];
+function leerMicrociclos() {
+  try {
+    return JSON.parse(window.localStorage.getItem(MICRO_KEY) || "{}") || {};
+  } catch (e) {
+    return {};
+  }
+}
+function guardarMicrociclos(obj) {
+  try {
+    window.localStorage.setItem(MICRO_KEY, JSON.stringify(obj));
+  } catch (e) {
+    /* sin almacenamiento: se mantiene en memoria durante la sesión */
+  }
+}
+const MICRO_VACIO = { diaPartido: 5, sesiones: {}, manual: {} };
+// MD de una fecha: primero el ajuste manual de ese día; si no, por distancia al
+// partido más cercano (MD+1 el día siguiente; después MD-n hasta 6 días antes).
+function mdDeFecha(micro, fecha) {
+  const manual = (micro.manual || {})[fecha];
+  if (manual === "-") return "";
+  if (manual) return manual;
+  const lunes = inicioSemanaCalendario(fecha);
+  const partidos = new Set();
+  [-7, 0, 7, 14].forEach((d) => {
+    if (micro.diaPartido == null) return;
+    const p = sumarDiasFecha(lunes, d + micro.diaPartido);
+    const m = (micro.manual || {})[p];
+    if (!m || m === "MD") partidos.add(p);
+  });
+  Object.entries(micro.manual || {}).forEach(([f, t]) => {
+    if (t === "MD" && Math.abs(diasEntreFechas(fecha, f)) <= 14) partidos.add(f);
+  });
+  if (partidos.has(fecha)) return "MD";
+  let dPrev = Infinity;
+  let dNext = Infinity;
+  partidos.forEach((p) => {
+    const d = diasEntreFechas(p, fecha);
+    if (d > 0 && d < dPrev) dPrev = d;
+    if (d < 0 && -d < dNext) dNext = -d;
+  });
+  if (dPrev === 1) return "MD+1";
+  if (dNext <= 6) return `MD-${dNext}`;
+  if (dPrev === 2) return "MD+2";
+  return "";
+}
+
 function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeInicial }) {
   // Mismo bootstrap que Programación (sesiones + tareas + ejercicios en una
   // sola llamada, cacheada) — Calendario es otra forma de mirar exactamente
@@ -8747,6 +8798,11 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [lunesRef, setLunesRef] = useState(() => inicioSemanaCalendario(todayStr()));
   const [modoPlan, setModoPlan] = useState(false);
   const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
+  const [microTodos, setMicroTodos] = useState(() => leerMicrociclos());
+  const [microAbierto, setMicroAbierto] = useState(false);
+  const [microGrupoSel, setMicroGrupoSel] = useState(null);
+  const [microSemanas, setMicroSemanas] = useState(1);
+  const [avisoMicro, setAvisoMicro] = useState("");
   const [cola, setCola] = useState(null); // [{ fecha, sesion }] mientras se publica
   const [idxCola, setIdxCola] = useState(0);
   const [fallosCola, setFallosCola] = useState([]);
@@ -8904,7 +8960,45 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const sesionPorId = new Map(conTareas.map((s) => [s.id, s]));
   const opcionesBiblioteca = conTareas.filter((s) => (s.nombre || "").trim() && (s.tareas || []).length).sort((a, b) => a.nombre.localeCompare(b.nombre));
   const idsOpcionesBib = new Set(opcionesBiblioteca.map((s) => s.id));
-  const pendientesPlan = diasSemana.filter((f) => asignadas[f] && sesionPorId.get(asignadas[f]));
+  const pendientesPlan = Object.keys(asignadas).filter((f) => asignadas[f] && sesionPorId.get(asignadas[f])).sort();
+  // El microciclo pertenece al equipo: un jugador de un equipo usa el de su
+  // equipo; uno independiente (sin grupo) tiene el suyo propio.
+  const jugadorScope = scope.tipo === "jugador" ? players.find((p) => p.id === scope.jugadorId) : null;
+  const gruposMicro = scope.tipo === "grupo" ? [scope.grupoId] : jugadorScope ? (jugadorScope.gruposIds || []).filter((g) => grupos.some((x) => x.id === g)) : [];
+  const grupoMicroId = gruposMicro.includes(microGrupoSel) ? microGrupoSel : gruposMicro[0] || null;
+  const microKey = grupoMicroId ? `g:${grupoMicroId}` : scope.tipo === "jugador" ? `j:${scope.jugadorId}` : grupos.length === 1 ? `g:${grupos[0].id}` : "equipo";
+  const microNombre = grupoMicroId ? grupos.find((g) => g.id === grupoMicroId)?.nombre || "equipo" : scope.tipo === "jugador" ? `${scope.label} (independiente)` : grupos.length === 1 ? grupos[0].nombre : "Todos los equipos";
+  const microHeredado = scope.tipo === "jugador" && !!grupoMicroId;
+  const micro = { ...MICRO_VACIO, ...(microTodos[microKey] || {}) };
+  const cambiarMicro = (parche) => {
+    const nuevo = { ...microTodos, [microKey]: { ...micro, ...parche } };
+    setMicroTodos(nuevo);
+    guardarMicrociclos(nuevo);
+  };
+  const mdDe = (f) => mdDeFecha(micro, f);
+  const fijarMdManual = (f, valor) => {
+    const manual = { ...(micro.manual || {}) };
+    if (!valor) delete manual[f];
+    else manual[f] = valor;
+    cambiarMicro({ manual });
+  };
+  const microConfigurado = MICRO_TAGS_ORDEN.some((t) => micro.sesiones[t]);
+  const aplicarMicrociclo = () => {
+    const nuevas = {};
+    let sinSesion = 0;
+    for (let i = 0; i < 7 * microSemanas; i++) {
+      const f = sumarDiasFecha(lunesRef, i);
+      if (f < hoy) continue;
+      const tag = mdDe(f);
+      const id = tag ? micro.sesiones[tag] : "";
+      if (id && sesionPorId.get(id)) nuevas[f] = id;
+      else if (tag && !micro.sesiones[tag]) sinSesion += 1;
+    }
+    setAsignadas(nuevas);
+    setModoPlan(true);
+    const n = Object.keys(nuevas).length;
+    setAvisoMicro(n ? `Microciclo aplicado: ${n} día${n === 1 ? "" : "s"} con sesión${sinSesion ? ` · ${sinSesion} día${sinSesion === 1 ? "" : "s"} sin sesión definida (descanso)` : ""}. Revisa y pulsa «Publicar».` : "Ningún día de este periodo tiene sesión en el microciclo tipo (o ya han pasado).");
+  };
   const destinoVacio = destinoScope !== null && destinoScope.length === 0;
   const etiquetaDiaLarga = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" });
   const etiquetaSemana = () => {
@@ -9152,6 +9246,9 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
               <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, 7))} style={navMesBtnCalendarioStyle} aria-label="Semana siguiente"><ChevronRight size={16} /></button>
               <button onClick={() => { setLunesRef(inicioSemanaCalendario(hoy)); setDiaSel(hoy); }} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, color: ds.ink, cursor: "pointer" }}>Hoy</button>
               <span style={{ flex: 1 }} />
+              {vista === "semana" && <button type="button" onClick={() => setMicroAbierto((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.border}`, background: microAbierto ? ds.surfaceRaised : "transparent", color: ds.ink }}>
+                Microciclo{microConfigurado ? "" : " tipo"}
+              </button>}
               {vista === "semana" && <button type="button" onClick={() => setModoPlan((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
                 {modoPlan ? "Cerrar planificación" : "Planificar semana"}
               </button>}
@@ -9179,6 +9276,52 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                 </div>
               );
             })()}
+            {microAbierto && (
+              <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
+                  <b style={{ fontFamily: dsF.display, fontSize: 15 }}>Microciclo tipo · {microNombre}</b>
+                  {microHeredado && <span style={{ fontSize: 12, color: ds.inkSecondary }}>heredado por {scope.label}{gruposMicro.length > 1 ? "" : ""}</span>}
+                  {gruposMicro.length > 1 && scope.tipo === "jugador" && (
+                    <select value={grupoMicroId || ""} onChange={(e) => setMicroGrupoSel(e.target.value)} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "5px 8px" }}>
+                      {gruposMicro.map((g) => <option key={g} value={g}>{grupos.find((x) => x.id === g)?.nombre}</option>)}
+                    </select>
+                  )}
+                  <span style={{ flex: 1 }} />
+                  <label style={{ fontSize: 12.5, color: ds.inkSecondary, display: "flex", alignItems: "center", gap: 6 }}>
+                    Día de partido
+                    <select value={micro.diaPartido == null ? "" : micro.diaPartido} onChange={(e) => cambiarMicro({ diaPartido: e.target.value === "" ? null : Number(e.target.value) })} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }}>
+                      <option value="">Sin partido</option>
+                      {["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"].map((n, i) => <option key={n} value={i}>{n}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 10 }}>
+                  Elige qué sesión toca en cada día del microciclo. Cada fecha del calendario se identifica con su MD según el partido (puedes corregir cualquier día con la etiqueta MD de su fila). Las sesiones se aplican tal cual, sin tocar la carga. Se guarda en este navegador.
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
+                  {MICRO_TAGS_ORDEN.map((t) => (
+                    <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, background: ds.surfaceRaised, border: `1px solid ${micro.sesiones[t] ? ds.accentBorderSubtle : ds.border}`, borderRadius: 10, padding: "6px 8px" }}>
+                      <b style={{ fontFamily: dsF.mono, fontSize: 12, width: 44, color: t === "MD" ? ds.accent : ds.ink }}>{t}</b>
+                      <select value={micro.sesiones[t] || ""} onChange={(e) => { const ses2 = { ...micro.sesiones }; if (e.target.value) ses2[t] = e.target.value; else delete ses2[t]; cambiarMicro({ sesiones: ses2 }); }} style={{ flex: 1, minWidth: 0, background: "transparent", border: "none", color: ds.ink, fontSize: 12.5 }}>
+                        <option value="">Descanso / sin sesión</option>
+                        {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                        {micro.sesiones[t] && !idsOpcionesBib.has(micro.sesiones[t]) && <option value={micro.sesiones[t]}>{sesionPorId.get(micro.sesiones[t])?.nombre || "Sesión eliminada"}</option>}
+                      </select>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                  <label style={{ fontSize: 12.5, color: ds.inkSecondary, display: "flex", alignItems: "center", gap: 6 }}>
+                    Aplicar a
+                    <select value={microSemanas} onChange={(e) => setMicroSemanas(Number(e.target.value))} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }}>
+                      {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n === 1 ? "esta semana" : `${n} semanas desde esta`}</option>)}
+                    </select>
+                  </label>
+                  <button type="button" disabled={!microConfigurado} onClick={aplicarMicrociclo} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: microConfigurado ? 1 : 0.5 }}>Aplicar microciclo</button>
+                  {avisoMicro && <span style={{ fontSize: 12.5, color: ds.inkSecondary, flex: 1, minWidth: 200 }}>{avisoMicro}</span>}
+                </div>
+              </div>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               {[
                 [`${resumenSemana.n}`, resumenSemana.n === 1 ? "sesión" : "sesiones"],
@@ -9216,6 +9359,14 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                       <div style={{ fontSize: 11, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{NOMBRES_DIA[i]}</div>
                       <div style={{ width: 40, height: 40, margin: "4px auto 0", borderRadius: "50%", background: esHoy ? ds.accent : ds.surfaceRaised, color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>{Number(f.slice(8))}</div>
                       {esHoy && <div style={{ fontSize: 10, color: ds.accent, fontWeight: 700, marginTop: 3 }}>HOY</div>}
+                      {!pasado && (
+                        <select value={micro.manual[f] || ""} onChange={(e) => fijarMdManual(f, e.target.value)} title="Día del microciclo (MD). «Auto» lo calcula según el día de partido." style={{ display: "block", margin: "6px auto 0", width: 56, fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, textAlign: "center", color: mdDe(f) ? (mdDe(f) === "MD" ? ds.accentInk : ds.accent) : ds.inkMuted, background: mdDe(f) === "MD" ? ds.accent : "transparent", border: `1px solid ${mdDe(f) ? ds.accentBorderSubtle : ds.border}`, borderRadius: 999, padding: "2px 0", cursor: "pointer", appearance: "none", WebkitAppearance: "none" }}>
+                          <option value="">{micro.manual[f] ? "Auto" : mdDe(f) || "MD ·"}</option>
+                          {MD_TAGS.filter((t) => t !== "Sin MD").map((t) => <option key={t} value={t}>{t}</option>)}
+                          <option value="-">Sin MD</option>
+                        </select>
+                      )}
+                      {pasado && mdDe(f) && <div style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, color: ds.inkMuted, marginTop: 6 }}>{mdDe(f)}</div>}
                     </div>
                     <div style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
                       {sols.map((sol) => (
@@ -9312,7 +9463,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             {fallosCola.length > 0 && !cola && <div style={{ marginBottom: 10, fontSize: 12.5, color: ds.danger }}>{fallosCola.join(" · ")}</div>}
             {modoPlan && (
               <div style={{ position: "sticky", bottom: 0, zIndex: 5, background: ds.canvas, padding: "10px 0", marginBottom: 14, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", borderTop: `1px solid ${ds.border}` }}>
-                <button type="button" disabled={!pendientesPlan.length || destinoVacio || !!cola} onClick={() => lanzarCola(pendientesPlan.map((f) => ({ fecha: f, sesion: sesionPorId.get(asignadas[f]) })))} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: !pendientesPlan.length || destinoVacio || cola ? 0.5 : 1 }}>
+                <button type="button" disabled={!pendientesPlan.length || destinoVacio || !!cola} onClick={() => lanzarCola(pendientesPlan.map((f) => ({ fecha: f, sesion: sesionPorId.get(asignadas[f]), md: mdDe(f) || undefined })))} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "11px 20px", fontSize: 13.5, fontWeight: 700, cursor: "pointer", opacity: !pendientesPlan.length || destinoVacio || cola ? 0.5 : 1 }}>
                   Publicar semana{pendientesPlan.length ? ` (${pendientesPlan.length} día${pendientesPlan.length === 1 ? "" : "s"})` : ""}
                 </button>
                 <span style={{ fontSize: 12, color: ds.inkMuted }}>{destinoVacio ? "Este grupo no tiene jugadores activos." : `Para ${scope.label} · cada sesión se publica con la fecha de su día.`}</span>
@@ -9532,6 +9683,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
               forzarDestino
               sinProgresion
               autoEnviar
+              mdForzado={actualCola.md}
               onBack={() => {}}
               onFallo={(msg) => { setFallosCola((f) => [...f, `${etiquetaDiaLarga(actualCola.fecha)}: ${msg}`]); siguienteCola(true); }}
               onGuardado={() => siguienteCola(false)}
@@ -15685,7 +15837,7 @@ function PasoRevisarEnviarReal({ resumen, destinatarios, fechas, md, nombre, onE
 // fecha del día y el destino elegido, y la guarda y publica sola — así se
 // reutiliza TODA la lógica de guardado (movilidad y preventivo por fecha,
 // circuitos, materiales…) sin duplicarla. Nunca aplica progresión de carga.
-function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado, autoEnviar, sinProgresion, forzarDestino, onFallo }) {
+function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado, autoEnviar, sinProgresion, forzarDestino, onFallo, mdForzado }) {
   const [gruposDestino] = useEntityList("grupos");
   const parcialRef = useRef(nuevoEstadoParcial());
   const isEditing = !!sesionExistente;
@@ -15720,7 +15872,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   const [videoAmpliado, setVideoAmpliado] = useState(null);
   const [revisandoEnvio, setRevisandoEnvio] = useState(false);
 
-  const [md, setMd] = useState(isEditing ? base?.md || "" : "");
+  const [md, setMd] = useState(mdForzado || (isEditing ? base?.md || "" : ""));
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
   // Nombre de plantilla, opcional — es lo que permite luego encontrarla en
   // la Biblioteca de sesiones y reutilizarla sin tener que reconocerla por
