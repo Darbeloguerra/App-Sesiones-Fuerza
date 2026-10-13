@@ -12981,6 +12981,47 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   );
 }
 
+const tieneVideoEjercicio = (e) => !!(e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean));
+
+// Vista rápida: solo los ejercicios sin vídeo, con un campo para pegar el
+// enlace y guardarlo al momento, sin abrir el panel completo de cada uno.
+function ListaEnlacesVideoReal({ ejercicios, onGuardar }) {
+  const [borradores, setBorradores] = useState({});
+  const [guardando, setGuardando] = useState("");
+  const [error, setError] = useState("");
+  const sin = ejercicios.filter((e) => !tieneVideoEjercicio(e));
+  if (!sin.length) return <div style={{ fontSize: 13, color: ds.inkSecondary, padding: 12 }}>Todos los ejercicios tienen vídeo. 🎉</div>;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 12, color: ds.inkSecondary }}>{sin.length} ejercicios sin vídeo — pega el enlace (YouTube o vídeo directo) y pulsa Guardar.</div>
+      {error && <div style={{ color: ds.danger, fontSize: 12 }}>{error}</div>}
+      {sin.map((e) => (
+        <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", border: `1px solid ${ds.border}`, borderRadius: 8 }}>
+          <div style={{ flex: "1 1 180px", minWidth: 0 }}>
+            <div style={{ fontSize: 13, color: ds.ink }}>{e.nombre}</div>
+            <div style={{ fontSize: 10.5, color: ds.inkMuted, fontFamily: dsF.mono }}>{[e.bloque, ...(e.tags_descriptivos || [])].filter(Boolean).join(" · ")}</div>
+          </div>
+          <input value={borradores[e.id] || ""} onChange={(ev) => setBorradores((b) => ({ ...b, [e.id]: ev.target.value }))} placeholder="https://youtu.be/…" style={{ flex: "2 1 240px", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }} />
+          <button
+            type="button"
+            disabled={!(borradores[e.id] || "").trim() || guardando === e.id}
+            onClick={async () => {
+              setGuardando(e.id);
+              setError("");
+              const ok = await onGuardar(e, borradores[e.id].trim());
+              if (!ok) setError("No se pudo guardar. Inténtalo de nuevo.");
+              setGuardando("");
+            }}
+            style={{ fontSize: 12, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "6px 12px", cursor: "pointer", opacity: (borradores[e.id] || "").trim() ? 1 : 0.5 }}
+          >
+            {guardando === e.id ? "Guardando…" : "Guardar"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
@@ -13017,6 +13058,8 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
     .filter((e) => (lateralidadFiltro === "Todas" ? true : e.lateralidad === lateralidadFiltro))
     .filter((e) => (libTab === "personalizados" ? e.es_personalizado !== false : true))
     .filter((e) => (libTab === "favoritos" ? !!e.favorito : true))
+    .filter((e) => (libTab === "sinvideo" ? !tieneVideoEjercicio(e) : true))
+    .filter((e) => (libTab === "convideo" ? tieneVideoEjercicio(e) : true))
     .filter((e) => (e.nombre || "").toLowerCase().includes(busqueda.toLowerCase()));
 
   const toggleFavorito = (ej) => {
@@ -13025,6 +13068,8 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
 
   const totalPersonalizados = ejercicios.filter((e) => e.es_personalizado !== false).length;
   const totalFavoritos = ejercicios.filter((e) => e.favorito).length;
+  const totalConVideo = ejercicios.filter(tieneVideoEjercicio).length;
+  const pctVideo = ejercicios.length ? Math.round((totalConVideo / ejercicios.length) * 100) : 0;
 
   const abrirEdicion = (ej) => {
     setEjercicioEditando(ej);
@@ -13132,6 +13177,15 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
               {ejercicios.length} ejercicios · {totalPersonalizados} personalizados · {totalFavoritos} favoritos
             </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, maxWidth: 340 }} title="Ejercicios con vídeo de demostración">
+              <div style={{ flex: 1, height: 6, borderRadius: 999, background: ds.border, overflow: "hidden" }}>
+                <div style={{ width: `${pctVideo}%`, height: "100%", background: pctVideo >= 90 ? ds.success || ds.accent : ds.accent }} />
+              </div>
+              <span style={{ fontSize: 11.5, color: ds.inkSecondary, whiteSpace: "nowrap" }}>{totalConVideo}/{ejercicios.length} con vídeo ({pctVideo}%)</span>
+              {totalConVideo < ejercicios.length && (
+                <button type="button" onClick={() => setVista("videos")} style={{ fontSize: 11.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", padding: 0, whiteSpace: "nowrap" }}>Completar →</button>
+              )}
+            </div>
           </div>
           <button
             onClick={() => {
@@ -13167,6 +13221,7 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
             <select value={vista} onChange={(e) => setVista(e.target.value)} style={campoSelectReal({ maxWidth: 220 })}>
               <option value="lista">Lista y filtros</option>
               <option value="rotacion">Orden de rotación</option>
+              <option value="videos">Enlaces de vídeo (rápido)</option>
             </select>
           </label>
           {vista === "lista" && (
@@ -13176,11 +13231,15 @@ function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
                 <option value="todos">Todos los ejercicios</option>
                 <option value="personalizados">Personalizados</option>
                 <option value="favoritos">♥ Favoritos</option>
+                <option value="sinvideo">Sin vídeo</option>
+                <option value="convideo">Con vídeo</option>
               </select>
             </label>
           )}
         </div>
-        {vista === "lista" ? (
+        {vista === "videos" ? (
+          <ListaEnlacesVideoReal ejercicios={ejercicios} onGuardar={(ej, url) => saveEjercicios(ejercicios.map((e) => (e.id === ej.id ? { ...e, gif_url: url } : e)))} />
+        ) : vista === "lista" ? (
           <>
             <div style={{ display: "flex", gap: 8, marginBottom: 14, position: "relative" }}>
               <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar ejercicio..." style={{ flex: 1 }} />
@@ -14296,23 +14355,38 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   );
 }
 
+// Cuántas veces está ya un ejercicio en la sesión que se está diseñando —
+// lo aporta DisenoSesionReal; fuera de él, 0.
+const EnSesionContext = React.createContext(() => 0);
+
 function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
+  const [zonaFiltro, setZonaFiltro] = useState("");
+  const [soloVideo, setSoloVideo] = useState(false);
+  const [soloFav, setSoloFav] = useState(false);
+  const [previsId, setPrevisId] = useState(null);
+  const [anadidos, setAnadidos] = useState({});
+  const [aviso, setAviso] = useState("");
+  const [varianteVideo, setVarianteVideo] = useState("");
   // Ejercicio (ya existente sin zona, o { nombre, nuevo: true } recién
   // escrito) que está esperando a que se le asigne zona corporal antes de
-  // poder añadirse a la sesión — la zona es obligatoria desde ahora, así
-  // que ningún ejercicio pasa de aquí sin ella.
+  // poder añadirse a la sesión — la zona es obligatoria, así que ningún
+  // ejercicio pasa de aquí sin ella.
   const [pendienteZona, setPendienteZona] = useState(null);
   const [guardandoZona, setGuardandoZona] = useState(false);
-  // Los ejercicios sin bloque (creados desde el diseñador antes de este arreglo)
-  // también se ofrecen: antes quedaban invisibles y había que volver a crearlos.
+  const enSesion = React.useContext(EnSesionContext);
+  const ancho = useAnchoVentana();
+  const dosPaneles = ancho >= 760;
+
   const coincideBloque = (e) => !bloque || !e.bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
   const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
+  const coincideFiltros = (e) =>
+    (!zonaFiltro || (e.tags_descriptivos || []).includes(zonaFiltro)) &&
+    (!soloVideo || !!e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean)) &&
+    (!soloFav || !!e.favorito);
 
-  // Igual que en la Biblioteca: la matriz aparece primero, y justo debajo,
-  // indentadas, sus variantes — en vez de una lista alfabética plana donde
-  // "Sentadilla" y "Sentadilla + salto" quedan sin relación aparente.
+  // La matriz aparece primero y justo debajo, indentadas, sus variantes.
   const idsExistentes = new Set(ejercicios.map((e) => e.id));
   const variantesPorMatriz = {};
   ejercicios.forEach((e) => {
@@ -14323,46 +14397,135 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   const matrices = ejercicios.filter((e) => !e.ejercicio_base_id || !idsExistentes.has(e.ejercicio_base_id));
   const opciones = [];
   matrices.forEach((m) => {
-    // Igual que en la Biblioteca: la familia se muestra si la MATRIZ o
-    // CUALQUIERA de sus variantes encaja con el bloque/texto buscado — antes
-    // se exigía que la matriz en sí encajara con el bloque, así que una
-    // variante guardada en otro bloque (p. ej. matriz en "Movilidad" con una
-    // variante pensada para "Fuerza") quedaba invisible aquí aunque sí
-    // apareciera en la Biblioteca general.
-    const matrizCoincide = coincideBloque(m) && coincideTexto(m);
-    const variantesCoinciden = (variantesPorMatriz[m.id] || []).filter((v) => coincideBloque(v) && coincideTexto(v));
-    if (matrizCoincide || variantesCoinciden.length) {
+    const ok = (x) => coincideBloque(x) && coincideTexto(x) && coincideFiltros(x);
+    const variantesCoinciden = (variantesPorMatriz[m.id] || []).filter(ok);
+    if (ok(m) || variantesCoinciden.length) {
       opciones.push(m);
       variantesCoinciden.forEach((v) => opciones.push({ ...v, esVariante: true }));
     }
   });
+  const ejPrevis = ejercicios.find((e) => e.id === previsId) || null;
+  const matrizPrevis = ejPrevis ? ejercicios.find((e) => e.id === ejPrevis.ejercicio_base_id) || ejPrevis : null;
+  const variantesPrevis = matrizPrevis ? variantesPorMatriz[matrizPrevis.id] || [] : [];
+  const urlVideo = ejPrevis ? (varianteVideo && ejPrevis.videos_variantes?.[varianteVideo]) || ejPrevis.gif_url || Object.values(ejPrevis.videos_variantes || {}).find(Boolean) || "" : "";
 
   const cerrarTodo = () => {
     setAbierto(false);
     setFiltro("");
     setPendienteZona(null);
+    setPrevisId(null);
+    setAnadidos({});
+    setAviso("");
+    setVarianteVideo("");
+  };
+
+  const anadir = (e) => {
+    if (!(e.tags_descriptivos && e.tags_descriptivos.length)) {
+      setPendienteZona(e);
+      return;
+    }
+    onAdd(e);
+    setAnadidos((a) => ({ ...a, [e.id]: (a[e.id] || 0) + 1 }));
+    setAviso(`«${e.nombre}» añadido a ${bloque || "la sesión"}`);
+    if (!dosPaneles) cerrarTodo();
   };
 
   const elegirZona = async (zona) => {
     setGuardandoZona(true);
     try {
       if (pendienteZona.nuevo) {
-        // Todavía no existe en la base de datos — la zona viaja junto con
-        // el resto de datos hasta el sitio donde de verdad se crea.
         onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: [zona], bloque: bloque || "" });
       } else {
-        // Ya existe: se actualiza ese ejercicio en tu biblioteca para
-        // siempre, y se añade a la sesión con la zona ya puesta.
         const actualizado = await onAsignarZona(pendienteZona, zona);
         onAdd(actualizado);
       }
       cerrarTodo();
     } catch (e) {
-      // Se deja el aviso abierto para que puedas reintentar sin perder la
-      // búsqueda ni tener que volver a encontrar el ejercicio.
+      // Se deja el aviso abierto para reintentar sin perder la búsqueda.
     }
     setGuardandoZona(false);
   };
+
+  const chip = (activo, onClick, txt) => (
+    <button key={txt} type="button" onClick={onClick} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: "transparent", color: activo ? ds.accent : ds.inkSecondary, whiteSpace: "nowrap", fontWeight: activo ? 600 : 400 }}>
+      {txt}
+    </button>
+  );
+
+  const lista = (
+    <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+      {opciones.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "8px 4px" }}>Sin resultados{filtro.trim() ? " — puedes crear uno nuevo con este nombre" : " con estos filtros"}</div>}
+      {opciones.map((e) => {
+        const n = enSesion(e.id) + (anadidos[e.id] || 0);
+        const sel = e.id === previsId;
+        const miniatura = miniaturaTarea(e.gif_url);
+        return (
+          <div
+            key={e.id}
+            onClick={() => (dosPaneles ? (setPrevisId(e.id), setVarianteVideo("")) : anadir(e))}
+            style={{ padding: "6px 8px", paddingLeft: e.esVariante ? 22 : 8, borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: sel ? ds.border : "transparent" }}
+            onMouseEnter={(ev) => !sel && (ev.currentTarget.style.background = ds.border)}
+            onMouseLeave={(ev) => !sel && (ev.currentTarget.style.background = "transparent")}
+          >
+            <div style={{ width: 34, height: 34, borderRadius: 6, background: "rgba(127,127,127,0.15)", flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 11 }}>
+              {miniatura ? <img src={miniatura} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : e.gif_url ? "▶" : ""}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0, flex: 1 }}>
+              <span style={{ color: e.esVariante ? ds.inkSecondary : ds.ink, fontSize: e.esVariante ? 12.5 : 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {e.favorito ? "♥ " : ""}{e.esVariante && "↳ "}{e.nombre}
+              </span>
+              <span style={{ color: ds.inkMuted, fontSize: 10.5, fontFamily: dsF.mono }}>{(e.tags_descriptivos || []).join(" · ")}</span>
+            </div>
+            {n > 0 && <span style={{ fontSize: 10.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, padding: "1px 7px", flexShrink: 0 }}>en sesión ×{n}</span>}
+            {dosPaneles && (
+              <button type="button" onClick={(ev) => { ev.stopPropagation(); anadir(e); }} style={{ fontSize: 11.5, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", flexShrink: 0 }}>
+                + Añadir
+              </button>
+            )}
+          </div>
+        );
+      })}
+      {filtro.trim() && (
+        <div onClick={() => setPendienteZona({ nombre: filtro.trim(), nuevo: true })} style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: ds.accent, fontSize: 12.5, borderTop: `1px solid ${ds.border}`, marginTop: 4 }}>
+          + Crear "{filtro.trim()}" como nuevo ejercicio
+        </div>
+      )}
+    </div>
+  );
+
+  const panelPrevis = (
+    <div style={{ width: 300, flexShrink: 0, borderLeft: `1px solid ${ds.border}`, paddingLeft: 12, overflowY: "auto" }}>
+      {!ejPrevis ? (
+        <div style={{ color: ds.inkMuted, fontSize: 12, padding: "12px 0", lineHeight: 1.5 }}>Toca un ejercicio para ver el vídeo y sus variantes antes de añadirlo.</div>
+      ) : (
+        <>
+          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>{ejPrevis.nombre}</div>
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", margin: "6px 0" }}>
+            {(ejPrevis.tags_descriptivos || []).map((t) => <span key={t} style={{ fontSize: 10.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 7px" }}>{t}</span>)}
+            {ejPrevis.bloque && <span style={{ fontSize: 10.5, color: ds.inkMuted }}>{ejPrevis.bloque}</span>}
+          </div>
+          {urlVideo ? <VideoEmbed url={urlVideo} /> : <div style={{ fontSize: 12, color: ds.inkMuted, border: `1px dashed ${ds.border}`, borderRadius: 8, padding: 14, textAlign: "center" }}>Sin vídeo todavía</div>}
+          {Object.keys(ejPrevis.videos_variantes || {}).filter((k) => ejPrevis.videos_variantes[k]).length > 0 && (
+            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 8 }}>
+              {chip(!varianteVideo, () => setVarianteVideo(""), "General")}
+              {Object.keys(ejPrevis.videos_variantes).filter((k) => ejPrevis.videos_variantes[k]).map((k) => chip(varianteVideo === k, () => setVarianteVideo(k), k.replace(/\|/g, " · ")))}
+            </div>
+          )}
+          {variantesPrevis.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontSize: 10.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Variantes</div>
+              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                {[matrizPrevis, ...variantesPrevis].map((v) => chip(v.id === previsId, () => { setPrevisId(v.id); setVarianteVideo(""); }, v.id === matrizPrevis.id ? "Base" : v.nombre))}
+              </div>
+            </div>
+          )}
+          <button type="button" onClick={() => anadir(ejPrevis)} style={{ marginTop: 12, width: "100%", fontSize: 12.5, fontWeight: 600, color: "#fff", background: ds.accent, border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer" }}>
+            + Añadir a «{bloque || "sesión"}»
+          </button>
+        </>
+      )}
+    </div>
+  );
 
   return (
     <div style={{ position: "relative" }}>
@@ -14371,75 +14534,43 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
       </button>
       {abierto && (
         <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-        <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: 440, maxHeight: "82dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-            <span style={{ fontFamily: dsF.display, fontSize: 13.5, fontWeight: 700 }}>Añadir ejercicio{bloque ? ` · ${bloque}` : ""}</span>
-            <button type="button" onClick={cerrarTodo} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
-          </div>
-          {!pendienteZona && (
-            <>
-              <input
-                autoFocus
-                value={filtro}
-                onChange={(e) => setFiltro(e.target.value)}
-                placeholder="Buscar ejercicio..."
-                style={{ width: "100%", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }}
-              />
-              <div style={{ flex: 1, minHeight: 0, maxHeight: "min(58dvh, 440px)", overflowY: "auto" }}>
-                {opciones.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "8px 4px" }}>Sin resultados — se creará uno nuevo con este nombre al escribirlo</div>}
-                {opciones.map((e) => (
-                  <div
-                    key={e.id}
-                    onClick={() => {
-                      if (!(e.tags_descriptivos && e.tags_descriptivos.length)) {
-                        setPendienteZona(e);
-                        return;
-                      }
-                      onAdd(e);
-                      cerrarTodo();
-                    }}
-                    style={{ padding: "7px 8px", paddingLeft: e.esVariante ? 18 : 8, borderRadius: 6, cursor: "pointer", display: "flex", flexDirection: "column", gap: 2 }}
-                    onMouseEnter={(ev) => (ev.currentTarget.style.background = ds.border)}
-                    onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
-                  >
-                    <span style={{ color: e.esVariante ? ds.inkSecondary : ds.ink, fontSize: e.esVariante ? 12.5 : 13 }}>
-                      {e.esVariante && "↳ "}
-                      {e.nombre}
-                    </span>
-                    <span style={{ color: ds.inkMuted, fontSize: 10.5, fontFamily: dsF.mono }}>{(e.tags_descriptivos || []).join(" · ")}</span>
-                  </div>
-                ))}
-                {filtro.trim() && (
-                  <div
-                    onClick={() => setPendienteZona({ nombre: filtro.trim(), nuevo: true })}
-                    style={{ padding: "7px 8px", borderRadius: 6, cursor: "pointer", color: ds.accent, fontSize: 12.5, borderTop: `1px solid ${ds.border}`, marginTop: 4 }}
-                  >
-                    + Crear "{filtro.trim()}" como nuevo ejercicio
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-          {pendienteZona && (
-            <div style={{ padding: 4 }}>
-              <div style={{ fontSize: 11.5, color: ds.accent, marginBottom: 8, lineHeight: 1.4 }}>
-                "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}
-              </div>
-              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
-                  <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />
-                ))}
-              </div>
-              <button
-                onClick={() => setPendienteZona(null)}
-                disabled={guardandoZona}
-                style={{ marginTop: 8, fontSize: 11, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}
-              >
-                {guardandoZona ? "Guardando..." : "Cancelar"}
-              </button>
+          <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: dosPaneles ? 900 : 440, height: dosPaneles ? "min(80dvh, 640px)" : undefined, maxHeight: "86dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontFamily: dsF.display, fontSize: 13.5, fontWeight: 700 }}>Añadir ejercicio{bloque ? ` · ${bloque}` : ""}</span>
+              <button type="button" onClick={cerrarTodo} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
             </div>
-          )}
-        </div>
+            {!pendienteZona && (
+              <>
+                <input autoFocus value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar ejercicio..." style={{ width: "100%", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }} />
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
+                  {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
+                  {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
+                  {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
+                </div>
+                <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, maxHeight: dosPaneles ? undefined : "min(52dvh, 420px)" }}>
+                  {lista}
+                  {dosPaneles && panelPrevis}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8, minHeight: 28 }}>
+                  <span style={{ fontSize: 11.5, color: ds.accent }}>{aviso}</span>
+                  <button type="button" onClick={cerrarTodo} style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "6px 14px", cursor: "pointer" }}>Hecho</button>
+                </div>
+              </>
+            )}
+            {pendienteZona && (
+              <div style={{ padding: 4 }}>
+                <div style={{ fontSize: 11.5, color: ds.accent, marginBottom: 8, lineHeight: 1.4 }}>
+                  "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
+                </div>
+                <button onClick={() => setPendienteZona(null)} disabled={guardandoZona} style={{ marginTop: 8, fontSize: 11, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+                  {guardandoZona ? "Guardando..." : "Cancelar"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>
@@ -14980,6 +15111,74 @@ function SugerenciasAlternanciaReal({ sugerencias, bloque, onAplicar }) {
   );
 }
 
+// Paso 2 del diseñador: antes de publicar, el entrenador ve la sesión como la
+// verá el jugador, los avisos pendientes (clicables, llevan al sitio a
+// corregir) y a quién y cuándo llega. Enviar solo ocurre desde aquí.
+function PasoRevisarEnviarReal({ resumen, destinatarios, fechas, md, nombre, onEditarConfig, onIrBloque, onEnviar, onCerrar, guardando }) {
+  const bloquesConContenido = resumen.bloques.filter((b) => !b.vacio && (b.items || []).length);
+  const irAviso = (txt) => {
+    if (/^Sin (fechas|jugadores)/.test(txt)) onEditarConfig();
+    else onIrBloque("fuerza");
+    onCerrar();
+  };
+  const hayBloqueante = resumen.avisos.some((a) => /^Sin (fechas|jugadores)/.test(a));
+  return (
+    <div onClick={onCerrar} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "88dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px 6px" }}>
+          <span style={{ fontFamily: dsF.display, fontSize: 14.5, fontWeight: 700 }}>Revisar y enviar</span>
+          <button type="button" onClick={onCerrar} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 20, cursor: "pointer", lineHeight: 1 }}>×</button>
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "4px 14px 10px", display: "flex", flexDirection: "column", gap: 12 }}>
+          <div style={{ border: `1px solid ${ds.border}`, borderRadius: 10, padding: "10px 12px", display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ flex: 1, fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.6 }}>
+              <div style={{ color: ds.ink, fontWeight: 700, fontSize: 13.5 }}>{nombre || "Sesión sin nombre"}</div>
+              <div>Para: <b style={{ color: ds.ink }}>{destinatarios}</b></div>
+              <div>Fechas: <b style={{ color: ds.ink }}>{fechas.length ? fechas.join(", ") : "ninguna"}</b>{md ? ` · ${md}` : ""}</div>
+              <div>Duración estimada: <b style={{ color: ds.ink }}>~{formatearDuracionDiseno(resumen.totalSeg)}</b></div>
+            </div>
+            <button type="button" onClick={() => { onEditarConfig(); onCerrar(); }} style={{ fontSize: 12, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "4px 10px", cursor: "pointer" }}>Editar</button>
+          </div>
+          {resumen.avisos.length > 0 && (
+            <div style={{ border: `1px solid ${ds.danger}`, borderRadius: 10, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={{ fontSize: 11, fontFamily: dsF.mono, color: ds.danger, textTransform: "uppercase", letterSpacing: 0.4 }}>Pendiente de revisar</div>
+              {resumen.avisos.map((a, i) => (
+                <div key={i} onClick={() => irAviso(a)} style={{ fontSize: 12.5, color: ds.ink, cursor: "pointer", textDecoration: "underline dotted" }}>⚠ {a}</div>
+              ))}
+            </div>
+          )}
+          <div>
+            <div style={{ fontSize: 11, fontFamily: dsF.mono, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 6 }}>Así la verá el jugador</div>
+            <div style={{ border: `1px solid ${ds.border}`, borderRadius: 10, overflow: "hidden" }}>
+              {bloquesConContenido.length === 0 && <div style={{ padding: 12, fontSize: 12.5, color: ds.inkMuted }}>La sesión está vacía.</div>}
+              {bloquesConContenido.map((b, i) => (
+                <div key={b.id} style={{ padding: "8px 12px", borderTop: i ? `1px solid ${ds.border}` : "none" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12.5, fontWeight: 700, color: ds.ink }}>
+                    <span>{b.nombre}</span>
+                    <span style={{ fontFamily: dsF.mono, fontWeight: 400, color: ds.inkMuted, fontSize: 11 }}>{formatearDuracionDiseno(b.seg)}</span>
+                  </div>
+                  {b.items.map((it, j) => (
+                    <div key={j} style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 3 }}>
+                      <span style={{ color: ds.ink }}>{it.titulo}</span>
+                      {it.sub ? <span style={{ color: ds.inkMuted }}> — {it.sub}</span> : null}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderTop: `1px solid ${ds.border}` }}>
+          <button type="button" onClick={onCerrar} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "9px 14px", fontSize: 13, cursor: "pointer" }}>Volver al diseño</button>
+          <button type="button" onClick={onEnviar} disabled={guardando || hayBloqueante} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 600, cursor: "pointer", opacity: guardando || hayBloqueante ? 0.5 : 1 }}>
+            {guardando ? "Enviando..." : "Enviar a los jugadores"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado }) {
   const [gruposDestino] = useEntityList("grupos");
   const parcialRef = useRef(nuevoEstadoParcial());
@@ -15013,6 +15212,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
   // Lightbox de vídeo para las miniaturas de tarea clicables (mismo patrón
   // que PantallaJugadorReal / gifAmpliado).
   const [videoAmpliado, setVideoAmpliado] = useState(null);
+  const [revisandoEnvio, setRevisandoEnvio] = useState(false);
 
   const [md, setMd] = useState(isEditing ? base?.md || "" : "");
   const [objetivo, setObjetivo] = useState(base?.objetivo || "");
@@ -15951,7 +16151,18 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
     return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs), porZona, descansoMedio: media(descansos), repsTotales, segTrabajo: segFuerza }, filasDescanso, sugerencias, avisos };
   })();
 
+  // Cuántas veces está cada ejercicio ya en la sesión — lo consume el selector
+  // para marcar «en sesión ×N» sin que el entrenador repita por error.
+  const conteoEnSesion = (() => {
+    const m = {};
+    const cuenta = (t) => { const id = t && (t.ejercicioId || t.ejercicio_id); if (id) m[id] = (m[id] || 0) + 1; };
+    [tareasCore, tareasResistencia, tareasFuerza, tareasPreventivoManual].forEach((l) => (l || []).forEach(cuenta));
+    [circuitosCore, circuitosResistencia, circuitosFuerza].forEach((l) => (l || []).forEach((c) => (c.tareas || []).forEach(cuenta)));
+    return (id) => m[id] || 0;
+  })();
+
   return (
+    <EnSesionContext.Provider value={conteoEnSesion}>
     <>
     <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640} layoutFijo>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -16568,11 +16779,11 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
                 {guardando ? "Guardando..." : isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar borrador"}
               </button>
               <button
-                onClick={() => guardar(false)}
+                onClick={() => setRevisandoEnvio(true)}
                 disabled={guardando}
                 style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 8, padding: "10px 18px", fontSize: 13.5, fontWeight: 600, cursor: "pointer", opacity: guardando ? 0.6 : 1 }}
               >
-                {guardando ? "Guardando..." : "Guardar y enviar"}
+                {guardando ? "Guardando..." : "Revisar y enviar →"}
               </button>
             </>
           )}
@@ -16580,6 +16791,20 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
         </div>
       </div>
     </PantallaBase>
+    {revisandoEnvio && (
+      <PasoRevisarEnviarReal
+        resumen={resumenDiseno}
+        destinatarios={targetPlayerIds === null ? "Todos los jugadores" : `${(targetPlayerIds || []).length} jugador(es) concretos`}
+        fechas={fechas}
+        md={md}
+        nombre={nombre}
+        guardando={guardando}
+        onEditarConfig={() => setDetallesAbiertos(true)}
+        onIrBloque={setBloqueActivo}
+        onEnviar={async () => { await guardar(false); setRevisandoEnvio(false); }}
+        onCerrar={() => setRevisandoEnvio(false)}
+      />
+    )}
     {videoAmpliado && (
       <div
         onClick={() => setVideoAmpliado(null)}
@@ -16597,6 +16822,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       </div>
     )}
     </>
+    </EnSesionContext.Provider>
   );
 }
 
