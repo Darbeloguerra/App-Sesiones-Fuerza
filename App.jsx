@@ -8241,8 +8241,8 @@ function useReferenciasPorEjercicio(sesionActualId) {
   }, [tareasHistoricas, sesionesHistoricas, tareasHistoricasLoaded, sesionesHistoricasLoaded, sesionActualId]);
 }
 
-function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura }) {
-  const [abierta, setAbierta] = useState(esHoy);
+function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura, compacta, abiertaInicial }) {
+  const [abierta, setAbierta] = useState(abiertaInicial ?? esHoy);
   const [confirmando, setConfirmando] = useState(false);
   const [borrando, setBorrando] = useState(false);
   const bloques = {};
@@ -8275,17 +8275,17 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
         <div style={{ flex: 1, minWidth: 0 }}>
           {sesion.nombre && <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.accent, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sesion.nombre}</div>}
           <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            {esHoy && (
+            {esHoy && !compacta && (
               <span style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>
                 HOY
               </span>
             )}
-            {(sesion.fechas || []).map((f) => (
+            {!compacta && (sesion.fechas || []).map((f) => (
               <span key={f} style={{ fontSize: 13, fontWeight: 600, color: ds.ink }}>
                 {fmtDateShort(f)}
               </span>
             ))}
-            {!(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: ds.inkMuted }}>Sin fecha todavía</span>}
+            {!compacta && !(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: ds.inkMuted }}>Sin fecha todavía</span>}
             {sesion.md && (
               <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 6px" }}>{sesion.md}</span>
             )}
@@ -8297,7 +8297,7 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
           </div>
           <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 3 }}>
             {!sesion.jugadores_destino || !sesion.jugadores_destino.length ? "Todo el equipo" : `${sesion.jugadores_destino.length} jugador(es)`}
-            {(sesion.fechas || []).length > 1 && ` · lote de ${sesion.fechas.length} fechas`}
+            {(sesion.fechas || []).length > 1 && (compacta ? ` · también: ${sesion.fechas.slice().sort().map((f) => fmtDateShort(f)).join(", ")}` : ` · lote de ${sesion.fechas.length} fechas`)}
           </div>
         </div>
         <span style={{ color: ds.inkMuted, fontSize: 12, transform: abierta ? "rotate(90deg)" : "none" }}>›</span>
@@ -8349,12 +8349,12 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
             </div>
           ))}
           {!soloLectura && (
-            <>
-              <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} style={{ alignSelf: "flex-start" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 4, borderTop: `1px solid ${ds.border}`, marginTop: 2 }}>
+              <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} >
                 Editar esta sesión
               </DsButton>
               {onReutilizar && (
-                <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ alignSelf: "flex-start", borderColor: ds.accentBorderSubtle, color: ds.accent }}>
+                <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ borderColor: ds.accentBorderSubtle, color: ds.accent }}>
                   Reutilizar como nueva
                 </DsButton>
               )}
@@ -8378,11 +8378,11 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
                   </button>
                 </div>
               ) : (
-                <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ alignSelf: "flex-start" }}>
+                <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ marginLeft: "auto" }}>
                   Eliminar sesión
                 </DsButton>
               )}
-            </>
+            </div>
           )}
         </div>
       )}
@@ -9023,8 +9023,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           </div>
         )}
 
+        {/* Barra: vista semana/mes, navegación y modo planificar */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
         {/* Selector de ámbito: equipo / grupo / jugador */}
-        <div style={{ position: "relative", marginBottom: 14, width: "min(100%, 360px)" }}>
+        <div style={{ position: "relative", width: "min(100%, 240px)" }}>
           <button
             onClick={() => setScopeDdAbierto((v) => !v)}
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13.5, fontWeight: 600 }}
@@ -9087,8 +9089,6 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           )}
         </div>
 
-        {/* Barra: vista semana/mes, navegación y modo planificar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
           <div style={{ display: "inline-flex", border: `1px solid ${ds.border}`, borderRadius: 999, overflow: "hidden" }}>
             {[["semana", "Semana"], ["mes", "Mes"]].map(([id, lab]) => (
               <button key={id} type="button" onClick={() => setVista(id)} style={{ border: "none", padding: "7px 16px", fontSize: 12.5, fontWeight: 700, cursor: "pointer", background: vista === id ? ds.accent : "transparent", color: vista === id ? ds.accentInk : ds.inkSecondary }}>{lab}</button>
@@ -9133,65 +9133,79 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                 {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
               </div>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(108px, 1fr))", gap: 8, marginBottom: 8 }}>
+            {/* Agenda semanal: una fila por día, con el contenido a todo el ancho. */}
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, marginBottom: 14 }}>
               {diasSemana.map((f, i) => {
                 const ses = sesionesEnFecha(f);
                 const esHoy = f === hoy;
-                const esSel = f === diaSel;
                 const pasado = f < hoy;
-                const nSol = solicitudesEnFecha(f).length;
+                const sols = solicitudesEnFecha(f);
                 return (
-                  <div key={f} style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0, opacity: pasado && modoPlan ? 0.55 : 1 }}>
-                    <button onClick={() => setDiaSel(f)} aria-pressed={esSel} style={{ display: "flex", alignItems: "center", gap: 8, textAlign: "left", background: esSel ? ds.accentSubtle : ds.surface, border: `1.5px solid ${esSel ? ds.accent : esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 14, padding: "8px 10px", cursor: "pointer", color: ds.ink }}>
-                      <span style={{ width: 34, height: 34, borderRadius: "50%", background: esHoy ? ds.accent : ds.surfaceRaised, color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 14, flexShrink: 0 }}>{Number(f.slice(8))}</span>
-                      <span style={{ minWidth: 0 }}>
-                        <span style={{ display: "block", fontWeight: 800, fontSize: 13 }}>{NOMBRES_DIA[i]}</span>
-                        <span style={{ display: "block", fontSize: 11, color: ds.inkMuted }}>{ses.length ? `${ses.length} sesión${ses.length === 1 ? "" : "es"}` : "sin sesión"}{nSol ? ` · ${nSol} petición` : ""}</span>
-                      </span>
-                    </button>
-                    {ses.map((s) => (
-                      <div key={s.id} onClick={() => setDiaSel(f)} style={{ cursor: "pointer", background: ds.surface, border: `1px solid ${ds.border}`, borderLeft: `4px solid ${s.enviada ? ds.success : ds.accent}`, borderRadius: 12, padding: "8px 10px" }}>
-                        <div style={{ fontSize: 12.5, fontWeight: 700, color: ds.ink, lineHeight: 1.3 }}>{s.nombre || "Sesión sin nombre"}</div>
-                        <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{[s.md, etiquetaDestinoSesion(s, players, grupos)].filter(Boolean).join(" · ")}{s.enviada ? "" : " · borrador"}</div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-                          {resumenSesionTarjeta(s).map((r) => (
-                            <span key={r.bloque} title={`${r.bloque}: ${r.n} tarea(s)${r.series ? ` · ${r.series} series` : ""}`} style={{ fontSize: 10, color: COLOR_BLOQUE_DISENO[r.bloque.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")] || ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 6px" }}>
-                              {r.bloque} {r.series ? `${r.series} s` : r.n}
-                            </span>
-                          ))}
+                  <div key={f} style={{ display: "flex", gap: 14, alignItems: "flex-start", background: ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 14, padding: 12, flexWrap: "wrap" }}>
+                    <div style={{ width: 64, flexShrink: 0, textAlign: "center" }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{NOMBRES_DIA[i]}</div>
+                      <div style={{ width: 40, height: 40, margin: "4px auto 0", borderRadius: "50%", background: esHoy ? ds.accent : ds.surfaceRaised, color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>{Number(f.slice(8))}</div>
+                      {esHoy && <div style={{ fontSize: 10, color: ds.accent, fontWeight: 700, marginTop: 3 }}>HOY</div>}
+                    </div>
+                    <div style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+                      {sols.map((sol) => (
+                        <div key={sol.id} style={{ background: `${ds.warning}14`, border: `1px solid ${ds.warning}55`, borderRadius: 10, padding: "8px 12px", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                          <span style={{ flex: 1, minWidth: 140, fontSize: 12.5, color: ds.ink }}><b>{nombreJugadorSolicitud(sol)}</b> pidió sesión{sol.nota ? ` · "${sol.nota}"` : ""}</span>
+                          <DsButton size="sm" onClick={() => disenarParaSolicitud(sol, "sesion")}>Diseñar</DsButton>
+                          <button onClick={() => descartarSolicitud(sol)} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "5px 10px", color: ds.inkMuted, fontSize: 11.5, cursor: "pointer" }}>Descartar</button>
                         </div>
-                        {!pasado && (
-                          <div onClick={(ev) => ev.stopPropagation()} style={{ display: "flex", gap: 6, marginTop: 6, alignItems: "center" }}>
-                            <button type="button" onClick={() => editar(s)} style={{ fontSize: 10.5, color: ds.accent, background: "none", border: "none", cursor: "pointer", padding: 0, fontWeight: 600 }}>Editar</button>
-                            <select
-                              value=""
-                              onChange={(e) => { if (e.target.value) lanzarCola([{ fecha: e.target.value, sesion: s }]); }}
-                              style={{ fontSize: 10.5, background: "transparent", border: "none", color: ds.inkSecondary, padding: 0, maxWidth: 90, cursor: "pointer" }}
-                              title="Copiar esta sesión a otro día de la semana"
-                            >
-                              <option value="">Copiar a…</option>
-                              {diasSemana.filter((d) => d >= hoy && d !== f).map((d) => <option key={d} value={d}>{etiquetaDiaLarga(d)}</option>)}
-                            </select>
+                      ))}
+                      {ses.map((s) => (
+                        <div key={s.id}>
+                          <TarjetaSesionReal sesion={s} esHoy={esHoy} compacta abiertaInicial={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center", marginTop: 6, paddingLeft: 2 }}>
+                            <span style={{ fontSize: 11.5, color: ds.inkMuted }}>Para: {etiquetaDestinoSesion(s, players, grupos)}</span>
+                            {resumenSesionTarjeta(s).map((r) => (
+                              <span key={r.bloque} style={{ fontSize: 10.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 8px" }}>{r.bloque}{r.series ? ` · ${r.series} series` : ` · ${r.n}`}</span>
+                            ))}
+                            <span style={{ flex: 1 }} />
+                            {!pasado && (
+                              <select value="" onChange={(e) => { if (e.target.value) lanzarCola([{ fecha: e.target.value, sesion: s }]); }} title="Copiar esta sesión a otro día de la semana" style={{ fontSize: 11.5, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.inkSecondary, padding: "3px 6px", cursor: "pointer" }}>
+                                <option value="">Copiar a…</option>
+                                {diasSemana.filter((d) => d >= hoy && d !== f).map((d) => <option key={d} value={d}>{etiquetaDiaLarga(d)}</option>)}
+                              </select>
+                            )}
+                            {scope.tipo === "jugador" && !yaEsIndividualDeEsteJugador(s) && (
+                              <button onClick={() => personalizarParaJugador(s, scope.jugadorId, f)} style={{ background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 8px", color: ds.accent, fontSize: 11.5, fontWeight: 600, cursor: "pointer" }}>Personalizar solo para {scope.label} →</button>
+                            )}
                           </div>
-                        )}
-                      </div>
-                    ))}
-                    {modoPlan && !pasado && (
-                      <select
-                        value={asignadas[f] || ""}
-                        onChange={(e) => setAsignadas((a) => { const n = { ...a }; if (e.target.value) n[f] = e.target.value; else delete n[f]; return n; })}
-                        style={{ marginTop: "auto", background: ds.surfaceRaised, border: `1px dashed ${asignadas[f] ? ds.accent : ds.accentBorderSubtle}`, borderRadius: 10, color: ds.ink, fontSize: 12, padding: "7px 8px", minWidth: 0 }}
-                      >
-                        <option value="">+ Sesión…</option>
-                        {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
-                        {asignadas[f] && !idsOpcionesBib.has(asignadas[f]) && <option value={asignadas[f]}>{sesionPorId.get(asignadas[f])?.nombre || "Sesión de la semana anterior"}</option>}
-                      </select>
-                    )}
+                        </div>
+                      ))}
+                      {ses.length === 0 && !pasado && !modoPlan && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Sin sesión{scope.tipo !== "equipo" ? ` para ${scope.label}` : ""}.</div>}
+                      {ses.length === 0 && pasado && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Sin sesión.</div>}
+                      {!pasado && (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                          {modoPlan ? (
+                            <select
+                              value={asignadas[f] || ""}
+                              onChange={(e) => setAsignadas((a) => { const n = { ...a }; if (e.target.value) n[f] = e.target.value; else delete n[f]; return n; })}
+                              style={{ flex: "1 1 260px", background: ds.surfaceRaised, border: `1px dashed ${asignadas[f] ? ds.accent : ds.accentBorderSubtle}`, borderRadius: 10, color: ds.ink, fontSize: 12.5, padding: "8px 10px" }}
+                            >
+                              <option value="">+ Añadir a la planificación…</option>
+                              {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                              {asignadas[f] && !idsOpcionesBib.has(asignadas[f]) && <option value={asignadas[f]}>{sesionPorId.get(asignadas[f])?.nombre || "Sesión de la semana anterior"}</option>}
+                            </select>
+                          ) : (
+                            !destinoVacio && (
+                              <select value="" onChange={(e) => { const ses2 = sesionPorId.get(e.target.value); if (ses2) lanzarCola([{ fecha: f, sesion: ses2 }]); }} style={{ background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, color: ds.accent, fontSize: 12.5, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>
+                                <option value="">+ Sesión de mi biblioteca…</option>
+                                {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                              </select>
+                            )
+                          )}
+                          <button type="button" onClick={() => nuevaSesionEnFecha(f)} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, padding: "6px 12px", cursor: "pointer" }}>+ Diseñar sesión</button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
-            <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 14 }}>Pulsa un día para ver y gestionar lo que tiene.</div>
             {resultadoCola && <div style={{ marginBottom: 10, fontSize: 13, color: ds.success }}>{resultadoCola}</div>}
             {fallosCola.length > 0 && !cola && <div style={{ marginBottom: 10, fontSize: 12.5, color: ds.danger }}>{fallosCola.join(" · ")}</div>}
             {modoPlan && (
@@ -9278,7 +9292,8 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           </>
         )}
 
-        {/* Panel del día seleccionado */}
+        {/* Panel del día seleccionado (solo en la vista mensual; la semanal ya muestra todo en su fila) */}
+        {vista === "mes" && (
         <div>
           <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8, textTransform: "uppercase" }}>
             {fmtDateLabel(diaSel)}
@@ -9340,6 +9355,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             )}
           </div>
         </div>
+        )}
       </div>
       {cola && actualCola && (
         <>
