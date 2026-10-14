@@ -8733,7 +8733,7 @@ function guardarMicrociclos(obj) {
     /* sin almacenamiento: se mantiene en memoria durante la sesión */
   }
 }
-const MICRO_VACIO = { diaPartido: 5, sesiones: {}, manual: {} };
+const MICRO_VACIO = { diaPartido: null, sesiones: {}, manual: {} };
 // MD de una fecha: primero el ajuste manual de ese día; si no, por distancia al
 // partido más cercano (MD+1 el día siguiente; después MD-n hasta 6 días antes).
 function mdDeFecha(micro, fecha) {
@@ -8800,6 +8800,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
   const [microTodos, setMicroTodos] = useState(() => leerMicrociclos());
   const [microAbierto, setMicroAbierto] = useState(false);
+  const [diasAbiertos, setDiasAbiertos] = useState({}); // fecha -> true/false (por defecto abierto solo hoy)
   const [microGrupoSel, setMicroGrupoSel] = useState(null);
   const [microSemanas, setMicroSemanas] = useState(1);
   const [avisoMicro, setAvisoMicro] = useState("");
@@ -8981,6 +8982,15 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     if (!valor) delete manual[f];
     else manual[f] = valor;
     cambiarMicro({ manual });
+  };
+  // El microciclo es opcional: solo se ven etiquetas MD si se ha elegido día de partido o se ha marcado algún día a mano.
+  const microActivo = micro.diaPartido != null || Object.keys(micro.manual || {}).length > 0;
+  const quitarMicro = () => {
+    if (!window.confirm(`¿Quitar el microciclo de ${microNombre}? Se borran el día de partido, las sesiones por MD y los ajustes manuales.`)) return;
+    const nuevo = { ...microTodos };
+    delete nuevo[microKey];
+    setMicroTodos(nuevo);
+    guardarMicrociclos(nuevo);
   };
   const microConfigurado = MICRO_TAGS_ORDEN.some((t) => micro.sesiones[t]);
   const aplicarMicrociclo = () => {
@@ -9246,10 +9256,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
               <button onClick={() => setLunesRef(sumarDiasFecha(lunesRef, 7))} style={navMesBtnCalendarioStyle} aria-label="Semana siguiente"><ChevronRight size={16} /></button>
               <button onClick={() => { setLunesRef(inicioSemanaCalendario(hoy)); setDiaSel(hoy); }} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 999, padding: "6px 14px", fontSize: 12.5, fontWeight: 600, color: ds.ink, cursor: "pointer" }}>Hoy</button>
               <span style={{ flex: 1 }} />
-              {vista === "semana" && <button type="button" onClick={() => setMicroAbierto((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.border}`, background: microAbierto ? ds.surfaceRaised : "transparent", color: ds.ink }}>
-                Microciclo{microConfigurado ? "" : " tipo"}
-              </button>}
-              {vista === "semana" && <button type="button" onClick={() => setModoPlan((v) => !v)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
+              {vista === "semana" && <button type="button" onClick={() => { setModoPlan((v) => !v); setMicroAbierto(false); }} style={{ fontSize: 13, fontWeight: 700, borderRadius: 999, padding: "8px 16px", cursor: "pointer", border: `1px solid ${ds.accent}`, background: modoPlan ? ds.accent : "transparent", color: modoPlan ? ds.accentInk : ds.accent }}>
                 {modoPlan ? "Cerrar planificación" : "Planificar semana"}
               </button>}
             </>
@@ -9276,7 +9283,50 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                 </div>
               );
             })()}
-            {microAbierto && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6, marginBottom: 12 }}>
+              {diasSemana.map((f, i) => {
+                const n = sesionesEnFecha(f).length;
+                const md = mdDe(f);
+                const esHoy = f === hoy;
+                return (
+                  <button key={f} type="button" onClick={() => { setDiasAbiertos((a) => ({ ...a, [f]: true })); const el = document.getElementById(`dia-${f}`); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} style={{ background: esHoy ? ds.accentSubtle : ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 12, padding: "8px 4px", cursor: "pointer", color: ds.ink, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+                    <span style={{ fontSize: 10.5, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase" }}>{NOMBRES_DIA[i]} {Number(f.slice(8))}</span>
+                    <span style={{ fontSize: 11, fontFamily: dsF.mono, fontWeight: 700, color: md ? ds.accent : ds.inkMuted, minHeight: 14 }}>{md || ""}</span>
+                    <span style={{ fontSize: 11.5, fontWeight: 600, color: n ? ds.ink : ds.inkMuted }}>{n ? `${n} ses.` : "—"}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              {[
+                [`${resumenSemana.n}`, resumenSemana.n === 1 ? "sesión" : "sesiones"],
+                [`${resumenSemana.dias}/7`, "días con sesión"],
+                [`${resumenSemana.fuerzaSeries}`, "series de fuerza"],
+                ...(cumplimientoSemana !== null ? [[`${cumplimientoSemana} %`, "cumplimiento"]] : []),
+              ].map(([v, l]) => (
+                <span key={l} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "5px 12px" }}>
+                  <b style={{ fontFamily: dsF.display, fontSize: 15 }}>{v}</b>
+                  <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{l}</span>
+                </span>
+              ))}
+              {resumenSemana.mds.length > 0 && <span style={{ fontSize: 11.5, color: ds.inkSecondary, alignSelf: "center" }}>MD: {resumenSemana.mds.join(" · ")}</span>}
+              {resumenSemana.dias === 0 && <span style={{ fontSize: 12, color: ds.inkMuted, alignSelf: "center" }}>Semana vacía — pulsa «Planificar semana» para montarla.</span>}
+            </div>
+            {modoPlan && (
+              <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 12, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12.5, color: ds.ink, flex: 1, minWidth: 220 }}>
+                  Planificando para <b>{microNombre === scope.label ? scope.label : scope.label}</b>. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga.
+                </span>
+                <span style={{ display: "inline-flex", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, overflow: "hidden" }}>
+                  {[[false, "Día a día"], [true, "Con microciclo tipo"]].map(([v, l]) => (
+                    <button key={l} type="button" onClick={() => setMicroAbierto(v)} style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 12px", border: "none", cursor: "pointer", background: microAbierto === v ? ds.accent : "transparent", color: microAbierto === v ? ds.accentInk : ds.accent }}>{l}</button>
+                  ))}
+                </span>
+                {!microAbierto && <button type="button" onClick={copiarSemanaAnterior} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>Copiar la semana anterior</button>}
+                {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
+              </div>
+            )}
+            {modoPlan && microAbierto && (
               <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
                   <b style={{ fontFamily: dsF.display, fontSize: 15 }}>Microciclo tipo · {microNombre}</b>
@@ -9318,32 +9368,9 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                     </select>
                   </label>
                   <button type="button" disabled={!microConfigurado} onClick={aplicarMicrociclo} style={{ background: ds.accent, border: `1px solid ${ds.accent}`, color: ds.accentInk, borderRadius: 10, padding: "9px 16px", fontSize: 13, fontWeight: 700, cursor: "pointer", opacity: microConfigurado ? 1 : 0.5 }}>Aplicar microciclo</button>
+                  {microActivo && <button type="button" onClick={quitarMicro} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 10, padding: "9px 14px", fontSize: 12.5, cursor: "pointer" }}>Quitar microciclo</button>}
                   {avisoMicro && <span style={{ fontSize: 12.5, color: ds.inkSecondary, flex: 1, minWidth: 200 }}>{avisoMicro}</span>}
                 </div>
-              </div>
-            )}
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              {[
-                [`${resumenSemana.n}`, resumenSemana.n === 1 ? "sesión" : "sesiones"],
-                [`${resumenSemana.dias}/7`, "días con sesión"],
-                [`${resumenSemana.fuerzaSeries}`, "series de fuerza"],
-                ...(cumplimientoSemana !== null ? [[`${cumplimientoSemana} %`, "cumplimiento"]] : []),
-              ].map(([v, l]) => (
-                <span key={l} style={{ display: "inline-flex", alignItems: "baseline", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "5px 12px" }}>
-                  <b style={{ fontFamily: dsF.display, fontSize: 15 }}>{v}</b>
-                  <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{l}</span>
-                </span>
-              ))}
-              {resumenSemana.mds.length > 0 && <span style={{ fontSize: 11.5, color: ds.inkSecondary, alignSelf: "center" }}>MD: {resumenSemana.mds.join(" · ")}</span>}
-              {resumenSemana.dias === 0 && <span style={{ fontSize: 12, color: ds.inkMuted, alignSelf: "center" }}>Semana vacía — pulsa «Planificar semana» para montarla.</span>}
-            </div>
-            {modoPlan && (
-              <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 12, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12.5, color: ds.ink, flex: 1, minWidth: 220 }}>
-                  Elige la sesión de cada día para <b>{scope.label}</b>. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga.
-                </span>
-                <button type="button" onClick={copiarSemanaAnterior} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>Copiar la semana anterior</button>
-                {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
               </div>
             )}
             {/* Agenda semanal: una fila por día, con el contenido a todo el ancho. */}
@@ -9354,19 +9381,18 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                 const pasado = f < hoy;
                 const sols = solicitudesEnFecha(f);
                 return (
-                  <div key={f} style={{ display: "flex", gap: 14, alignItems: "flex-start", background: ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 14, padding: 12, flexWrap: "wrap" }}>
+                  <div key={f} id={`dia-${f}`} style={{ display: "flex", gap: 14, alignItems: "flex-start", background: ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 14, padding: 10, flexWrap: "wrap" }}>
                     <div style={{ width: 64, flexShrink: 0, textAlign: "center" }}>
                       <div style={{ fontSize: 11, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>{NOMBRES_DIA[i]}</div>
                       <div style={{ width: 40, height: 40, margin: "4px auto 0", borderRadius: "50%", background: esHoy ? ds.accent : ds.surfaceRaised, color: esHoy ? ds.accentInk : ds.ink, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>{Number(f.slice(8))}</div>
                       {esHoy && <div style={{ fontSize: 10, color: ds.accent, fontWeight: 700, marginTop: 3 }}>HOY</div>}
-                      {!pasado && (
-                        <select value={micro.manual[f] || ""} onChange={(e) => fijarMdManual(f, e.target.value)} title="Día del microciclo (MD). «Auto» lo calcula según el día de partido." style={{ display: "block", margin: "6px auto 0", width: 56, fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, textAlign: "center", color: mdDe(f) ? (mdDe(f) === "MD" ? ds.accentInk : ds.accent) : ds.inkMuted, background: mdDe(f) === "MD" ? ds.accent : "transparent", border: `1px solid ${mdDe(f) ? ds.accentBorderSubtle : ds.border}`, borderRadius: 999, padding: "2px 0", cursor: "pointer", appearance: "none", WebkitAppearance: "none" }}>
+                      {microActivo && (
+                        <select value={micro.manual[f] || ""} onChange={(e) => fijarMdManual(f, e.target.value)} title="Día del microciclo (MD). «Auto» lo calcula según el día de partido." style={{ display: "block", margin: "6px auto 0", width: 64, fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, textAlign: "center", textAlignLast: "center", color: mdDe(f) ? (mdDe(f) === "MD" ? ds.accentInk : ds.accent) : ds.inkMuted, background: mdDe(f) === "MD" ? ds.accent : "transparent", border: `1px solid ${mdDe(f) ? ds.accentBorderSubtle : ds.border}`, borderRadius: 999, padding: "2px 0", cursor: "pointer", appearance: "none", WebkitAppearance: "none" }}>
                           <option value="">{micro.manual[f] ? "Auto" : mdDe(f) || "MD ·"}</option>
                           {MD_TAGS.filter((t) => t !== "Sin MD").map((t) => <option key={t} value={t}>{t}</option>)}
                           <option value="-">Sin MD</option>
                         </select>
                       )}
-                      {pasado && mdDe(f) && <div style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, color: ds.inkMuted, marginTop: 6 }}>{mdDe(f)}</div>}
                     </div>
                     <div style={{ flex: "1 1 320px", minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
                       {sols.map((sol) => (
@@ -9376,7 +9402,21 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                           <button onClick={() => descartarSolicitud(sol)} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, padding: "5px 10px", color: ds.inkMuted, fontSize: 11.5, cursor: "pointer" }}>Descartar</button>
                         </div>
                       ))}
-                      {ses.map((s) => (
+                      {ses.map((s) => !(diasAbiertos[f] ?? esHoy) ? (
+                        (() => {
+                          const c = cumplimientoSesion(s, f);
+                          const color = c ? (c.pct >= 80 ? ds.success : c.pct >= 50 ? ds.warning : ds.danger) : ds.inkMuted;
+                          return (
+                            <button key={s.id} type="button" onClick={() => setDiasAbiertos((a) => ({ ...a, [f]: true }))} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", textAlign: "left", width: "100%", background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, padding: "9px 12px", cursor: "pointer", color: ds.ink }}>
+                              <span style={{ fontWeight: 700, color: ds.accent, fontSize: 14, flex: "1 1 200px", minWidth: 0 }}>{s.nombre || s.objetivo || "Sesión"}</span>
+                              <span style={{ fontSize: 11.5, color: ds.inkSecondary }}>{etiquetaDestinoSesion(s, players, grupos)}</span>
+                              {!s.enviada && <span style={{ fontSize: 10.5, color: ds.warning, border: `1px solid ${ds.warning}66`, borderRadius: 999, padding: "1px 8px" }}>borrador</span>}
+                              {c && <span style={{ fontSize: 12, fontWeight: 700, color }}>{c.completos.length}/{c.total} · {c.pct} %</span>}
+                              <ChevronRight size={14} />
+                            </button>
+                          );
+                        })()
+                      ) : (
                         <div key={s.id}>
                           <TarjetaSesionReal sesion={s} esHoy={esHoy} compacta abiertaInicial={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
                           {(() => {
@@ -9417,6 +9457,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                               <span key={r.bloque} style={{ fontSize: 10.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 8px" }}>{r.bloque}{r.series ? ` · ${r.series} series` : ` · ${r.n}`}</span>
                             ))}
                             <span style={{ flex: 1 }} />
+                            <button type="button" onClick={() => setDiasAbiertos((a) => ({ ...a, [f]: false }))} style={{ fontSize: 11.5, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer" }}>Cerrar</button>
                             {!pasado && (
                               <select value="" onChange={(e) => { if (e.target.value) lanzarCola([{ fecha: e.target.value, sesion: s }]); }} title="Copiar esta sesión a otro día de la semana" style={{ fontSize: 11.5, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.inkSecondary, padding: "3px 6px", cursor: "pointer" }}>
                                 <option value="">Copiar a…</option>
@@ -9431,7 +9472,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                       ))}
                       {ses.length === 0 && !pasado && !modoPlan && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Sin sesión{scope.tipo !== "equipo" ? ` para ${scope.label}` : ""}.</div>}
                       {ses.length === 0 && pasado && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>Sin sesión.</div>}
-                      {!pasado && (
+                      {!pasado && (ses.length === 0 || (diasAbiertos[f] ?? esHoy) || modoPlan) && (
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                           {modoPlan ? (
                             <select
@@ -9445,13 +9486,13 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                             </select>
                           ) : (
                             !destinoVacio && (
-                              <select value="" onChange={(e) => { const ses2 = sesionPorId.get(e.target.value); if (ses2) lanzarCola([{ fecha: f, sesion: ses2 }]); }} style={{ background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, color: ds.accent, fontSize: 12.5, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>
-                                <option value="">+ Sesión de mi biblioteca…</option>
-                                {opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}
+                              <select value="" onChange={(e) => { if (e.target.value === "__nueva") { nuevaSesionEnFecha(f); return; } const ses2 = sesionPorId.get(e.target.value); if (ses2) lanzarCola([{ fecha: f, sesion: ses2 }]); }} style={{ background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, color: ds.accent, fontSize: 12.5, fontWeight: 600, padding: "6px 10px", cursor: "pointer" }}>
+                                <option value="">+ Añadir sesión…</option>
+                                <option value="__nueva">✎ Diseñar una nueva</option>
+                                {opcionesBiblioteca.length > 0 && <optgroup label="De mi biblioteca">{opcionesBiblioteca.map((o) => <option key={o.id} value={o.id}>{o.nombre}</option>)}</optgroup>}
                               </select>
                             )
                           )}
-                          <button type="button" onClick={() => nuevaSesionEnFecha(f)} style={{ background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, padding: "6px 12px", cursor: "pointer" }}>+ Diseñar sesión</button>
                         </div>
                       )}
                     </div>
