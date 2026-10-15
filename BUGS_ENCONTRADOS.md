@@ -4,22 +4,26 @@ Este archivo registra problemas detectados mientras se reorganiza App.jsx en
 módulos más pequeños. No se corrigen aquí salvo que se diga explícitamente
 "corregido" — son anotaciones para decidir más adelante.
 
-## 1. `e1rmDe` (línea ~19049, dentro de `ReferenciasFuerzaFichaReal`) — e1RM sin validaciones
+## 1. `e1rmDe` (dentro de `ReferenciasFuerzaFichaReal`) — e1RM sin validaciones — CORREGIDO en el Paso 4
 
-Las otras 4 copias del cálculo de e1RM (`e1rmDeValores` L910, `e1rmDeRegistro`
-L10854 y L12204, `e1rmDeItem` L12464) comprueban:
+Las otras 4 copias del cálculo de e1RM (`e1rmDeValores`, dos `e1rmDeRegistro`,
+`e1rmDeItem`) comprobaban:
 - que las reps sean ≤ `REPS_MAX_RIR_FIABLE` (12),
 - que la carga sea un número válido,
 - que el RIR no esté vacío (`""`) antes de tratarlo como 0.
 
-`e1rmDe` (pantalla "Ficha de jugador → Referencias de fuerza") no hace
-ninguna de las 3 comprobaciones. Puede mostrar "NaN" o un e1RM calculado
+`e1rmDe` (pantalla "Ficha de jugador → Referencias de fuerza") no hacía
+ninguna de las 3 comprobaciones. Podía mostrar "NaN" o un e1RM calculado
 con un RIR vacío tratado como "al fallo".
 
-**Estado:** pendiente de corregir en el Paso 4 (unificación del e1RM). El
-usuario ha aprobado que, al unificar, esta pantalla pase a usar la versión
-correcta (con las 3 validaciones). Se marcará como "corregido" aquí cuando
-se complete ese paso.
+**Estado:** corregido. Las 5 copias ahora delegan en la única función
+`e1rmDeValores` de `src/calc/e1rm.js` (con el usuario aprobado
+explícitamente este cambio de comportamiento para esta pantalla en
+concreto). Además se simplificaron 2 copias parciales más del mismo
+cálculo (dentro de `calcularCambiosE1rm` y de la lógica de "Cambios esta
+semana" de `PantallaJugadorReal`), que reimplementaban la rama "con carga"
+en vez de llamar a la función compartida — mismo resultado, menos código
+duplicado.
 
 ## 2. Adherencia "cumplidas/asignadas × 100" reimplementada 3 veces
 
@@ -80,3 +84,30 @@ de texto sin acordarse de este duplicado.
 Detectado al hacer `npm install` en el Paso 0. No se ha tocado ninguna
 dependencia (instrucción explícita del usuario). Anotado para que se decida
 aparte si se quiere actualizar algo.
+
+## 10. `e1rmDeValores`: reps vacías (`""`) no se tratan como "sin dato", a diferencia de carga y RIR
+
+Descubierto al escribir los tests del Paso 4. La función comprueba que la
+CARGA y el RIR no estén vacíos antes de convertirlos a número, pero a las
+REPS solo les hace `Number(reps)` directo: `Number("")` da `0`, no `NaN`,
+así que una fila con `reps: ""` pero carga y RIR válidos **no** se descarta
+— calcula un e1RM con 0 reps (RTF = 0 + RIR), en vez de devolver `null`
+como cabría esperar. No se ha tocado porque es el comportamiento que ya
+tenía la app en sus 5 copias (no es algo que haya introducido esta
+reorganización) y en la práctica `repsReal` casi nunca llega vacío desde
+los formularios. Queda anotado por si se quiere endurecer el guard.
+
+## 11. Funciones de "récord de carga"/"cambios de e1RM" no se movieron a src/calc/e1rm.js
+
+`calcularRecordsCargaJugador`, `calcularCambiosE1rm`, `cambiosRobustosE1rm`,
+`evaluarRendimientoEquipo`, `calcularCargaFuerzaPorMicro` y
+`calcularCargaSugerida` siguen en App.jsx (no en `src/calc/e1rm.js`) porque
+dependen de `materialEfectivo`/`EQUIPOS_AMBIGUOS`/`claveDisenoTarea`/
+`medianaNum` — utilidades de propósito general usadas por muchas pantallas
+(Diseñador de sesiones, Historial, Ficha de jugador...), no solo por el
+e1RM. Moverlas habría arrastrado esa infraestructura más amplia fuera de
+alcance de "unificar el e1RM". Estas funciones ya delegan en la función
+compartida `e1rmDeValores` (importada de `src/calc/e1rm.js`) para el
+cálculo en sí, así que la duplicación de la FÓRMULA queda resuelta igual;
+solo el "dónde vive el archivo" se queda en App.jsx por ahora. Candidatas a
+mover en una fase posterior, junto con `materialEfectivo` y compañía.

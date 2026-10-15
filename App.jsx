@@ -89,6 +89,7 @@ import {
   cmjVentanasMicrociclo,
   cmjMicroDeFecha,
 } from "./src/calc/cmj.js";
+import { REPS_MAX_RIR_FIABLE, pct1RMporRTF, e1rmDeValores } from "./src/calc/e1rm.js";
 
 // ============================================================
 // SISTEMA DE DISEÑO "FUERZA" — incrustado aquí mismo (antes eran 3
@@ -937,14 +938,7 @@ function medianaNum(arr) {
   const m = Math.floor(o.length / 2);
   return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
 }
-function e1rmDeValores(carga, reps, rir) {
-  const c = Number(carga);
-  const r = Number(reps);
-  const ri = rir !== "" && rir != null ? Number(rir) : null;
-  if (!c || Number.isNaN(c) || Number.isNaN(r) || ri == null || Number.isNaN(ri) || r > REPS_MAX_RIR_FIABLE) return null;
-  const pct = pct1RMporRTF(r + ri);
-  return pct ? c / pct : null;
-}
+// e1rmDeValores ahora en src/calc/e1rm.js — importada arriba.
 const MIN_REGISTROS_PARA_REVISAR = 4;
 function detectarRegistrosAtipicos(items) {
   const candidatos = items.filter((it) => it.done && !it.esReferencia && !it.esResistencia && it.bloque !== "CMJ" && it.cargaOriginal !== "" && it.cargaOriginal != null);
@@ -10182,15 +10176,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     if (!registrosPorEjercicio.has(clave)) registrosPorEjercicio.set(clave, { nombre: it.name, equipo, regs: [] });
     registrosPorEjercicio.get(clave).regs.push(it);
   });
-  const e1rmDeRegistro = (it) => {
-    const reps = Number(it.repsReal);
-    const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
-    const carga = Number(it.cargaReal);
-    if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-    if (reps > REPS_MAX_RIR_FIABLE) return null;
-    const pct = pct1RMporRTF(reps + rir);
-    return pct ? carga / pct : null;
-  };
+  const e1rmDeRegistro = (it) => e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
   // mejorE1rmPorClave: el mejor e1RM estimado de ESTE jugador para cada
   // combinación ejercicio+equipo — se reutiliza más abajo para sugerir
   // cargas de tareas en modo %1RM (ver construirTareaVisual).
@@ -10247,15 +10233,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     // (reps al fallo estimadas) si nunca la lleva — mismo criterio que
     // Progreso.
     const valorEstimado = (it) => {
+      if (conCarga) return e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
       const reps = Number(it.repsReal);
       const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
       if (Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-      if (conCarga) {
-        const carga = Number(it.cargaReal);
-        if (!carga || Number.isNaN(carga) || reps > REPS_MAX_RIR_FIABLE) return null;
-        const pct = pct1RMporRTF(reps + rir);
-        return pct ? carga / pct : null;
-      }
       return reps + rir;
     };
     const conValor = regs.map((it) => ({ it, v: valorEstimado(it) })).filter((x) => x.v != null);
@@ -11486,29 +11467,8 @@ function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo)
   return [(nombre || "").toLowerCase(), equipo || "std", unilateral ? "uni" : "bi", repsObjetivo ?? "", rirObjetivo ?? ""].join("::");
 }
 
-// Tabla RTF (repeticiones hasta el fallo) -> %1RM. RTF = reps realizadas +
-// RIR: el puente que conecta una marca con un diseño (reps/RIR) distinto al
-// de hoy. Valores medios de las fórmulas de Epley y Brzycki, coherentes con
-// la literatura de RIR/RPE en entrenamiento de fuerza (Zourdos et al. 2016)
-// y el mismo principio que usan los sistemas de autorregulación tipo RP o
-// RTS/Tuchscherer. Es una tabla GENERALISTA (mismo valor para cualquier
-// ejercicio) — el margen de error real es de varios puntos porcentuales,
-// mayor cuanto más se aleje el RTF de 1-10 o más difieran las reps.
-const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75 };
-// Por encima de ~12 repeticiones, el RIR reportado por el jugador deja de
-// ser fiable (la relación reps-%1RM ya no es lineal y la autopercepción del
-// RIR se degrada mucho en series largas — ver conversación) y la tabla de
-// arriba ni siquiera cubre ese RTF. Cualquier cálculo de e1RM basado en RIR
-// descarta las series por encima de este umbral en vez de forzarlas dentro
-// de la tabla (lo que antes producía un e1RM muy por debajo del real).
-const REPS_MAX_RIR_FIABLE = 12;
-function pct1RMporRTF(rtf) {
-  const rtfClamp = Math.max(1, Math.min(10, rtf));
-  const base = Math.floor(rtfClamp);
-  const resto = rtfClamp - base;
-  if (resto === 0 || base >= 10) return TABLA_PCT_1RM_POR_RTF[base];
-  return TABLA_PCT_1RM_POR_RTF[base] + (TABLA_PCT_1RM_POR_RTF[base + 1] - TABLA_PCT_1RM_POR_RTF[base]) * resto;
-}
+// TABLA_PCT_1RM_POR_RTF, REPS_MAX_RIR_FIABLE y pct1RMporRTF ahora en
+// src/calc/e1rm.js — importadas arriba.
 
 // Motor de "récord de carga" (e1RM) del jugador, extraído a una función
 // reutilizable — es EXACTAMENTE el mismo cálculo que ya vive dentro de la
@@ -11532,15 +11492,7 @@ function calcularRecordsCargaJugador(items) {
       equiposPorNombre.get(it.name).add(eq);
     });
   const etiqueta = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
-  const e1rmDeRegistro = (it) => {
-    const reps = Number(it.repsReal);
-    const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
-    const carga = Number(it.cargaReal);
-    if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-    if (reps > REPS_MAX_RIR_FIABLE) return null;
-    const pct = pct1RMporRTF(reps + rir);
-    return pct ? carga / pct : null;
-  };
+  const e1rmDeRegistro = (it) => e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
   const registrosPorEjercicio = new Map();
   registrosConCarga.forEach((it) => {
     const equipo = materialEfectivo(it);
@@ -11601,15 +11553,10 @@ function calcularCambiosE1rm(items, inicio, fin) {
   porClave.forEach(({ nombre, equipo, regs }, clave) => {
     const conCarga = claveConCarga.has(clave);
     const valorEstimado = (it) => {
+      if (conCarga) return e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
       const reps = Number(it.repsReal);
       const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
       if (Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-      if (conCarga) {
-        const carga = Number(it.cargaReal);
-        if (!carga || Number.isNaN(carga) || reps > REPS_MAX_RIR_FIABLE) return null;
-        const pct = pct1RMporRTF(reps + rir);
-        return pct ? carga / pct : null;
-      }
       return reps + rir;
     };
     const conValor = regs
@@ -11728,16 +11675,9 @@ function evaluarRendimientoEquipo(itemsPorJugador, jugadores, inicio, fin) {
 // cmjVentanasMicrociclo y cmjMicroDeFecha ahora en src/calc/cmj.js —
 // importadas arriba.
 
-// e1RM de un registro (mismo cálculo que el resto de la app: carga dividida
-// por el %1RM del RTF = reps + RIR; sin RIR o con más de 12 reps no hay dato).
+// e1RM de un registro — delega en la función compartida (src/calc/e1rm.js).
 function e1rmDeItem(it) {
-  const reps = Number(it.repsReal);
-  const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
-  const carga = Number(it.cargaReal);
-  if (!carga || Number.isNaN(carga) || Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-  if (reps > REPS_MAX_RIR_FIABLE) return null;
-  const pct = pct1RMporRTF(reps + rir);
-  return pct ? carga / pct : null;
+  return e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
 }
 
 // Carga de fuerza de un jugador en cada microciclo, con los datos que ya se
@@ -18147,9 +18087,12 @@ function ReferenciasFuerzaFichaReal({ jugador, filas, recargar }) {
   };
   const campo = { background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 7, color: ds.ink, fontSize: 12.5, padding: "7px 9px", width: "100%", boxSizing: "border-box" };
   const etiqueta = { fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", display: "block", marginBottom: 4 };
+  // Antes recalculaba aquí mismo sin las validaciones de e1rmDeValores
+  // (ver BUGS_ENCONTRADOS.md punto 1) — ahora delega en la función
+  // compartida, igual que el resto de la app.
   const e1rmDe = (r) => {
-    const pct = pct1RMporRTF(Number(r.reps) + Number(r.rir));
-    return pct ? Math.round(Number(r.carga_kg) / pct) : null;
+    const v = e1rmDeValores(r.carga_kg, r.reps, r.rir);
+    return v != null ? Math.round(v) : null;
   };
   return (
     <div style={{ marginTop: 22 }}>
