@@ -121,3 +121,26 @@ compartida `e1rmDeValores` (importada de `src/calc/e1rm.js`) para el
 cálculo en sí, así que la duplicación de la FÓRMULA queda resuelta igual;
 solo el "dónde vive el archivo" se queda en App.jsx por ahora. Candidatas a
 mover en una fase posterior, junto con `materialEfectivo` y compañía.
+
+## 13. `useMicrociclosTipo`/`usePartidos` vivían "dentro" de Calendario aunque las usa también CMJ y Dashboard (resuelto en el Paso 5, pantalla CMJ)
+
+Estaban físicamente declaradas en la zona que será la pantalla Calendario,
+pero `CmjMicrociclosReal` (Control de fatiga) y el Dashboard también las
+llamaban — otro caso de "función archivada donde no vive su único usuario"
+como el ya documentado para `useReferenciasPorEjercicio`. Se movieron a
+`src/core/hooks.js` junto con sus helpers de mensaje de error
+(`mensajeErrorMicro`, `mensajeErrorPartidos`, `leerMicrociclosLegacy`). Sin
+cambios de comportamiento.
+
+## 14. Nota de proceso: un `awk` de reemplazo borró por error una línea ajena (detectado y corregido)
+
+Al separar el núcleo compartido, uno de los recortes automáticos con `awk`
+calculó mal el límite final y se llevó por delante `const MICRO_VACIO = ...`
+(una línea que no debía tocarse, justo después del bloque que sí se movía).
+Se detectó con una comprobación de auditoría (comparar todas las
+declaraciones de nivel superior del archivo original contra el estado
+actual) y se restauró en el mismo paso, antes de hacer commit. Se anota
+aquí para que quede constancia del control de calidad usado, no porque
+quede ningún cambio sin corregir — en ese commit la línea ya estaba
+restaurada. A partir de este punto, esa misma auditoría se repite tras
+cada sub-paso siguiente.

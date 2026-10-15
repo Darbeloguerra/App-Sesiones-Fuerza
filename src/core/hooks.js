@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ds } from "./designSystem.jsx";
-import { api, supabase } from "./backend.js";
+import { api, supabase, genId } from "./backend.js";
 import { normalizarFecha } from "../calc/fechas.js";
 import { parseResistenciaData } from "../calc/adherencia.js";
 import { CMJ_UMBRAL_DEFECTO, cmjBuildPlayers } from "../calc/cmj.js";
@@ -1130,4 +1130,167 @@ export function useBootstrapProgramacion() {
     ejercicios: data?.ejercicios || [],
     retry,
   };
+}
+
+// ---------- MICROCICLO TIPO (MD-x) ----------
+// Se guarda en Supabase (tabla microciclos_tipo, una fila por ámbito: equipo,
+// grupo o jugador), así es el mismo en cualquier dispositivo o navegador.
+// No toca la carga de las sesiones. Compartido por Control de fatiga (CMJ),
+// Calendario y Dashboard.
+// Lectura única de lo que una versión anterior guardó en este navegador, solo
+// para subirlo a la base de datos la primera vez (no se vuelve a usar después).
+function leerMicrociclosLegacy() {
+  try {
+    return JSON.parse(window.localStorage.getItem("microciclos_v1") || "{}") || {};
+  } catch (e) {
+    return {};
+  }
+}
+function mensajeErrorMicro(error) {
+  const msg = (error && (error.message || String(error))) || "error desconocido";
+  if (/microciclos_tipo/.test(msg) && /(relation|does not exist|schema cache|find the table)/i.test(msg)) {
+    return "Falta crear la tabla «microciclos_tipo» en Supabase: ejecuta add_microciclos_tipo.sql y recarga.";
+  }
+  return `No se pudo guardar el microciclo: ${msg}`;
+}
+export function useMicrociclosTipo() {
+  const [todos, setTodos] = useState(() => sharedDataCache.get("microciclos_tipo") || null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (todos !== null) return undefined;
+    let off = false;
+    (async () => {
+      let mapa = {};
+      try {
+        const { data, error: e } = await supabase.from("microciclos_tipo").select("*");
+        if (e) throw e;
+        (data || []).forEach((r) => {
+          mapa[r.id] = r.config || {};
+        });
+        // Migración única: lo que había en el navegador pasa a la base de datos.
+        const legacy = leerMicrociclosLegacy();
+        const pendientes = Object.entries(legacy).filter(([k, v]) => v && typeof v === "object" && !mapa[k]);
+        if (pendientes.length) {
+          const { error: e2 } = await supabase.from("microciclos_tipo").upsert(pendientes.map(([id, config]) => ({ id, config, updated_at: new Date().toISOString() })), { onConflict: "id" });
+          if (!e2) pendientes.forEach(([k, v]) => (mapa[k] = v));
+        }
+      } catch (e) {
+        if (!off) setError(mensajeErrorMicro(e));
+      }
+      sharedDataCache.set("microciclos_tipo", mapa);
+      if (!off) setTodos(mapa);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const actual = todos || {};
+  const guardar = async (clave, config) => {
+    const previo = actual;
+    const nuevo = { ...actual, [clave]: config };
+    sharedDataCache.set("microciclos_tipo", nuevo);
+    setTodos(nuevo);
+    setError("");
+    try {
+      const { error: e } = await supabase.from("microciclos_tipo").upsert({ id: clave, config, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      sharedDataCache.set("microciclos_tipo", previo);
+      setTodos(previo);
+      setError(mensajeErrorMicro(e));
+      return false;
+    }
+  };
+  const borrar = async (clave) => {
+    const previo = actual;
+    const nuevo = { ...actual };
+    delete nuevo[clave];
+    sharedDataCache.set("microciclos_tipo", nuevo);
+    setTodos(nuevo);
+    setError("");
+    try {
+      const { error: e } = await supabase.from("microciclos_tipo").delete().eq("id", clave);
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      sharedDataCache.set("microciclos_tipo", previo);
+      setTodos(previo);
+      setError(mensajeErrorMicro(e));
+      return false;
+    }
+  };
+  return { todos: actual, loaded: todos !== null, error, guardar, borrar };
+}
+function mensajeErrorPartidos(error) {
+  const msg = (error && (error.message || String(error))) || "error desconocido";
+  if (/partidos/.test(msg) && /(relation|does not exist|schema cache|find the table)/i.test(msg)) {
+    return "Falta crear la tabla «partidos» en Supabase: ejecuta paso4_partidos.sql y recarga.";
+  }
+  return `No se pudo guardar el partido: ${msg}`;
+}
+// Calendario de partidos reales por ámbito (mismas claves que el microciclo tipo:
+// "g:<equipo>", "j:<jugador independiente>" o "equipo"). Un independiente puede
+// tener los suyos o ninguno: sin partidos simplemente no hay etiquetas MD.
+export function usePartidos() {
+  const [lista, setLista] = useState(() => sharedDataCache.get("partidos") || null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (lista !== null) return undefined;
+    let off = false;
+    (async () => {
+      let rows = [];
+      let ok = true;
+      try {
+        const { data, error: e } = await supabase.from("partidos").select("*").order("fecha");
+        if (e) throw e;
+        rows = (data || []).map((r) => ({ ...r, fecha: normalizarFecha(r.fecha) }));
+      } catch (e) {
+        ok = false;
+        if (!off) setError(mensajeErrorPartidos(e));
+      }
+      if (ok) sharedDataCache.set("partidos", rows);
+      if (!off) setLista(rows);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const actual = lista || [];
+  const aplicar = (nueva) => {
+    sharedDataCache.set("partidos", nueva);
+    setLista(nueva);
+  };
+  const guardar = async (partido) => {
+    const previo = actual;
+    const nuevo = { id: partido.id || genId("par"), local: true, competicion: "", rival: "", ...partido };
+    aplicar([...actual.filter((x) => x.id !== nuevo.id), nuevo].sort((a, b) => (a.fecha < b.fecha ? -1 : 1)));
+    setError("");
+    try {
+      const { error: e } = await supabase.from("partidos").upsert(nuevo, { onConflict: "id" });
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      aplicar(previo);
+      setError(mensajeErrorPartidos(e));
+      return false;
+    }
+  };
+  const borrar = async (id) => {
+    const previo = actual;
+    aplicar(actual.filter((x) => x.id !== id));
+    setError("");
+    try {
+      const { error: e } = await supabase.from("partidos").delete().eq("id", id);
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      aplicar(previo);
+      setError(mensajeErrorPartidos(e));
+      return false;
+    }
+  };
+  return { todos: actual, loaded: lista !== null, error, guardar, borrar };
 }
