@@ -4354,6 +4354,7 @@ function useCarteraEntrenador() {
         sev: cmj.status === "red" ? 3 : 2,
         tipo: "cmj",
         jugadorId: p.id,
+        chip: `${p.name}${cmj.fechaTest ? ` · test ${fmtF(cmj.fechaTest)}` : ""}`,
         titulo: `${p.name} · CMJ ${cmj.status === "red" ? "en rojo" : "a vigilar"}`,
         detalle: `Último test ${cmj.fechaTest ? fmtF(cmj.fechaTest) : "—"}. Revisa la carga de su próxima sesión.`,
         acciones: [{ label: "Ver CMJ", tipo: "ficha", pestana: "cmj" }, { label: "Planificar", tipo: "cal" }],
@@ -4369,6 +4370,7 @@ function useCarteraEntrenador() {
         id: `mol-${p.id}`,
         sev: val >= 7 ? 3 : 2,
         tipo: "molestia",
+        chip: `${p.name} · ${val}/10${ultimaMol.zona ? ` ${String(ultimaMol.zona).toLowerCase()}` : ""}`,
         jugadorId: p.id,
         titulo: `${p.name} · molestia ${val}/10${ultimaMol.zona ? ` en ${String(ultimaMol.zona).toLowerCase()}` : ""}`,
         detalle: `Indicada ${cuando} al enviar su sesión. Valora ajustar su próxima sesión.`,
@@ -4379,7 +4381,10 @@ function useCarteraEntrenador() {
     if (v && v.pct <= -8) {
       nuevaAlerta({
         id: `e1rm-${p.id}`,
-        sev: v.pct <= -12 ? 3 : 2,
+        // El e1RM sale del RIR que indica cada jugador y oscila mucho: solo sube a
+        // "atención" si cae con claridad en más de un ejercicio; si no, es un aviso.
+        sev: v.pct <= -15 && v.nEjercicios >= 2 ? 2 : 1,
+        chip: `${p.name} · ${Math.round(v.pct)} %`,
         tipo: "rendimiento",
         jugadorId: p.id,
         titulo: `${p.name} · rendimiento a la baja (${Math.round(v.pct)} %)`,
@@ -4392,6 +4397,7 @@ function useCarteraEntrenador() {
       nuevaAlerta({
         id: `inactivo-${p.id}`,
         sev: 2,
+        chip: `${p.name} · ${diasSin === null ? "nunca" : `${diasSin} d`}`,
         tipo: "inactivo",
         jugadorId: p.id,
         titulo: `${p.name} · sin registrar ${diasSin === null ? "ninguna sesión" : `desde hace ${diasSin} días`}`,
@@ -4402,6 +4408,7 @@ function useCarteraEntrenador() {
       nuevaAlerta({
         id: `adh-${p.id}`,
         sev: r.cump28 / r.asig28 < 0.4 ? 2 : 1,
+        chip: `${p.name} · ${Math.round((r.cump28 / r.asig28) * 100)} %`,
         tipo: "adherencia",
         jugadorId: p.id,
         titulo: `${p.name} · adherencia ${Math.round((r.cump28 / r.asig28) * 100)} %`,
@@ -4505,6 +4512,48 @@ function useCarteraEntrenador() {
   return { loaded: true, activos, playersById: datos.playersById, grupos: datos.grupos, gruposById: datos.gruposById, filas, alertas, sesionesHoy, semana, cumplSem, hoy };
 }
 
+// Agrupa las alertas repetitivas (una por jugador) en una sola fila con los
+// nombres dentro, para que la bandeja sean unas pocas líneas y no una por jugador.
+// CMJ en rojo y molestias fuertes siguen siendo una fila por jugador: son las
+// que piden actuar ya.
+const PLANTILLA_GRUPO_ALERTA = {
+  cmj: (n) => ({ titulo: `${n} jugadores con el CMJ a vigilar`, detalle: "Revisa la carga de sus próximas sesiones." }),
+  molestia: (n) => ({ titulo: `${n} jugadores con molestia`, detalle: "Indicada al enviar su última sesión." }),
+  inactivo: (n) => ({ titulo: `${n} jugadores sin registrar desde hace 5 días o más`, detalle: "Tenían sesiones asignadas en las últimas dos semanas." }),
+  adherencia: (n) => ({ titulo: `${n} jugadores por debajo del 60 % de adherencia`, detalle: "Cumplimiento de las últimas 4 semanas." }),
+  rendimiento: (n) => ({ titulo: `${n} jugadores con la carga estimada a la baja esta semana`, detalle: "Dato orientativo: se calcula con el RIR que indican, compruébalo en su ficha antes de actuar." }),
+};
+function agruparAlertas(alertas) {
+  const salida = [];
+  const porTipo = new Map();
+  alertas.forEach((a) => {
+    const individual = !a.jugadorId || a.tipo === "solicitud" || !PLANTILLA_GRUPO_ALERTA[a.tipo] || (a.tipo === "cmj" && a.sev >= 3) || (a.tipo === "molestia" && a.sev >= 3);
+    if (individual) {
+      salida.push(a);
+      return;
+    }
+    if (!porTipo.has(a.tipo)) porTipo.set(a.tipo, []);
+    porTipo.get(a.tipo).push(a);
+  });
+  porTipo.forEach((lista, tipo) => {
+    if (lista.length === 1) {
+      salida.push(lista[0]);
+      return;
+    }
+    const plantilla = PLANTILLA_GRUPO_ALERTA[tipo](lista.length);
+    salida.push({
+      id: `grupo-${tipo}`,
+      sev: Math.max(...lista.map((a) => a.sev)),
+      tipo,
+      titulo: plantilla.titulo,
+      detalle: plantilla.detalle,
+      chips: lista.map((a) => ({ label: a.chip || a.titulo, jugadorId: a.jugadorId, pestana: (a.acciones || []).find((x) => x.tipo === "ficha")?.pestana || "resumen" })),
+      acciones: [],
+    });
+  });
+  return salida.sort((a, b) => b.sev - a.sev);
+}
+
 function PuntoSev({ sev }) {
   return <span style={{ width: 9, height: 9, borderRadius: "50%", background: (SEV_ALERTA[sev] || SEV_ALERTA[1]).color, flexShrink: 0, marginTop: 5 }} />;
 }
@@ -4517,6 +4566,15 @@ function FilaAlertaReal({ alerta, onAccion }) {
       <div style={{ flex: "1 1 240px", minWidth: 0 }}>
         <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{alerta.titulo}</div>
         <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>{alerta.detalle}</div>
+        {alerta.chips && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+            {alerta.chips.map((c) => (
+              <button key={c.jugadorId + c.label} type="button" onClick={() => onAccion(alerta, { tipo: "ficha", pestana: c.pestana, jugadorId: c.jugadorId })} style={{ fontSize: 11.5, color: ds.ink, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "3px 10px", cursor: "pointer" }}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {(alerta.acciones || []).map((a, i) => (
@@ -4536,9 +4594,10 @@ function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) 
   const [verTodas, setVerTodas] = useState(false);
   const [abiertas, setAbiertas] = useState({});
   const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+  const bandeja = c.loaded ? agruparAlertas(c.alertas) : [];
 
   const accion = (alerta, a) => {
-    const jugador = alerta.jugadorId ? c.playersById.get(alerta.jugadorId) : null;
+    const jugador = a.jugadorId || alerta.jugadorId ? c.playersById.get(a.jugadorId || alerta.jugadorId) : null;
     if (a.tipo === "ficha" && jugador) onOpenHistory?.(jugador, a.pestana);
     else if (a.tipo === "cal") onAbrirModulo(a.scopeJugador && alerta.jugadorId ? `calendario:j:${alerta.jugadorId}` : jugador && alerta.tipo !== "borrador" ? `calendario:j:${jugador.id}` : "calendario");
     else if (a.tipo === "fatiga") onAbrirModulo("fatiga");
@@ -4603,15 +4662,15 @@ function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) 
       <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Requiere tu atención</b>
-          {c.alertas.length > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 800, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "1px 8px" }}>{c.alertas.length}</span>}
+          {bandeja.length > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 800, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "1px 8px" }}>{bandeja.length}</span>}
         </div>
-        {c.alertas.length === 0 && <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 0 2px" }}>Nada pendiente. Todo el equipo al día.</div>}
-        {(verTodas ? c.alertas : c.alertas.slice(0, 6)).map((a) => (
+        {bandeja.length === 0 && <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 0 2px" }}>Nada pendiente. Todo el equipo al día.</div>}
+        {(verTodas ? bandeja : bandeja.slice(0, 6)).map((a) => (
           <FilaAlertaReal key={a.id} alerta={a} onAccion={accion} />
         ))}
-        {c.alertas.length > 6 && (
+        {bandeja.length > 6 && (
           <button type="button" onClick={() => setVerTodas((v) => !v)} style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
-            {verTodas ? "Ver menos" : `Ver las ${c.alertas.length - 6} restantes`}
+            {verTodas ? "Ver menos" : `Ver las ${bandeja.length - 6} restantes`}
           </button>
         )}
       </div>
