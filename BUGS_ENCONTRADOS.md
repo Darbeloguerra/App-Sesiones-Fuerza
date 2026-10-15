@@ -79,13 +79,23 @@ duplicó como `CMJ_TAG_LABELS` dentro de cmj.js — 3 strings, comentado,
 sin riesgo de desincronización salvo que alguien cambie esas 3 etiquetas
 de texto sin acordarse de este duplicado.
 
-## 9. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
+## 9. Dos funciones muertas encontradas al separar el núcleo compartido (Paso 5.1c)
+
+- `useTareasForSesiones` (App.jsx): declarada pero no la llama nadie en todo
+  el archivo — solo aparece mencionada dentro de un comentario de otra
+  función. No se toca ni se mueve: se queda donde está hasta que se decida
+  si se borra.
+- `inputStyle` (App.jsx, justo donde antes vivía `MD_TAGS`): un objeto de
+  estilo declarado y nunca usado en ningún sitio. Igual que arriba, no se
+  toca.
+
+## 10. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
 
 Detectado al hacer `npm install` en el Paso 0. No se ha tocado ninguna
 dependencia (instrucción explícita del usuario). Anotado para que se decida
 aparte si se quiere actualizar algo.
 
-## 10. `e1rmDeValores`: reps vacías (`""`) no se tratan como "sin dato", a diferencia de carga y RIR
+## 11. `e1rmDeValores`: reps vacías (`""`) no se tratan como "sin dato", a diferencia de carga y RIR
 
 Descubierto al escribir los tests del Paso 4. La función comprueba que la
 CARGA y el RIR no estén vacíos antes de convertirlos a número, pero a las
@@ -97,7 +107,7 @@ tenía la app en sus 5 copias (no es algo que haya introducido esta
 reorganización) y en la práctica `repsReal` casi nunca llega vacío desde
 los formularios. Queda anotado por si se quiere endurecer el guard.
 
-## 11. Funciones de "récord de carga"/"cambios de e1RM" no se movieron a src/calc/e1rm.js
+## 12. Funciones de "récord de carga"/"cambios de e1RM" no se movieron a src/calc/e1rm.js
 
 `calcularRecordsCargaJugador`, `calcularCambiosE1rm`, `cambiosRobustosE1rm`,
 `evaluarRendimientoEquipo`, `calcularCargaFuerzaPorMicro` y
