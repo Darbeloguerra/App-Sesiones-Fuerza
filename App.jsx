@@ -331,7 +331,21 @@ function DsStatTile({ label, value, icon, delta, style, className }) {
 // de acceso son las políticas RLS creadas en Supabase (politicas_acceso.sql).
 const SUPABASE_URL = "https://ozarscohvitkopamnbtt.supabase.co";
 const SUPABASE_KEY = "sb_publishable_iUxpTZzSNfACaGacbUawFA_uZi3qpN-";
-const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+// Pase de acceso (se obtiene al entrar con el código, ver PortalAccesoSeguro y
+// paso2_seguridad.sql). Va en la cabecera x-client-info —que el navegador ya
+// tiene permitida para Supabase— y las políticas RLS lo leen para saber quién
+// es (entrenador / jugador). Solo vive en memoria: al cerrar la pestaña hay que
+// volver a entrar, igual que antes.
+const accesoSesion = { token: null, rol: null, jugadorId: null };
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  global: {
+    fetch: (url, options = {}) => {
+      const headers = new Headers(options.headers || {});
+      if (accesoSesion.token) headers.set("x-client-info", `${headers.get("x-client-info") || "app"} acceso/${accesoSesion.token}`);
+      return fetch(url, { ...options, headers });
+    },
+  },
+});
 
 const ENTITY_TABLE = {
   jugadores: "jugadores",
@@ -357,6 +371,9 @@ const ENTITY_TABLE = {
 };
 
 const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota", solicitudesSesion: "sol", referenciasFuerza: "ref" };
+function idRegistroFijo(jugadorId, tareaId, fecha) {
+  return `reg_${jugadorId}_${tareaId}_${fecha}`;
+}
 function genId(prefix) {
   return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
 }
@@ -481,6 +498,7 @@ function applyFilters(query, filters) {
   return query;
 }
 
+let registrosUnicoDisponible; // undefined = sin comprobar aún
 const api = {
   // CRÍTICO: Supabase/PostgREST devuelve como máximo 1000 filas por
   // consulta si no se le pide explícitamente un rango — no da ningún error,
@@ -530,14 +548,24 @@ const api = {
   save: async (entity, record) => {
     const toSave = transformToDb(entity, record);
     if (!toSave.id) toSave.id = genId(ID_PREFIX[entity] || "id");
-    let { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle();
+    // Registros: si en la base ya existe la restricción única (jugador, tarea, día)
+    // (paso3_integridad.sql), se actualiza por esa clave natural: nunca puede haber dos
+    // filas del mismo jugador, tarea y día. Si aún no existe, se usa el id (que ya es fijo).
+    let conflictKey = "id";
+    if (entity === "registros" && registrosUnicoDisponible !== false && toSave.jugador_id && toSave.tarea_id && toSave.fecha) conflictKey = "jugador_id,tarea_id,fecha";
+    let { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: conflictKey }).select().maybeSingle();
+    if (error && conflictKey !== "id" && (error.code === "42P10" || /no unique or exclusion constraint/i.test(`${error.message || ""}`))) {
+      registrosUnicoDisponible = false;
+      conflictKey = "id";
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle());
+    }
     // Red de seguridad: si la columna nueva registros.series_hechas todavía
     // no existe en la base de datos (falta ejecutar sql/add_series_hechas.sql),
     // PostgREST rechaza el guardado entero. En vez de que el jugador pierda
     // su registro, se reintenta sin ese campo.
     if (error && entity === "registros" && "series_hechas" in toSave && /series_hechas/.test(`${error.message || ""} ${error.details || ""}`)) {
       const { series_hechas: _omitido, ...sinSeries } = toSave;
-      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: "id" }).select().maybeSingle());
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: conflictKey }).select().maybeSingle());
     }
     // Preventivo por jugador: tareas.para_jugadores. Si la columna aún no existe
     // y el valor está vacío, se guarda sin ella; si tiene valor NO se puede
@@ -2660,6 +2688,137 @@ function PantallaPortal({ children, maxWidth = 320 }) {
   );
 }
 
+// Decide qué portal usar: si en Supabase ya está instalada la seguridad
+// (paso2_seguridad.sql) se entra por la función `entrar`; si todavía no, se usa
+// el portal anterior, para que subir la app antes que el SQL no rompa nada.
+function PortalAccesoRaiz(props) {
+  const [modo, setModo] = useState(null); // null = comprobando | "seguro" | "antiguo"
+  const [reintento, setReintento] = useState(0);
+  const [falloRed, setFalloRed] = useState(false);
+  useEffect(() => {
+    let cancelado = false;
+    setFalloRed(false);
+    (async () => {
+      try {
+        const { data, error } = await supabase.rpc("acceso_activo");
+        if (cancelado) return;
+        if (!error && data === true) return setModo("seguro");
+        // PGRST202 / 404: la función no existe todavía => seguridad sin instalar.
+        const falta = error && (error.code === "PGRST202" || error.code === "42883" || /Could not find the function|does not exist|404/i.test(`${error.message || ""}`));
+        if (falta) return setModo("antiguo");
+        setFalloRed(true);
+      } catch {
+        if (!cancelado) setFalloRed(true);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [reintento]);
+  if (falloRed)
+    return (
+      <PantallaPortal>
+        <div style={{ width: "100%", maxWidth: 320, textAlign: "center" }}>
+          <div style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 700, marginBottom: 10, color: ds.danger }}>No se pudo conectar</div>
+          <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 20, lineHeight: 1.5 }}>Comprueba tu conexión e inténtalo de nuevo.</div>
+          <DsButton onClick={() => setReintento((n) => n + 1)} style={{ width: "100%" }}>
+            Reintentar
+          </DsButton>
+        </div>
+      </PantallaPortal>
+    );
+  if (modo === null)
+    return (
+      <PantallaPortal>
+        <LoadingBlock />
+      </PantallaPortal>
+    );
+  return modo === "seguro" ? <PortalAccesoSeguro {...props} /> : <PortalAcceso {...props} />;
+}
+
+// Portal con seguridad real: el código se comprueba DENTRO de Supabase
+// (función entrar); el navegador nunca descarga PIN ni código de entrenador.
+function PortalAccesoSeguro({ onEnterCoach, onEnterPlayer }) {
+  const [codigo, setCodigo] = useState("");
+  const [error, setError] = useState("");
+  const [entrando, setEntrando] = useState(false);
+  const [resultado, setResultado] = useState(null);
+
+  const validar = async () => {
+    const valor = codigo.trim();
+    if (!valor || entrando) return;
+    setEntrando(true);
+    setError("");
+    try {
+      const { data, error: e } = await supabase.rpc("entrar", { p_codigo: valor });
+      if (e) throw e;
+      if (!data || !data.ok) {
+        setError(
+          data?.error === "suspendido"
+            ? "Tu acceso está desactivado. Habla con tu entrenador."
+            : data?.error === "bloqueado"
+            ? "Demasiados intentos fallidos. Espera unos minutos e inténtalo de nuevo."
+            : "Código no reconocido. Revisa e inténtalo de nuevo."
+        );
+        return;
+      }
+      sharedDataCache.clear();
+      accesoSesion.token = data.token;
+      accesoSesion.rol = data.rol;
+      accesoSesion.jugadorId = data.jugador_id || null;
+      setResultado(data.rol === "entrenador" ? { tipo: "entrenador" } : { tipo: "jugador", nombre: data.nombre, id: data.jugador_id });
+    } catch {
+      setError("No se pudo conectar. Comprueba tu conexión e inténtalo de nuevo.");
+    } finally {
+      setEntrando(false);
+    }
+  };
+
+  if (resultado) {
+    return (
+      <PantallaPortal>
+        <div style={{ textAlign: "center", maxWidth: 320 }}>
+          <div style={{ width: 60, height: 60, borderRadius: dsR.full, background: ds.bgElevated, border: `2px solid ${ds.success}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 26, color: ds.success, margin: "0 auto 16px" }}>✓</div>
+          <div style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 700, marginBottom: 6 }}>{resultado.tipo === "entrenador" ? "Acceso como entrenador" : `Hola, ${resultado.nombre}`}</div>
+          <div style={{ fontSize: 13, color: ds.inkSecondary, lineHeight: 1.5, marginBottom: 20 }}>{resultado.tipo === "entrenador" ? "Entrando al panel del entrenador..." : "Entrando a tu sesión de hoy..."}</div>
+          <DsButton onClick={() => (resultado.tipo === "entrenador" ? onEnterCoach() : onEnterPlayer(resultado.id))} style={{ width: "100%" }}>
+            Continuar
+          </DsButton>
+        </div>
+      </PantallaPortal>
+    );
+  }
+  return (
+    <PantallaPortal>
+      <div style={{ width: "100%", maxWidth: 320 }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.1em", color: ds.inkSecondary, marginBottom: 6 }}>ENTRENAMIENTO DE FUERZA</div>
+          <div style={{ fontFamily: dsF.display, fontSize: 22, fontWeight: 700 }}>Introduce tu código</div>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 6 }}>El PIN de jugador o el código de entrenador</div>
+        </div>
+        <DsInput
+          value={codigo}
+          onChange={(e) => {
+            setCodigo(e.target.value);
+            setError("");
+          }}
+          onKeyDown={(e) => e.key === "Enter" && validar()}
+          placeholder="••••"
+          autoFocus
+          type="password"
+          inputMode="numeric"
+          error={!!error}
+          style={{ fontSize: 20, letterSpacing: "0.2em", textAlign: "center", padding: "14px 12px", fontFamily: dsF.mono, marginBottom: 10 }}
+        />
+        {error && <div style={{ color: ds.danger, fontSize: 12, textAlign: "center", marginBottom: 10 }}>{error}</div>}
+        <DsButton onClick={validar} disabled={entrando} style={{ width: "100%" }}>
+          {entrando ? "Comprobando..." : "Entrar"}
+        </DsButton>
+      </div>
+    </PantallaPortal>
+  );
+}
+
 // ---------- PORTAL DE ACCESO ÚNICO ----------
 // Calca el diseño validado de portal-acceso.jsx: pantalla completa,
 // sin la cabecera antigua, tipografía monoespaciada, un solo código de
@@ -3563,6 +3722,55 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
   );
 }
 
+// Cambio del código de entrenador (se guarda cifrado en Supabase; nadie, tampoco la
+// app, puede volver a leerlo). Un código largo protege mucho más que uno de 4 cifras.
+function PanelCodigoEntrenadorReal({ onCerrar }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [estado, setEstado] = useState({ guardando: false, error: "", ok: false });
+  const guardar = async () => {
+    const v = a.trim();
+    if (v.length < 4) return setEstado({ guardando: false, error: "Mínimo 4 caracteres (recomendado: 8 o más).", ok: false });
+    if (v !== b.trim()) return setEstado({ guardando: false, error: "Los dos códigos no coinciden.", ok: false });
+    setEstado({ guardando: true, error: "", ok: false });
+    try {
+      const { data, error } = await supabase.rpc("cambiar_codigo_entrenador", { p_nuevo: v });
+      if (error) throw error;
+      if (!data || !data.ok) {
+        const msg = data?.error === "igual_que_un_jugador" ? "Ese código ya es el PIN de un jugador. Elige otro." : data?.error === "corto" ? "Demasiado corto." : "No tienes permiso para cambiarlo.";
+        return setEstado({ guardando: false, error: msg, ok: false });
+      }
+      setA("");
+      setB("");
+      setEstado({ guardando: false, error: "", ok: true });
+    } catch {
+      setEstado({ guardando: false, error: "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.", ok: false });
+    }
+  };
+  return (
+    <div style={{ background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 14, marginBottom: 14, maxWidth: 420 }}>
+      <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Código de entrenador</div>
+      <div style={{ fontSize: 12, color: ds.inkSecondary, marginBottom: 10, lineHeight: 1.5 }}>
+        Se guarda cifrado: ni tú ni la app podréis volver a verlo, solo cambiarlo. Recomendado: 8 cifras o más; con 4 es fácil de adivinar.
+      </div>
+      <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
+        <DsInput type="password" value={a} onChange={(e) => setA(e.target.value)} placeholder="Código nuevo" />
+        <DsInput type="password" value={b} onChange={(e) => setB(e.target.value)} placeholder="Repite el código" />
+      </div>
+      {estado.error && <div style={{ color: ds.danger, fontSize: 12, marginBottom: 8 }}>{estado.error}</div>}
+      {estado.ok && <div style={{ color: ds.success, fontSize: 12, marginBottom: 8 }}>Código cambiado. Úsalo la próxima vez que entres.</div>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <DsButton onClick={guardar} disabled={estado.guardando}>
+          {estado.guardando ? "Guardando..." : "Guardar código"}
+        </DsButton>
+        <DsButton variant="secondary" onClick={onCerrar}>
+          Cerrar
+        </DsButton>
+      </div>
+    </div>
+  );
+}
+
 function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
@@ -3582,6 +3790,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   // grupo real ("grupos", entidad ya existente) hace aquí de "equipo" del
   // mockup — no se crea ninguna tabla/entidad nueva para esto.
   const [vista, setVista] = useState("cartera");
+  const [codigoEntrenadorAbierto, setCodigoEntrenadorAbierto] = useState(false);
   const [equipoAbiertoId, setEquipoAbiertoId] = useState(null);
   // Preseleccionado al pulsar "+ Añadir jugador" desde dentro del detalle de
   // un equipo — así el alta queda ya asignada a ese grupo sin un segundo paso.
@@ -3735,7 +3944,17 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
         {/* view-switch del mockup de Fase 6 (Equipos y usuarios): tres
             vistas, no un valor binario — sigue siendo un grupo de botones
             (como DsTabSwitcher en el resto de la app), no un <select>. */}
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          {accesoSesion.token && accesoSesion.rol === "entrenador" ? (
+            <button
+              onClick={() => setCodigoEntrenadorAbierto((v) => !v)}
+              style={{ fontSize: 12, padding: "7px 11px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}
+            >
+              Código de entrenador
+            </button>
+          ) : (
+            <span />
+          )}
           <DsTabSwitcher
             tabs={[
               { id: "cartera", label: "Cartera" },
@@ -3749,6 +3968,8 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
             }}
           />
         </div>
+
+        {codigoEntrenadorAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoEntrenadorAbierto(false)} />}
 
         {errorAccion && (
           <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
@@ -4345,6 +4566,16 @@ function useCarteraEntrenador() {
     }
   };
   const fmtF = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+  (datos.rendimiento?.sistemicos || []).forEach((sx) => {
+    nuevaAlerta({
+      id: `datos-${sx.clave}`,
+      sev: 1,
+      tipo: "datos",
+      titulo: `${sx.nombre}: ${sx.pct > 0 ? "+" : ""}${sx.pct} % en ${sx.jugadores} jugadores a la vez`,
+      detalle: "Cambio demasiado grande y simultáneo para ser rendimiento: ¿cambió el material, la unidad de carga o el ejercicio? Se ha excluido de las alertas de rendimiento.",
+      acciones: [],
+    });
+  });
   activos.forEach((p) => {
     const r = met.get(p.id);
     const cmj = estadoCmj && estadoCmj.get ? estadoCmj.get(p.id) : null;
@@ -4377,18 +4608,19 @@ function useCarteraEntrenador() {
         acciones: [{ label: "Planificar", tipo: "cal" }, { label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
       });
     }
-    const v = variacionPorJugador.get(p.id);
-    if (v && v.pct <= -8) {
+    const rend = datos.rendimiento?.resultados?.get(p.id);
+    if (rend && rend.alerta) {
+      const n = rend.bajan.length;
       nuevaAlerta({
         id: `e1rm-${p.id}`,
-        // El e1RM sale del RIR que indica cada jugador y oscila mucho: solo sube a
-        // "atención" si cae con claridad en más de un ejercicio; si no, es un aviso.
-        sev: v.pct <= -15 && v.nEjercicios >= 2 ? 2 : 1,
-        chip: `${p.name} · ${Math.round(v.pct)} %`,
+        // Regla calibrada (ver RENDIMIENTO_CFG): siempre "aviso", nunca urgencia:
+        // el e1RM depende del RIR que apunta el jugador.
+        sev: 1,
+        chip: `${p.name} · ${Math.round(rend.pct)} %`,
         tipo: "rendimiento",
         jugadorId: p.id,
-        titulo: `${p.name} · rendimiento a la baja (${Math.round(v.pct)} %)`,
-        detalle: v.peor ? `Lo que más baja: ${v.peor.nombre} (${Math.round(v.peor.pct)} %) frente a su nivel habitual.` : "Frente a su nivel habitual de esta semana.",
+        titulo: `${p.name} · ${n} ejercicios con la carga estimada a la baja`,
+        detalle: `Lo que más baja: ${rend.peor.nombre} (${Math.round(rend.peor.pct)} %) frente a su nivel habitual.`,
         acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "progreso" }],
       });
     }
@@ -4467,6 +4699,11 @@ function useCarteraEntrenador() {
       ultima: r.ultima,
       diasSin: r.ultima ? diasEntreFechas(r.ultima, hoy) : null,
       cmj: cmj ? cmj.status : null,
+      molestia: (() => {
+        const ms = molestias.filter((m) => m.jugador_id === p.id && m.fecha >= sumarDiasFecha(hoy, -3)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+        return ms.length ? Number(ms[0].valor) : null;
+      })(),
+      hoy: null, // "hecho" | "parcial" | "pendiente" | null (sin sesión hoy); se rellena abajo
       variacion: variacionPorJugador.has(p.id) ? variacionPorJugador.get(p.id).pct : null,
       alertas: al,
     });
@@ -4490,6 +4727,18 @@ function useCarteraEntrenador() {
       });
       return { sesion: s, completos, parciales, ninguno, total: completos.length + parciales.length + ninguno.length };
     });
+
+  const rangoHoy = { hecho: 3, parcial: 2, pendiente: 1 };
+  const marcarHoy = (lista, valor) =>
+    lista.forEach((pl) => {
+      const f = filas.get(pl.id);
+      if (f && (f.hoy == null || rangoHoy[valor] > rangoHoy[f.hoy])) f.hoy = valor;
+    });
+  sesionesHoy.forEach(({ completos, parciales, ninguno }) => {
+    marcarHoy(completos, "hecho");
+    marcarHoy(parciales, "parcial");
+    marcarHoy(ninguno, "pendiente");
+  });
 
   // ---- Semana ----
   const semana = Array.from({ length: 7 }, (_, i) => {
@@ -4589,6 +4838,7 @@ function FilaAlertaReal({ alerta, onAccion }) {
 
 function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
   const c = useCarteraEntrenador();
+  const { todos: partidosInicio } = usePartidos();
   const ancho = useAnchoVentana();
   const pendientesCount = useSolicitudesPendientesCount();
   const [verTodas, setVerTodas] = useState(false);
@@ -4610,6 +4860,18 @@ function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) 
       <div style={{ marginBottom: 18 }}>
         <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>{hoyLabel}</div>
         <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 700, margin: 0 }}>Inicio</h1>
+        {(() => {
+          const prox = partidosInicio.filter((x) => x.fecha >= c.hoy).sort((a, b) => (a.fecha < b.fecha ? -1 : 1))[0];
+          if (!prox) return null;
+          const dias = diasEntreFechas(c.hoy, prox.fecha);
+          const cuando = dias === 0 ? "hoy" : dias === 1 ? "mañana" : `en ${dias} días`;
+          return (
+            <div style={{ fontSize: 13, color: ds.inkSecondary, marginTop: 6 }}>
+              Próximo partido: <b style={{ color: ds.ink }}>{new Date(`${prox.fecha}T00:00:00`).toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" })}</b>
+              {prox.rival ? ` · ${prox.rival}` : ""} · {cuando}
+            </div>
+          );
+        })()}
       </div>
 
       {/* HOY */}
@@ -4657,6 +4919,53 @@ function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) 
           );
         })}
       </div>
+
+      {/* PLANTEL HOY */}
+      {c.activos.length > 0 && (() => {
+        const orden = { atencion: 0, aldia: 1, sinplan: 2 };
+        const lista = [...c.activos].sort((a, b) => (orden[c.filas.get(a.id)?.estado] ?? 3) - (orden[c.filas.get(b.id)?.estado] ?? 3) || a.name.localeCompare(b.name));
+        const resumen = { hecho: 0, parcial: 0, pendiente: 0 };
+        lista.forEach((pl) => {
+          const h = c.filas.get(pl.id)?.hoy;
+          if (h) resumen[h] += 1;
+        });
+        return (
+          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+              <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Plantel</b>
+              <span style={{ fontSize: 12, color: ds.inkSecondary }}>{c.activos.length} activos</span>
+              <span style={{ flex: 1 }} />
+              {(resumen.hecho + resumen.parcial + resumen.pendiente) > 0 && (
+                <span style={{ fontSize: 12, color: ds.inkSecondary }}>
+                  Hoy: <b style={{ color: ds.success }}>{resumen.hecho}</b> hecho · <b>{resumen.parcial}</b> a medias · <b style={{ color: ds.warning }}>{resumen.pendiente}</b> pendiente
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {lista.map((pl) => {
+                const f = c.filas.get(pl.id) || {};
+                const meta = ESTADO_JUGADOR_META[f.estado];
+                const etiquetas = [];
+                if (f.molestia != null && f.molestia >= 3) etiquetas.push({ t: `M${f.molestia}`, color: f.molestia >= 7 ? ds.danger : ds.warning, titulo: `Molestia ${f.molestia}/10` });
+                if (f.cmj === "red" || f.cmj === "amber") etiquetas.push({ t: "CMJ", color: f.cmj === "red" ? ds.danger : ds.warning, titulo: f.cmj === "red" ? "CMJ en rojo" : "CMJ a vigilar" });
+                const hoyIcono = f.hoy === "hecho" ? "✓" : f.hoy === "parcial" ? "½" : f.hoy === "pendiente" ? "○" : "";
+                const titulo = [meta ? meta.label : "", f.adh28 != null ? `adherencia 4 sem: ${f.adh28} %` : "", f.hoy ? `hoy: ${f.hoy}` : "sin sesión hoy"].filter(Boolean).join(" · ");
+                return (
+                  <button key={pl.id} type="button" title={titulo} onClick={() => onOpenHistory?.(pl)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 12, cursor: "pointer" }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta ? meta.color : ds.inkMuted, flexShrink: 0 }} />
+                    {pl.name}
+                    {etiquetas.map((e) => (
+                      <span key={e.t} title={e.titulo} style={{ fontFamily: dsF.mono, fontSize: 10, fontWeight: 800, color: e.color }}>{e.t}</span>
+                    ))}
+                    {hoyIcono && <span style={{ fontFamily: dsF.mono, fontSize: 11, color: f.hoy === "hecho" ? ds.success : ds.inkMuted }}>{hoyIcono}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 10 }}>Punto = estado (naranja atención · verde al día · gris sin plan) · M = molestia ≥3 en 3 días · CMJ = a vigilar/rojo · ✓ hecho hoy · ½ a medias · ○ pendiente</div>
+          </div>
+        );
+      })()}
 
       {/* REQUIERE TU ATENCIÓN */}
       <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
@@ -4941,6 +5250,7 @@ function useDatosDashboardEntrenador() {
     if (!itemsPorJugador.has(it.jugadorId)) itemsPorJugador.set(it.jugadorId, []);
     itemsPorJugador.get(it.jugadorId).push(it);
   });
+  const rendimiento = evaluarRendimientoEquipo(itemsPorJugador, activos, lunes, hoy);
   const variaciones = activos
     .map((p) => {
       const cambios = calcularCambiosE1rm(itemsPorJugador.get(p.id) || [], lunes, hoy);
@@ -5000,6 +5310,7 @@ function useDatosDashboardEntrenador() {
     semanaDias,
     jugadoresSinTrabajo,
     variaciones,
+    rendimiento,
     atencionSemaforo,
     sesionHoy,
     pendientesHoy,
@@ -6597,16 +6908,20 @@ function CmjMicrociclosReal() {
   // Fecha del partido para rellenar MD-2 / MD+1 sin teclear (por defecto, el
   // próximo día de partido definido en el microciclo tipo del Calendario).
   const { todos: microTipoCmj, loaded: microTipoCmjLoaded } = useMicrociclosTipo();
+  const { todos: partidosCmj, loaded: partidosCmjLoaded } = usePartidos();
   const [partidoRef, setPartidoRef] = useState("");
   useEffect(() => {
-    if (!microTipoCmjLoaded || partidoRef) return;
+    if (!microTipoCmjLoaded || !partidosCmjLoaded || partidoRef) return;
+    // Primero el próximo partido real del calendario; si no hay, el día de partido semanal.
+    const proximo = partidosCmj.map((x) => x.fecha).filter((f) => f >= todayStr()).sort()[0];
+    if (proximo) return setPartidoRef(proximo);
     const m = Object.values(microTipoCmj).find((x) => x && x.diaPartido != null);
     if (!m) return;
     const hoyP = todayStr();
     const f = sumarDiasFecha(inicioSemanaCalendario(hoyP), m.diaPartido);
     setPartidoRef(f >= hoyP ? f : sumarDiasFecha(f, 7));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [microTipoCmjLoaded]);
+  }, [microTipoCmjLoaded, partidosCmjLoaded]);
 
   const cargar = useCallback(async () => {
     const { data, error } = await supabase.from("cmj_microciclos").select("*");
@@ -7697,7 +8012,7 @@ function useReferenciasPorEjercicio(sesionActualId) {
   }, [tareasHistoricas, sesionesHistoricas, tareasHistoricasLoaded, sesionesHistoricasLoaded, sesionActualId]);
 }
 
-function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura, compacta, abiertaInicial }) {
+function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura, compacta, abiertaInicial, jugadoresConRegistros = 0 }) {
   const [abierta, setAbierta] = useState(abiertaInicial ?? esHoy);
   const [confirmando, setConfirmando] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -7817,7 +8132,11 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
               {confirmando ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                   <span style={{ fontSize: 12, color: ds.danger }}>
-                    {sesion.enviada ? "Esta sesión ya se envió — ¿eliminarla igualmente?" : "¿Eliminar esta sesión? No se puede deshacer."}
+                    {jugadoresConRegistros > 0
+                      ? `${jugadoresConRegistros} jugador${jugadoresConRegistros === 1 ? "" : "es"} ya registr${jugadoresConRegistros === 1 ? "ó" : "aron"} esta sesión. Si la eliminas, su entrenamiento se conserva pero ya no podrá asociarse a ella. ¿Eliminarla igualmente?`
+                      : sesion.enviada
+                      ? "Esta sesión ya se envió — ¿eliminarla igualmente?"
+                      : "¿Eliminar esta sesión? No se puede deshacer."}
                   </span>
                   <button
                     onClick={async () => {
@@ -8049,10 +8368,81 @@ function useMicrociclosTipo() {
   };
   return { todos: actual, loaded: todos !== null, error, guardar, borrar };
 }
+function mensajeErrorPartidos(error) {
+  const msg = (error && (error.message || String(error))) || "error desconocido";
+  if (/partidos/.test(msg) && /(relation|does not exist|schema cache|find the table)/i.test(msg)) {
+    return "Falta crear la tabla «partidos» en Supabase: ejecuta paso4_partidos.sql y recarga.";
+  }
+  return `No se pudo guardar el partido: ${msg}`;
+}
+// Calendario de partidos reales por ámbito (mismas claves que el microciclo tipo:
+// "g:<equipo>", "j:<jugador independiente>" o "equipo"). Un independiente puede
+// tener los suyos o ninguno: sin partidos simplemente no hay etiquetas MD.
+function usePartidos() {
+  const [lista, setLista] = useState(() => sharedDataCache.get("partidos") || null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (lista !== null) return undefined;
+    let off = false;
+    (async () => {
+      let rows = [];
+      let ok = true;
+      try {
+        const { data, error: e } = await supabase.from("partidos").select("*").order("fecha");
+        if (e) throw e;
+        rows = (data || []).map((r) => ({ ...r, fecha: normalizarFecha(r.fecha) }));
+      } catch (e) {
+        ok = false;
+        if (!off) setError(mensajeErrorPartidos(e));
+      }
+      if (ok) sharedDataCache.set("partidos", rows);
+      if (!off) setLista(rows);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const actual = lista || [];
+  const aplicar = (nueva) => {
+    sharedDataCache.set("partidos", nueva);
+    setLista(nueva);
+  };
+  const guardar = async (partido) => {
+    const previo = actual;
+    const nuevo = { id: partido.id || genId("par"), local: true, competicion: "", rival: "", ...partido };
+    aplicar([...actual.filter((x) => x.id !== nuevo.id), nuevo].sort((a, b) => (a.fecha < b.fecha ? -1 : 1)));
+    setError("");
+    try {
+      const { error: e } = await supabase.from("partidos").upsert(nuevo, { onConflict: "id" });
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      aplicar(previo);
+      setError(mensajeErrorPartidos(e));
+      return false;
+    }
+  };
+  const borrar = async (id) => {
+    const previo = actual;
+    aplicar(actual.filter((x) => x.id !== id));
+    setError("");
+    try {
+      const { error: e } = await supabase.from("partidos").delete().eq("id", id);
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      aplicar(previo);
+      setError(mensajeErrorPartidos(e));
+      return false;
+    }
+  };
+  return { todos: actual, loaded: lista !== null, error, guardar, borrar };
+}
 const MICRO_VACIO = { diaPartido: null, sesiones: {}, manual: {} };
 // MD de una fecha: primero el ajuste manual de ese día; si no, por distancia al
 // partido más cercano (MD+1 el día siguiente; después MD-n hasta 6 días antes).
-function mdDeFecha(micro, fecha) {
+function mdDeFecha(micro, fecha, partidosReales = []) {
   const manual = (micro.manual || {})[fecha];
   if (manual === "-") return "";
   if (manual) return manual;
@@ -8066,6 +8456,10 @@ function mdDeFecha(micro, fecha) {
   });
   Object.entries(micro.manual || {}).forEach(([f, t]) => {
     if (t === "MD" && Math.abs(diasEntreFechas(fecha, f)) <= 14) partidos.add(f);
+  });
+  // Partidos reales del calendario: mandan sobre el día de partido semanal.
+  partidosReales.forEach((f) => {
+    if (Math.abs(diasEntreFechas(fecha, f)) <= 14) partidos.add(f);
   });
   if (partidos.has(fecha)) return "MD";
   let dPrev = Infinity;
@@ -8115,6 +8509,8 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [modoPlan, setModoPlan] = useState(false);
   const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
   const { todos: microTodos, loaded: microLoaded, error: microError, guardar: guardarMicro, borrar: borrarMicro } = useMicrociclosTipo();
+  const { todos: partidosTodos, loaded: partidosLoaded, error: partidosError, guardar: guardarPartido, borrar: borrarPartido } = usePartidos();
+  const [nuevoPartido, setNuevoPartido] = useState({ fecha: "", rival: "", local: true });
   const [microAbierto, setMicroAbierto] = useState(false);
   const [diasAbiertos, setDiasAbiertos] = useState({}); // fecha -> true/false (por defecto abierto solo hoy)
   const [microGrupoSel, setMicroGrupoSel] = useState(null);
@@ -8291,7 +8687,15 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     if (!microLoaded) return;
     guardarMicro(microKey, { ...micro, ...parche });
   };
-  const mdDe = (f) => mdDeFecha(micro, f);
+  const partidosScope = partidosTodos.filter((x) => x.ambito === microKey);
+  const fechasPartido = partidosScope.map((x) => x.fecha);
+  const partidoPorFecha = new Map(partidosScope.map((x) => [x.fecha, x]));
+  const anadirPartido = async () => {
+    if (!nuevoPartido.fecha) return;
+    const ok = await guardarPartido({ fecha: nuevoPartido.fecha, rival: nuevoPartido.rival.trim(), local: nuevoPartido.local, ambito: microKey });
+    if (ok) setNuevoPartido({ fecha: "", rival: "", local: true });
+  };
+  const mdDe = (f) => mdDeFecha(micro, f, fechasPartido);
   const fijarMdManual = (f, valor) => {
     const manual = { ...(micro.manual || {}) };
     if (!valor) delete manual[f];
@@ -8299,7 +8703,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     cambiarMicro({ manual });
   };
   // El microciclo es opcional: solo se ven etiquetas MD si se ha elegido día de partido o se ha marcado algún día a mano.
-  const microActivo = micro.diaPartido != null || Object.keys(micro.manual || {}).length > 0;
+  const microActivo = micro.diaPartido != null || Object.keys(micro.manual || {}).length > 0 || fechasPartido.length > 0;
   const quitarMicro = () => {
     if (!window.confirm(`¿Quitar el microciclo de ${microNombre}? Se borran el día de partido, las sesiones por MD y los ajustes manuales.`)) return;
     borrarMicro(microKey);
@@ -8349,6 +8753,15 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     return { n: sesSemana.length, dias: diasConSesion, fuerzaSeries, mds };
   })();
   // Cumplimiento de una sesión en una fecha: quién envió todo, quién algo y quién nada.
+  // Jugadores distintos con registros por sesión (para avisar antes de borrarla).
+  const sesionDeTarea = new Map(tareas.map((t) => [t.id, t.sesion_id]));
+  const jugadoresPorSesion = new Map();
+  registrosCal.forEach((r) => {
+    const sid = sesionDeTarea.get(r.tarea_id);
+    if (!sid) return;
+    if (!jugadoresPorSesion.has(sid)) jugadoresPorSesion.set(sid, new Set());
+    jugadoresPorSesion.get(sid).add(r.jugador_id);
+  });
   const enviadosSet = new Set(registrosCal.filter((r) => r.enviado === true || r.enviado === "true").map((r) => `${r.jugador_id}::${r.tarea_id}::${r.fecha}`));
   const cumplimientoSesion = (s, f) => {
     if (f > hoy) return null;
@@ -8604,6 +9017,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   <button key={f} type="button" onClick={() => { setDiasAbiertos((a) => ({ ...a, [f]: true })); const el = document.getElementById(`dia-${f}`); if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "start" }); }} style={{ background: esHoy ? ds.accentSubtle : ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 12, padding: "8px 4px", cursor: "pointer", color: ds.ink, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
                     <span style={{ fontSize: 10.5, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase" }}>{NOMBRES_DIA[i]} {Number(f.slice(8))}</span>
                     <span style={{ fontSize: 11, fontFamily: dsF.mono, fontWeight: 700, color: md ? ds.accent : ds.inkMuted, minHeight: 14 }}>{md || ""}</span>
+                    {partidoPorFecha.get(f) && <span title={`Partido${partidoPorFecha.get(f).rival ? ` vs ${partidoPorFecha.get(f).rival}` : ""}`} style={{ fontSize: 10, color: ds.inkSecondary, maxWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>⚽ {(partidoPorFecha.get(f).rival || "partido").slice(0, 10)}</span>}
                     <span style={{ fontSize: 11.5, fontWeight: 600, color: n ? ds.ink : ds.inkMuted }}>{n ? `${n} ses.` : "—"}</span>
                   </button>
                 );
@@ -8661,6 +9075,31 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   Elige qué sesión toca en cada día del microciclo. Cada fecha del calendario se identifica con su MD según el partido (puedes corregir cualquier día con la etiqueta MD de su fila). Las sesiones se aplican tal cual, sin tocar la carga.
                 </div>
                 {microError && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 10 }}>{microError}</div>}
+                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+                  <div style={{ fontSize: 12.5, fontWeight: 700, marginBottom: 6 }}>Partidos · {microNombre}</div>
+                  {partidosError && <div style={{ color: ds.danger, fontSize: 12.5, marginBottom: 8 }}>{partidosError}</div>}
+                  {!partidosLoaded && <div style={{ fontSize: 12, color: ds.inkMuted }}>Cargando partidos…</div>}
+                  {partidosLoaded && partidosScope.filter((x) => x.fecha >= sumarDiasFecha(hoy, -7)).length === 0 && (
+                    <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 6 }}>Sin partidos próximos. Añade los reales para que el MD de cada día salga solo; sin partidos puedes usar el día de partido semanal de arriba, o ninguno (jugadores sin competición).</div>
+                  )}
+                  {partidosScope.filter((x) => x.fecha >= sumarDiasFecha(hoy, -7)).map((x) => (
+                    <div key={x.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, padding: "3px 0" }}>
+                      <b style={{ fontFamily: dsF.mono, fontSize: 12 }}>{new Date(`${x.fecha}T00:00:00`).toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}</b>
+                      <span style={{ color: ds.inkSecondary }}>{x.local === false ? "fuera" : "en casa"}{x.rival ? ` · ${x.rival}` : ""}</span>
+                      <span style={{ flex: 1 }} />
+                      <button type="button" onClick={() => borrarPartido(x.id)} aria-label="Quitar partido" style={{ background: "transparent", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 14 }}>✕</button>
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                    <input type="date" value={nuevoPartido.fecha} onChange={(e) => setNuevoPartido({ ...nuevoPartido, fecha: e.target.value })} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }} />
+                    <input type="text" placeholder="Rival (opcional)" value={nuevoPartido.rival} onChange={(e) => setNuevoPartido({ ...nuevoPartido, rival: e.target.value })} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "6px 8px", width: 150 }} />
+                    <select value={nuevoPartido.local ? "1" : "0"} onChange={(e) => setNuevoPartido({ ...nuevoPartido, local: e.target.value === "1" })} style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }}>
+                      <option value="1">En casa</option>
+                      <option value="0">Fuera</option>
+                    </select>
+                    <button type="button" disabled={!nuevoPartido.fecha} onClick={anadirPartido} style={{ background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, color: ds.accent, borderRadius: 8, padding: "6px 12px", fontSize: 12.5, fontWeight: 700, cursor: nuevoPartido.fecha ? "pointer" : "default", opacity: nuevoPartido.fecha ? 1 : 0.5 }}>+ Añadir partido</button>
+                  </div>
+                </div>
                 {!microLoaded && <div style={{ fontSize: 12.5, color: ds.inkMuted, marginBottom: 10 }}>Cargando microciclo…</div>}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
                   {MICRO_TAGS_ORDEN.map((t) => (
@@ -8732,7 +9171,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                         })()
                       ) : (
                         <div key={s.id}>
-                          <TarjetaSesionReal sesion={s} esHoy={esHoy} compacta abiertaInicial={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                          <TarjetaSesionReal sesion={s} esHoy={esHoy} compacta abiertaInicial={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} jugadoresConRegistros={jugadoresPorSesion.get(s.id)?.size || 0} />
                           {(() => {
                             const c = cumplimientoSesion(s, f);
                             if (!c) return null;
@@ -8985,7 +9424,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 14 }}>
               {sesionesDiaSel.map((s) => (
                 <div key={s.id}>
-                  <TarjetaSesionReal sesion={s} esHoy={diaSel === hoy} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
+                  <TarjetaSesionReal sesion={s} esHoy={diaSel === hoy} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} jugadoresConRegistros={jugadoresPorSesion.get(s.id)?.size || 0} />
                   <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 4, marginLeft: 4 }}>Para: {etiquetaDestinoSesion(s, players, grupos)}</div>
                   {scope.tipo === "jugador" && !yaEsIndividualDeEsteJugador(s) && (
                     <button
@@ -9976,7 +10415,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   // ha confirmado que no lo hace (devuelve la tabla entera). Filtramos aquí
   // siempre, sea cual sea el comportamiento real del backend en cada momento.
   const registros =
-    player && tareaIds.length ? registrosJugador.filter((r) => r.jugador_id === player.id && tareaIds.includes(r.tarea_id)) : [];
+    player && tareaIds.length ? registrosJugador.filter((r) => r.jugador_id === player.id && tareaIds.includes(r.tarea_id) && normalizarFecha(r.fecha) === date) : [];
   // "Cualquiera" (incluye guardados sin enviar) — sirve para restaurar en
   // pantalla lo que el jugador ya había tecleado. "Enviados" (enviado !==
   // false) — el único que cuenta como sesión realmente confirmada, para
@@ -10823,7 +11262,9 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
         const draft = getRegistro(t.id);
         const existente = registrosByTarea.get(t.id);
         return {
-          ...(existente ? { id: existente.id } : {}),
+          // Id determinista (jugador + tarea + día): si un guardado falla a medias y el jugador
+          // reintenta, se SOBREESCRIBE la misma fila en vez de crear un duplicado.
+          id: existente ? existente.id : idRegistroFijo(player.id, t.id, date),
           jugador_id: player.id,
           tarea_id: t.id,
           fecha: date,
@@ -10850,7 +11291,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     try {
       const nuevos = construirRegistrosDesdeDraft(true);
       const tareaIdsTocadas = new Set(nuevos.map((n) => n.tarea_id));
-      const resto = registrosJugador.filter((r) => !tareaIdsTocadas.has(r.tarea_id));
+      const resto = registrosJugador.filter((r) => !(tareaIdsTocadas.has(r.tarea_id) && normalizarFecha(r.fecha) === date));
       // CRÍTICO: si esto falla o se queda a medias (sin conexión...) y no se
       // comprueba, el jugador ve "Sesión enviada" sin que se haya guardado
       // nada de verdad — y el entrenador se queda sin ningún registro sin
@@ -10889,7 +11330,7 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
     try {
       const nuevos = construirRegistrosDesdeDraft(false);
       const tareaIdsTocadas = new Set(nuevos.map((n) => n.tarea_id));
-      const resto = registrosJugador.filter((r) => !tareaIdsTocadas.has(r.tarea_id));
+      const resto = registrosJugador.filter((r) => !(tareaIdsTocadas.has(r.tarea_id) && normalizarFecha(r.fecha) === date));
       const ok = nuevos.length ? await saveRegistrosJugador([...resto, ...nuevos]) : true;
       if (ok) {
         setBorradorGuardadoOk(true);
@@ -11865,6 +12306,89 @@ function calcularCambiosE1rm(items, inicio, fin) {
     });
   });
   return cambios;
+}
+
+// ---------- Rendimiento (e1RM) calibrado con datos reales ----------
+// Calibrado con 7 semanas de histórico (3.357 registros de Fuerza, 877 series
+// jugador-ejercicio con carga). La regla anterior marcaba entre 7 y 21
+// jugadores por semana (de 13-23 con datos): casi toda la plantilla, por ruido
+// y por cambios de ejercicio (p. ej. un ejercicio con -59 % en 17 jugadores a
+// la vez, que no es rendimiento sino otro material/unidad). La regla calibrada
+// da 0-2 avisos por semana y separa los cambios que afectan a muchos
+// jugadores a la vez como "revisar datos".
+//   - Solo ejercicios con carga y e1RM calculable (reps <= 12, con RIR).
+//   - Base = mediana de las últimas 5 marcas anteriores (mín. 2).
+//   - Cae si baja más de max(10 %, 2 x su ruido propio (MAD)).
+//   - Aviso al jugador: >= 2 ejercicios caen y son >= 50 % de los comparables.
+//   - Cambio sistémico: un ejercicio con >= 5 jugadores y mediana de cambio
+//     >= 30 % (en valor absoluto) se excluye y se avisa para revisar datos.
+const RENDIMIENTO_CFG = { minPrevios: 2, ventana: 5, umbralMin: 0.1, kRuido: 2, minEjerciciosBajan: 2, fraccionBajan: 0.5, cambioSistemico: 0.3, minJugadoresSistemico: 5 };
+function cambiosRobustosE1rm(items, inicio, fin) {
+  const cfg = RENDIMIENTO_CFG;
+  const porClave = new Map();
+  items.forEach((it) => {
+    if (!it.done || it.esResistencia || it.esElastica || it.bloque === "CMJ") return;
+    const clave = `${it.name}::${materialEfectivo(it)}`;
+    if (!porClave.has(clave)) porClave.set(clave, { nombre: it.name, regs: [], conCarga: false });
+    const g = porClave.get(clave);
+    g.regs.push(it);
+    if (it.cargaReal !== "" && it.cargaReal != null) g.conCarga = true;
+  });
+  const res = [];
+  porClave.forEach(({ nombre, regs, conCarga }, clave) => {
+    if (!conCarga) return;
+    const serie = regs
+      .map((it) => {
+        const e1 = e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
+        return e1 ? { fecha: it.date, v: e1 } : null;
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
+    const dentro = serie.filter((x) => x.fecha >= inicio && x.fecha <= fin);
+    const antes = serie.filter((x) => x.fecha < inicio).slice(-cfg.ventana);
+    if (!dentro.length || antes.length < cfg.minPrevios) return;
+    const base = medianaNum(antes.map((x) => x.v));
+    if (!base) return;
+    const ruido = antes.length >= 3 ? (medianaNum(antes.map((x) => Math.abs(x.v - base))) * 1.4826) / base : 0;
+    const ultimo = dentro[dentro.length - 1].v;
+    res.push({ clave, nombre, base, ultimo, cambio: (ultimo - base) / base, ruido, serie: serie.slice(-5).map((x) => x.v) });
+  });
+  return res;
+}
+function evaluarRendimientoEquipo(itemsPorJugador, jugadores, inicio, fin) {
+  const cfg = RENDIMIENTO_CFG;
+  const porJugador = new Map();
+  const porEjercicio = new Map();
+  jugadores.forEach((p) => {
+    const cambios = cambiosRobustosE1rm(itemsPorJugador.get(p.id) || [], inicio, fin);
+    if (!cambios.length) return;
+    porJugador.set(p.id, cambios);
+    cambios.forEach((c) => {
+      if (!porEjercicio.has(c.clave)) porEjercicio.set(c.clave, { nombre: c.nombre, cambios: [] });
+      porEjercicio.get(c.clave).cambios.push(c.cambio);
+    });
+  });
+  const sistemicos = [];
+  const excluidos = new Set();
+  porEjercicio.forEach((g, clave) => {
+    if (g.cambios.length < cfg.minJugadoresSistemico) return;
+    const med = medianaNum(g.cambios);
+    if (Math.abs(med) >= cfg.cambioSistemico) {
+      excluidos.add(clave);
+      sistemicos.push({ clave, nombre: g.nombre, jugadores: g.cambios.length, pct: Math.round(med * 100) });
+    }
+  });
+  const resultados = new Map();
+  porJugador.forEach((cambios, id) => {
+    const validos = cambios.filter((c) => !excluidos.has(c.clave));
+    if (!validos.length) return;
+    const bajan = validos.filter((c) => c.cambio <= -Math.max(cfg.umbralMin, cfg.kRuido * c.ruido));
+    const alerta = bajan.length >= cfg.minEjerciciosBajan && bajan.length / validos.length >= cfg.fraccionBajan;
+    const media = validos.reduce((sum, c) => sum + c.cambio, 0) / validos.length;
+    const peor = [...validos].sort((a, b) => a.cambio - b.cambio)[0];
+    resultados.set(id, { alerta, pct: media * 100, bajan, comparables: validos.length, peor: { nombre: peor.nombre, pct: peor.cambio * 100 } });
+  });
+  return { resultados, sistemicos };
 }
 
 // Cumplimiento de la pauta (ejecutado frente a prescrito): compara lo que el
@@ -16884,8 +17408,54 @@ function precalentarDatosEntrenador() {
   }
 }
 
+// Cierra el pase en Supabase y limpia lo que haya en memoria del usuario anterior.
+function cerrarAcceso() {
+  const t = accesoSesion.token;
+  sharedDataCache.clear();
+  if (!t) return;
+  Promise.resolve(supabase.rpc("salir"))
+    .catch(() => {})
+    .finally(() => {
+      if (accesoSesion.token === t) {
+        accesoSesion.token = null;
+        accesoSesion.rol = null;
+        accesoSesion.jugadorId = null;
+      }
+    });
+}
+
 export default function App() {
-  const [screen, setScreen] = useState("portal"); // "portal" | "coach" | "player"
+  const [screen, setScreenBase] = useState("portal"); // "portal" | "coach" | "player"
+  const [avisoSesion, setAvisoSesion] = useState("");
+  const setScreen = useCallback((s) => {
+    if (s === "portal") cerrarAcceso();
+    setScreenBase(s);
+  }, []);
+
+  // Con seguridad activa, comprueba que el pase sigue vigente (caduca a los 30 días o
+  // si el entrenador suspende al jugador): si no, vuelve al portal con un aviso visible
+  // en vez de enseñar pantallas vacías.
+  useEffect(() => {
+    if (screen === "portal") return undefined;
+    const comprobar = async () => {
+      if (!accesoSesion.token) return;
+      try {
+        const { data, error } = await supabase.rpc("quien_soy");
+        if (!error && (data == null || data.rol == null)) {
+          setAvisoSesion("Tu sesión ha caducado o tu acceso ya no está activo. Vuelve a entrar con tu código.");
+          accesoSesion.token = null;
+          sharedDataCache.clear();
+          setScreenBase("portal");
+        }
+      } catch {
+        /* sin conexión: no se expulsa a nadie por eso */
+      }
+    };
+    comprobar();
+    const alVolver = () => document.visibilityState === "visible" && comprobar();
+    document.addEventListener("visibilitychange", alVolver);
+    return () => document.removeEventListener("visibilitychange", alVolver);
+  }, [screen]);
   const [playerId, setPlayerId] = useState(null);
   const [coachModulo, setCoachModulo] = useState(null); // null = dashboard
   const [historialJugador, setHistorialJugador] = useState(null); // jugador para "Ver ficha" desde Usuarios
@@ -16906,6 +17476,14 @@ export default function App() {
         html, body { background: ${ds.canvas}; margin: 0; padding: 0; height: 100%; overscroll-behavior: none; }
         #root { height: 100%; }
       `}</style>
+      {screen === "portal" && avisoSesion && (
+        <div role="alert" style={{ position: "fixed", top: 0, left: 0, right: 0, zIndex: 50, background: ds.bgElevated, color: ds.warning, padding: "10px 16px", fontSize: 13, textAlign: "center", borderBottom: `1px solid ${ds.border}` }}>
+          {avisoSesion}{" "}
+          <button onClick={() => setAvisoSesion("")} style={{ marginLeft: 8, background: "transparent", border: "none", color: "inherit", textDecoration: "underline", cursor: "pointer", fontSize: 13 }}>
+            Cerrar
+          </button>
+        </div>
+      )}
       <AppRouter
         screen={screen}
         setScreen={setScreen}
@@ -16943,7 +17521,7 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo: coac
 
   if (screen === "portal") {
     return (
-      <PortalAcceso
+      <PortalAccesoRaiz
         onEnterCoach={() => {
           setCoachModulo(null);
           setScreen("coach");
@@ -18719,6 +19297,57 @@ function ProgresoFichaJugadorReal({ jugador }) {
 // sql/add_notas_jugador.sql): textarea + lista de notas anteriores con
 // autor y fecha, mismo patrón CRUD genérico (api.list/save) que el resto de
 // entidades de la app.
+// Selector secundario dentro de una pestaña de la ficha (p. ej. Progreso | Historial).
+function FichaSubPestanasReal({ valor, opciones, onChange }) {
+  return (
+    <div style={{ display: "inline-flex", gap: 4, marginBottom: 14, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: 3 }}>
+      {opciones.map(([id, label]) => (
+        <button key={id} type="button" onClick={() => onChange(id)} style={{ fontSize: 12.5, fontWeight: 700, padding: "5px 12px", border: "none", borderRadius: 999, cursor: "pointer", background: valor === id ? ds.accent : "transparent", color: valor === id ? ds.accentInk : ds.inkSecondary }}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Lo que el entrenador escribió y lo que falta por registrar, a la vista en el Resumen
+// (antes las notas y las referencias de fuerza vivían en pestañas que casi nadie abría).
+function PendientesFichaReal({ jugador, onNavigateTab }) {
+  const [notas, , notasLoaded] = useEntityList("notasJugador", { jugador_id: jugador.id });
+  const { rows: refRows, loaded: refLoaded } = useReferenciasFuerza(jugador.id);
+  const propias = notas.filter((n) => n.jugador_id === jugador.id).sort((a, b) => (a.fecha < b.fecha ? 1 : a.fecha > b.fecha ? -1 : 0));
+  const ultima = propias[0];
+  const sinRefs = refLoaded && (refRows || []).length === 0;
+  if (!notasLoaded) return null;
+  return (
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "12px 14px", marginBottom: 14, display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <div style={{ fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.08em", color: ds.inkMuted, marginBottom: 3 }}>ÚLTIMA NOTA{propias.length > 1 ? ` · ${propias.length} EN TOTAL` : ""}</div>
+          {ultima ? (
+            <div style={{ fontSize: 13, color: ds.ink, lineHeight: 1.45 }}>
+              {ultima.texto.length > 220 ? `${ultima.texto.slice(0, 220)}…` : ultima.texto} <span style={{ color: ds.inkMuted, fontSize: 11.5 }}>· {ultima.fecha}</span>
+            </div>
+          ) : (
+            <div style={{ fontSize: 13, color: ds.inkSecondary }}>Sin notas todavía.</div>
+          )}
+        </div>
+        <button type="button" onClick={() => onNavigateTab("notas")} style={{ fontSize: 12.5, fontWeight: 700, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, padding: "6px 12px", cursor: "pointer" }}>
+          {ultima ? "Ver / añadir nota" : "+ Añadir nota"}
+        </button>
+      </div>
+      {sinRefs && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", borderTop: `1px solid ${ds.border}`, paddingTop: 10 }}>
+          <span style={{ fontSize: 12.5, color: ds.inkSecondary, flex: "1 1 240px" }}>Sin marcas de referencia de fuerza: añade sus tops de serie anteriores para que el e1RM y las cargas sugeridas partan de datos reales.</span>
+          <button type="button" onClick={() => onNavigateTab("progreso")} style={{ fontSize: 12.5, fontWeight: 700, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, padding: "6px 12px", cursor: "pointer" }}>
+            Añadir referencias
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function NotasFichaJugadorReal({ jugador }) {
   const [notas, saveNotas, loaded] = useEntityList("notasJugador", { jugador_id: jugador.id });
   const [texto, setTexto] = useState("");
@@ -19069,34 +19698,31 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
             {[
               { id: "resumen", label: "Resumen", icon: <Home size={14} /> },
               { id: "calendario", label: "Calendario", icon: <Calendar size={14} /> },
-              { id: "historial", label: "Historial", icon: <History size={14} /> },
-              { id: "cmj", label: "Control de fatiga", icon: <Activity size={14} /> },
               { id: "progreso", label: "Progreso", icon: <TrendingUp size={14} /> },
+              { id: "cmj", label: "Control de fatiga", icon: <Activity size={14} /> },
             ].map((v) => (
-              <DsNavItem key={v.id} active={pestana === v.id} icon={v.icon} onClick={() => setPestana(v.id)}>
+              <DsNavItem key={v.id} active={pestana === v.id || (v.id === "progreso" && pestana === "historial")} icon={v.icon} onClick={() => setPestana(v.id)}>
                 {v.label}
               </DsNavItem>
             ))}
             <div style={{ height: 1, background: ds.border, margin: "6px 4px" }} />
-            {[
-              { id: "notas", label: "Notas", icon: <BookOpen size={14} /> },
-              { id: "datos", label: "Datos y accesos", icon: <Lock size={14} /> },
-            ].map((v) => (
-              <DsNavItem key={v.id} active={pestana === v.id} icon={v.icon} onClick={() => setPestana(v.id)}>
-                {v.label}
-              </DsNavItem>
-            ))}
+            <DsNavItem active={pestana === "notas" || pestana === "datos"} icon={<BookOpen size={14} />} onClick={() => setPestana("notas")}>
+              Notas y accesos
+            </DsNavItem>
           </nav>
           <div style={{ flex: 1, minWidth: 0 }}>
             {pestana === "resumen" ? (
               <>
                 <FichaAtencionReal jugador={actual} onNavigateTab={setPestana} onAbrirModulo={onAbrirModulo} />
+                <PendientesFichaReal jugador={actual} onNavigateTab={setPestana} />
                 <ResumenFichaJugadorReal jugador={actual} onNavigateTab={setPestana} onGuardarObjetivo={guardarObjetivo} />
               </>
             ) : pestana === "calendario" ? (
               <CalendarioFichaJugadorReal jugador={actual} onAbrirModulo={onAbrirModulo} />
             ) : pestana === "historial" ? (
-              !historialLoaded ? (
+              <>
+                <FichaSubPestanasReal valor="historial" onChange={setPestana} opciones={[["progreso", "Progreso"], ["historial", "Historial de sesiones"]]} />
+              {!historialLoaded ? (
                 <LoadingBlock />
               ) : (
                 <HistorialPorJugador
@@ -19107,15 +19733,25 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
                   sesionesById={sesionesById}
                   registros={registros}
                 />
-              )
+              )}
+              </>
             ) : pestana === "cmj" ? (
               <CmjFichaJugadorReal jugadorId={actual.id} jugadorNombre={actual.name} />
             ) : pestana === "progreso" ? (
-              <ProgresoFichaJugadorReal jugador={actual} />
+              <>
+                <FichaSubPestanasReal valor="progreso" onChange={setPestana} opciones={[["progreso", "Progreso"], ["historial", "Historial de sesiones"]]} />
+                <ProgresoFichaJugadorReal jugador={actual} />
+              </>
             ) : pestana === "notas" ? (
-              <NotasFichaJugadorReal jugador={actual} />
+              <>
+                <FichaSubPestanasReal valor="notas" onChange={setPestana} opciones={[["notas", "Notas"], ["datos", "Datos y accesos"]]} />
+                <NotasFichaJugadorReal jugador={actual} />
+              </>
             ) : (
-              <DatosAccesosFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onAccion={manejarAccionDatos} />
+              <>
+                <FichaSubPestanasReal valor="datos" onChange={setPestana} opciones={[["notas", "Notas"], ["datos", "Datos y accesos"]]} />
+                <DatosAccesosFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onAccion={manejarAccionDatos} />
+              </>
             )}
           </div>
         </div>
