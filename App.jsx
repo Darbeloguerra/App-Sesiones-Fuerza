@@ -1066,46 +1066,6 @@ function AvisoCmjDestinatariosReal({ estado, players, targetPlayerIds, fechas, d
 }
 
 
-// Programación: con el último CMJ, qué jugadores en rojo/ámbar tienen fuerza
-// hoy o mañana, para que el entrenador ajuste la sesión de campo o la del día
-// siguiente (el CMJ del día llega tras la sesión de fuerza).
-function AvisoCmjProgramacionReal({ estado, players, sesiones, hoy, onEditar }) {
-  if (!estado || !estado.size || !players?.length) return null;
-  const manana = sumarDiasFecha(hoy, 1);
-  const filas = [];
-  [hoy, manana].forEach((f) => {
-    sesiones
-      .filter((s) => s.enviada && (s.fechas || []).includes(f))
-      .forEach((s) => {
-        const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : players.filter((p) => p.estado === "activo").map((p) => p.id);
-        const afectados = destino
-          .map((id) => ({ p: players.find((x) => x.id === id), e: estado.get(id) }))
-          .filter(({ p, e }) => p && e && (e.status === "red" || e.status === "amber"));
-        if (afectados.length) filas.push({ fecha: f, sesion: s, afectados });
-      });
-  });
-  if (!filas.length) return null;
-  return (
-    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 18 }}>
-      <div style={{ fontWeight: 700, fontSize: 13, color: ds.ink, marginBottom: 6 }}>Jugadores a vigilar según el último CMJ</div>
-      {filas.map(({ fecha, sesion, afectados }) => (
-        <div key={`${fecha}-${sesion.id}`} style={{ fontSize: 12.5, color: ds.inkSecondary, marginBottom: 6 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, marginRight: 8 }}>{fecha === hoy ? "HOY" : "MAÑANA"}</span>
-          <strong style={{ color: ds.ink }}>{sesion.nombre || sesion.objetivo || "Sesión"}</strong>
-          {" — "}
-          {afectados.map(({ p, e }, i) => (
-            <span key={p.id}>
-              {p.name} ({e.status === "red" ? "rojo" : "ámbar"}{e.fechaTest ? `, ${fmtDateShort(e.fechaTest)}` : ""}){i < afectados.length - 1 ? ", " : ""}
-            </span>
-          ))}
-          {" "}
-          <button onClick={() => onEditar(sesion)} style={{ background: "transparent", border: "none", color: ds.accent, cursor: "pointer", fontSize: 12, fontWeight: 600, padding: 0 }}>Revisar sesión →</button>
-        </div>
-      ))}
-      <div style={{ fontSize: 11, color: ds.inkMuted }}>El CMJ de hoy llega después de la fuerza: estos avisos usan el último test disponible (la fecha entre paréntesis).</div>
-    </div>
-  );
-}
 
 // ---------- Referencias de fuerza (calibración del e1RM) ----------
 // El entrenador puede introducir la "top serie" (carga × reps @ RIR) que un
@@ -3477,6 +3437,132 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
   );
 }
 
+// Lista de usuarios como cartera: estado, adherencia, última actividad y CMJ de
+// cada jugador de un vistazo; ordenada con quien necesita atención arriba.
+function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAlta, onGrupo }) {
+  const [busqueda, setBusqueda] = useState("");
+  const [filtro, setFiltro] = useState("todos");
+  const [menuId, setMenuId] = useState(null);
+  const ancho = useAnchoVentana();
+  const estaListo = cartera && cartera.loaded;
+  const filaDe = (p) => (estaListo ? cartera.filas.get(p.id) : null);
+  const activos = players.filter((p) => p.estado === "activo");
+  const suspendidos = players.filter((p) => p.estado !== "activo");
+  const cuenta = (e) => activos.filter((p) => filaDe(p)?.estado === e).length;
+  const orden = { atencion: 0, aldia: 1, sinplan: 2 };
+  const lista = (filtro === "suspendidos" ? suspendidos : activos)
+    .filter((p) => {
+      if (filtro === "todos" || filtro === "suspendidos") return true;
+      if (filtro === "atencion" || filtro === "aldia" || filtro === "sinplan") return filaDe(p)?.estado === filtro;
+      if (filtro === "independientes") return (p.gruposIds || []).length === 0;
+      return (p.gruposIds || []).includes(filtro);
+    })
+    .filter((p) => p.name.toLowerCase().includes(busqueda.toLowerCase()))
+    .sort((a, b) => (orden[filaDe(a)?.estado] ?? 3) - (orden[filaDe(b)?.estado] ?? 3) || a.name.localeCompare(b.name));
+  const pills = [
+    { id: "todos", label: `Todos (${activos.length})` },
+    { id: "atencion", label: `Atención${estaListo ? ` (${cuenta("atencion")})` : ""}` },
+    { id: "aldia", label: "Al día" },
+    { id: "sinplan", label: "Sin plan" },
+    ...grupos.map((g) => ({ id: g.id, label: g.nombre })),
+    { id: "independientes", label: "Independientes" },
+    ...(suspendidos.length ? [{ id: "suspendidos", label: `Suspendidos (${suspendidos.length})` }] : []),
+  ];
+  const compacto = ancho < 760;
+  const cols = compacto ? "minmax(120px, 1.6fr) 90px 70px 32px" : "minmax(170px, 1.7fr) 96px minmax(120px, 1.2fr) 110px 70px 32px";
+  const fmtUlt = (f) => (f.diasSin === null ? "Sin registros" : f.diasSin === 0 ? "Hoy" : f.diasSin === 1 ? "Ayer" : `Hace ${f.diasSin} d`);
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+        <div>
+          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
+          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Tu cartera</h1>
+          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+            {estaListo ? `${cuenta("atencion")} requieren atención · ${cuenta("aldia")} al día · ${activos.length} activos` : `${activos.length} activos`}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button type="button" onClick={onGrupo} style={{ fontSize: 12.5, fontWeight: 600, padding: "9px 14px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>+ Grupo</button>
+          <button type="button" onClick={onAlta} style={{ fontSize: 12.5, fontWeight: 700, padding: "9px 14px", borderRadius: dsR.md, border: `1px solid ${ds.accent}`, background: ds.accent, color: ds.accentInk, cursor: "pointer" }}>+ Añadir usuario</button>
+        </div>
+      </div>
+      <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar usuario..." style={{ width: "100%", marginBottom: 10 }} />
+      <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
+        {pills.map((f) => (
+          <button key={f.id} type="button" onClick={() => setFiltro(f.id)} style={{ fontSize: 12.5, padding: "6px 12px", borderRadius: 999, border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`, background: filtro === f.id ? ds.accentSubtle : "transparent", color: filtro === f.id ? ds.accent : ds.inkSecondary, cursor: "pointer", whiteSpace: "nowrap" }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, overflow: "visible" }}>
+        <div style={{ display: "grid", gridTemplateColumns: cols, gap: 10, padding: "9px 14px", fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.06em", color: ds.inkMuted, textTransform: "uppercase" }}>
+          <span>Jugador</span>
+          <span>Estado</span>
+          {!compacto && <span>Adherencia 4 sem.</span>}
+          {!compacto && <span>Última actividad</span>}
+          <span>CMJ</span>
+          <span />
+        </div>
+        {lista.map((p) => {
+          const f = filaDe(p);
+          const meta = f ? ESTADO_JUGADOR_META[f.estado] : null;
+          const cmjMeta = f && f.cmj ? CMJ_STATUS_META[f.cmj] : null;
+          const nGrupos = (p.gruposIds || []).map((g) => grupos.find((x) => x.id === g)?.nombre).filter(Boolean);
+          const motivo = f && f.alertas.length ? [...f.alertas].sort((a, b) => b.sev - a.sev)[0] : null;
+          return (
+            <div key={p.id} style={{ position: "relative", borderTop: `1px solid ${ds.border}` }}>
+              <div role="button" tabIndex={0} onClick={() => onAbrir(p)} onKeyDown={(e) => { if (e.key === "Enter") onAbrir(p); }} style={{ display: "grid", gridTemplateColumns: cols, gap: 10, padding: "11px 14px", alignItems: "center", cursor: "pointer" }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <span style={{ width: 34, height: 34, borderRadius: "50%", background: `${colorAvatarJugador(p.id)}33`, color: colorAvatarJugador(p.id), display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 12, flexShrink: 0 }}>{inicialesNombre(p.name)}</span>
+                  <span style={{ minWidth: 0 }}>
+                    <span style={{ display: "block", fontWeight: 700, fontSize: 13.5, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    <span style={{ display: "block", fontSize: 11.5, color: motivo && f.estado === "atencion" ? ds.warning : ds.inkMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {motivo && f.estado === "atencion" ? (() => { const t = motivo.titulo.replace(`${p.name} · `, ""); return t.charAt(0).toUpperCase() + t.slice(1); })() : nGrupos.length ? nGrupos.join(" · ") : "Independiente"}
+                    </span>
+                  </span>
+                </span>
+                <span>
+                  {p.estado !== "activo" ? (
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: ds.inkMuted, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "2px 9px" }}>Suspendido</span>
+                  ) : meta ? (
+                    <span style={{ fontSize: 11.5, fontWeight: 700, color: meta.color, border: `1px solid ${meta.color}66`, background: `${meta.color}14`, borderRadius: 999, padding: "2px 9px", whiteSpace: "nowrap" }}>{meta.label}</span>
+                  ) : (
+                    <span style={{ fontSize: 11.5, color: ds.inkMuted }}>…</span>
+                  )}
+                </span>
+                {!compacto && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ flex: 1, height: 6, borderRadius: 999, background: ds.border, overflow: "hidden" }}>
+                      <span style={{ display: "block", height: "100%", width: `${f && f.adh28 !== null ? f.adh28 : 0}%`, background: f && f.adh28 !== null && f.adh28 >= 75 ? ds.success : ds.warning }} />
+                    </span>
+                    <b style={{ fontSize: 12, width: 38, textAlign: "right", color: f && f.adh28 !== null ? ds.ink : ds.inkMuted }}>{f && f.adh28 !== null ? `${f.adh28} %` : "—"}</b>
+                  </span>
+                )}
+                {!compacto && <span style={{ fontSize: 12.5, color: f && f.diasSin !== null && f.diasSin >= 5 ? ds.warning : ds.inkSecondary }}>{f ? fmtUlt(f) : "…"}</span>}
+                <span>
+                  {cmjMeta ? (
+                    <span title={cmjMeta.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: cmjMeta.color }}>
+                      <span style={{ width: 9, height: 9, borderRadius: "50%", background: cmjMeta.color }} />
+                      {compacto ? "" : cmjMeta.label}
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: 11.5, color: ds.inkMuted }}>—</span>
+                  )}
+                </span>
+                <span style={{ position: "relative" }}>
+                  <button type="button" aria-label="Más acciones" onClick={(e) => { e.stopPropagation(); setMenuId(menuId === p.id ? null : p.id); }} style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "transparent", color: ds.inkSecondary, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>⋯</button>
+                  {menuId === p.id && <MenuAccionesReal jugador={p} onAccion={(id) => onAccion(p.id, id)} onCerrar={() => setMenuId(null)} />}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+        {lista.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "22px 14px", textAlign: "center", borderTop: `1px solid ${ds.border}` }}>Nadie en este filtro.</div>}
+      </div>
+    </div>
+  );
+}
+
 function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
@@ -3484,6 +3570,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   const [coachPin, , coachPinLoaded] = useConfigValue("coach_pin");
   const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
   const { items: equipoHistory, loaded: equipoLoaded } = useEquipoHistory();
+  const cartera = useCarteraEntrenador();
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
@@ -3494,7 +3581,7 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   // directorio plano que ya existía, sin tocar su lógica de filtros). Un
   // grupo real ("grupos", entidad ya existente) hace aquí de "equipo" del
   // mockup — no se crea ninguna tabla/entidad nueva para esto.
-  const [vista, setVista] = useState("equipos");
+  const [vista, setVista] = useState("cartera");
   const [equipoAbiertoId, setEquipoAbiertoId] = useState(null);
   // Preseleccionado al pulsar "+ Añadir jugador" desde dentro del detalle de
   // un equipo — así el alta queda ya asignada a ese grupo sin un segundo paso.
@@ -3651,9 +3738,9 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
           <DsTabSwitcher
             tabs={[
+              { id: "cartera", label: "Cartera" },
               { id: "equipos", label: "Equipos" },
               { id: "independientes", label: "Independientes" },
-              { id: "usuarios", label: "Usuarios" },
             ]}
             active={vista}
             onChange={(v) => {
@@ -3735,81 +3822,19 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
           />
         )}
 
-        {vista === "usuarios" && (
-          <div>
-            <div style={{ marginBottom: 18 }}>
-              <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>USUARIOS</div>
-              <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Usuarios</h1>
-              <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                {activos} activos · {suspendidos} suspendidos · {independientes} independientes
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14 }}>
-              <DsInput
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar usuario..."
-                style={{ flex: 1, minWidth: 160 }}
-              />
-            </div>
-            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap", alignItems: "center" }}>
-              {[
-                { id: "todos", label: "Todos" },
-                { id: "activo", label: "Activos" },
-                { id: "suspendido", label: "Suspendidos" },
-                { id: "independientes", label: "Independientes" },
-                ...grupos.map((g) => ({ id: g.id, label: g.nombre })),
-              ].map((f) => (
-                <button
-                  key={f.id}
-                  onClick={() => setFiltro(f.id)}
-                  style={{
-                    fontSize: 12.5,
-                    padding: "8px 12px",
-                    borderRadius: dsR.md,
-                    border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`,
-                    background: filtro === f.id ? ds.accentSubtle : "transparent",
-                    color: filtro === f.id ? ds.accent : ds.inkSecondary,
-                    cursor: "pointer",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
-              <button
-                onClick={() => setPanelGrupoAbierto(true)}
-                style={{ fontSize: 12.5, padding: "8px 12px", borderRadius: dsR.md, border: `1px dashed ${ds.chart2}66`, background: "transparent", color: ds.chart2, cursor: "pointer", whiteSpace: "nowrap" }}
-              >
-                + Grupo
-              </button>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {visibles.map((j) => (
-                <FilaJugadorReal
-                  key={j.id}
-                  jugador={j}
-                  categorias={categorias}
-                  grupos={grupos}
-                  adherencia={adherenciaPorJugador.has(j.id) ? adherenciaPorJugador.get(j.id) : null}
-                  onAccion={manejarAccion}
-                  onCambiarCategorias={cambiarCategorias}
-                  onCambiarGrupos={cambiarGrupos}
-                />
-              ))}
-              {visibles.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin usuarios en este filtro</div>}
-            </div>
-            <DsButton
-              variant="secondary"
-              onClick={() => {
-                setGrupoAltaPreset(null);
-                setPanelAltaAbierto(true);
-              }}
-              style={{ width: "100%", marginTop: 16, borderStyle: "dashed", borderColor: ds.accentBorderSubtle, color: ds.accent }}
-            >
-              + Añadir usuario
-            </DsButton>
-          </div>
+        {vista === "cartera" && (
+          <CarteraUsuariosReal
+            players={players}
+            grupos={grupos}
+            cartera={cartera}
+            onAbrir={(p) => onOpenHistory?.(p)}
+            onAccion={manejarAccion}
+            onAlta={() => {
+              setGrupoAltaPreset(null);
+              setPanelAltaAbierto(true);
+            }}
+            onGrupo={() => setPanelGrupoAbierto(true)}
+          />
         )}
       </div>
       {panelAltaAbierto && (
@@ -4134,12 +4159,10 @@ function IconoModulo({ tipo }) {
 }
 
 const MODULOS_DASHBOARD = [
-  { id: "programacion", nombre: "Programación", descripcion: "Sesión de hoy y próximas programadas", icono: "calendario" },
   { id: "calendario", nombre: "Calendario", descripcion: "Planifica sesiones futuras por equipo, grupo o jugador", icono: "calendario" },
   { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
   { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
   { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
-  { id: "historial", nombre: "Historial", descripcion: "Registro diario por jugador", icono: "reloj" },
   { id: "fatiga", nombre: "Control de fatiga", descripcion: "Salto CMJ, microciclos y estado del equipo", icono: "pulso" },
 ];
 
@@ -4169,122 +4192,6 @@ const MODULOS_DASHBOARD = [
 // lista infinita.
 const LISTA_MOVIL_MAX_ALTO = 216;
 
-function DashboardEntrenadorCompactoReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
-  const datos = useDatosDashboardEntrenador();
-  const pendientesCount = useSolicitudesPendientesCount();
-
-  return (
-    <PantallaBase rol="entrenador" maxWidth={520}>
-      <div>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-          <div>
-            <h1 style={{ fontFamily: TEMA.fuenteTitular, fontSize: 19, fontWeight: 700, margin: 0 }}>Buenas, David</h1>
-            <div style={{ fontSize: 10.5, color: TEMA.textoMuted, textTransform: "capitalize" }}>
-              {datos.loaded ? datos.hoyLabel : new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "short", year: "numeric" })}
-            </div>
-          </div>
-          <button onClick={onCerrarSesion} style={{ fontSize: 10.5, color: TEMA.textoMuted, background: "transparent", border: "none", padding: 0, cursor: "pointer", flexShrink: 0, textDecoration: "underline", textDecorationColor: TEMA.bordeSuave }}>
-            Cerrar sesión
-          </button>
-        </div>
-
-        {/* CTA de hoy — misma barra compacta que escritorio/iPad, no la
-            tarjeta grande de antes. */}
-        {datos.loaded && (
-          <button
-            onClick={() => onAbrirModulo(datos.heroAccionModulo)}
-            style={{
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-              background: `linear-gradient(135deg, ${ds.accent}, #D89A1F)`,
-              color: ds.accentInk,
-              fontFamily: dsF.sans,
-              border: "none",
-              borderRadius: dsR.lg,
-              padding: "10px 14px",
-              marginBottom: 12,
-              cursor: "pointer",
-              textAlign: "left",
-            }}
-          >
-            <span style={{ fontSize: 12.5, fontWeight: 700 }}>{datos.heroTitulo}</span>
-            <span style={{ fontSize: 11.5, fontWeight: 800, whiteSpace: "nowrap", flexShrink: 0 }}>{datos.heroAccionLabel} →</span>
-          </button>
-        )}
-
-        {/* Acceso directo a los módulos — arriba, no al fondo. */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 7, marginBottom: 14 }}>
-          {MODULOS_DASHBOARD.map((m) => (
-            <button
-              key={m.id}
-              onClick={() => onAbrirModulo(m.id)}
-              style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 10, padding: "9px 4px", cursor: "pointer" }}
-            >
-              {m.id === "calendario" && pendientesCount > 0 && (
-                <span style={{ position: "absolute", top: 4, right: 4, background: TEMA.alerta, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 8.5, fontWeight: 800, borderRadius: dsR.full, minWidth: 14, height: 14, display: "flex", alignItems: "center", justifyContent: "center", padding: "0 3px" }}>
-                  {pendientesCount}
-                </span>
-              )}
-              <div style={{ color: TEMA.textoMuted }}><IconoModulo tipo={m.icono} /></div>
-              <div style={{ fontSize: 9, fontWeight: 600, color: TEMA.texto, textAlign: "center", lineHeight: 1.15 }}>{m.nombre}</div>
-            </button>
-          ))}
-        </div>
-
-        {!datos.loaded ? (
-          <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 14, padding: 16, marginBottom: 20, minHeight: 90 }} />
-        ) : (
-          <>
-            <TiraStatsCompactaReal datos={datos} />
-
-            <PanelSemanaDashboardReal onAbrirModulo={onAbrirModulo} borradores={datos.borradores} semanaDias={datos.semanaDias} jugadoresSinTrabajo={datos.jugadoresSinTrabajo} compact />
-
-            <div style={{ marginBottom: 12 }}>
-              <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={datos.playersById} />
-            </div>
-
-            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 12, padding: "10px 12px", marginBottom: 10 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                <div style={{ fontFamily: dsF.display, fontSize: 12.5, fontWeight: 800, color: TEMA.texto }}>Quién necesita atención</div>
-                <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Historial →</button>
-              </div>
-              {datos.variaciones.length === 0 ? (
-                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>Aún no hay ejercicios repetidos esta semana con historial previo.</div>
-              ) : (
-                <div style={{ maxHeight: LISTA_MOVIL_MAX_ALTO, overflowY: "auto", marginTop: 2 }}>
-                  {datos.variaciones.map((v) => (
-                    <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={datos.atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} compact />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ background: TEMA.superficie, border: `1px solid ${TEMA.borde}`, borderRadius: 12, padding: "10px 12px", marginBottom: 18 }}>
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
-                <div style={{ fontFamily: dsF.display, fontSize: 12.5, fontWeight: 800, color: TEMA.texto }}>Pendientes de hoy</div>
-                <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 10, fontWeight: 600, cursor: "pointer" }}>Equipo →</button>
-              </div>
-              {!datos.sesionHoy ? (
-                <div style={{ color: TEMA.textoMuted, fontSize: 11.5, padding: "6px 0" }}>No hay sesión publicada para hoy.</div>
-              ) : datos.pendientesHoy.length === 0 ? (
-                <div style={{ color: ds.success, fontSize: 11.5, padding: "6px 0" }}>Todos han registrado hoy.</div>
-              ) : (
-                <div style={{ maxHeight: LISTA_MOVIL_MAX_ALTO, overflowY: "auto", marginTop: 2 }}>
-                  {datos.pendientesHoy.map((p) => (
-                    <FilaPendienteReal key={p.id} jugador={p} gruposById={datos.gruposById} onOpenHistory={onOpenHistory} compact />
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </PantallaBase>
-  );
-}
 
 // Fechas auxiliares para las métricas semanales del dashboard de
 // escritorio: aquí "semana" SÍ es la semana natural (lunes a domingo) que
@@ -4340,8 +4247,424 @@ function labelMes(mesRef) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
+// ---------- CARTERA DE JUGADORES + INICIO (bandeja de atención) ----------
+// Un único cálculo compartido por Inicio, la lista de Usuarios y la ficha:
+// para cada jugador activo, cómo va (adherencia 4 semanas, última actividad,
+// CMJ, rendimiento) y qué requiere atención. Todo sale de datos que ya
+// existen; no se guarda nada nuevo.
+const SEV_ALERTA = { 3: { color: ds.danger, label: "Urgente" }, 2: { color: ds.warning, label: "Atención" }, 1: { color: ds.inkMuted, label: "Aviso" } };
+const ESTADO_JUGADOR_META = {
+  atencion: { label: "Atención", color: ds.warning },
+  aldia: { label: "Al día", color: ds.success },
+  sinplan: { label: "Sin plan", color: ds.inkMuted },
+};
+
+// Molestias que han indicado los jugadores en las últimas dos semanas. Tolerante:
+// si la tabla "molestias" no existe todavía, devuelve una lista vacía.
+function useMolestiasRecientes() {
+  const [rows, setRows] = useState(() => sharedDataCache.get("molestias_rec") || null);
+  useEffect(() => {
+    if (rows !== null) return undefined;
+    let off = false;
+    (async () => {
+      let lista = [];
+      try {
+        const { data, error } = await supabase.from("molestias").select("*").gte("fecha", sumarDiasFecha(todayStr(), -13));
+        lista = error ? [] : data || [];
+      } catch (e) {
+        lista = [];
+      }
+      sharedDataCache.set("molestias_rec", lista);
+      if (!off) setRows(lista);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return rows || [];
+}
+
+function useCarteraEntrenador() {
+  const datos = useDatosDashboardEntrenador();
+  const [playersAll, , playersLoaded] = usePlayers();
+  const { items: hist, loaded: histLoaded } = useEquipoHistory();
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
+  const [solicitudes, , solLoaded] = useEntityList("solicitudesSesion", { estado: "pendiente" });
+  const estadoCmj = useEstadoCmjEquipo(playersAll);
+  const molestias = useMolestiasRecientes();
+  if (!datos.loaded || !playersLoaded || !histLoaded || !progLoaded) return { loaded: false };
+
+  const hoy = todayStr();
+  const manana = sumarDiasFecha(hoy, 1);
+  const lunes = inicioSemanaCalendario(hoy);
+  const desde28 = sumarDiasFecha(hoy, -27);
+  const desde14 = sumarDiasFecha(hoy, -13);
+  const activos = datos.activos;
+  const hechas = tareasHechasPorJugadorFecha(hist);
+  const fraccion = crearFraccionCumplida(tareasProg);
+
+  const met = new Map();
+  activos.forEach((p) => met.set(p.id, { asig28: 0, cump28: 0, asigSem: 0, cumpSem: 0, asig14: 0, ultima: null }));
+  sesiones
+    .filter((s) => s.enviada)
+    .forEach((s) => {
+      const destino = destinatariosEfectivosSesion(s, activos);
+      (s.fechas || []).forEach((f) => {
+        if (f < desde28 || f > hoy) return;
+        destino.forEach((id) => {
+          const r = met.get(id);
+          if (!r) return;
+          const fr = fraccion(s.id, f, hechas.get(`${id}::${f}`), id);
+          if (f === hoy && fr <= 0) return; // hoy todavía puede hacerla
+          r.asig28 += 1;
+          r.cump28 += fr;
+          if (f >= lunes) {
+            r.asigSem += 1;
+            r.cumpSem += fr;
+          }
+          if (f >= desde14) r.asig14 += 1;
+        });
+      });
+    });
+  hist.forEach((it) => {
+    if (!it.done) return;
+    const r = met.get(it.jugadorId);
+    if (r && (!r.ultima || it.date > r.ultima)) r.ultima = it.date;
+  });
+  const variacionPorJugador = new Map((datos.variaciones || []).map((v) => [v.jugador.id, v]));
+
+  // ---- Alertas ----
+  const alertas = [];
+  const porJugador = new Map();
+  const nuevaAlerta = (a) => {
+    alertas.push(a);
+    if (a.jugadorId) {
+      if (!porJugador.has(a.jugadorId)) porJugador.set(a.jugadorId, []);
+      porJugador.get(a.jugadorId).push(a);
+    }
+  };
+  const fmtF = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+  activos.forEach((p) => {
+    const r = met.get(p.id);
+    const cmj = estadoCmj && estadoCmj.get ? estadoCmj.get(p.id) : null;
+    if (cmj && (cmj.status === "red" || cmj.status === "amber")) {
+      nuevaAlerta({
+        id: `cmj-${p.id}`,
+        sev: cmj.status === "red" ? 3 : 2,
+        tipo: "cmj",
+        jugadorId: p.id,
+        titulo: `${p.name} · CMJ ${cmj.status === "red" ? "en rojo" : "a vigilar"}`,
+        detalle: `Último test ${cmj.fechaTest ? fmtF(cmj.fechaTest) : "—"}. Revisa la carga de su próxima sesión.`,
+        acciones: [{ label: "Ver CMJ", tipo: "ficha", pestana: "cmj" }, { label: "Planificar", tipo: "cal" }],
+      });
+    }
+    const ultimaMol = molestias
+      .filter((m) => m.jugador_id === p.id && m.fecha >= sumarDiasFecha(hoy, -3) && Number(m.valor) >= 5)
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
+    if (ultimaMol) {
+      const val = Number(ultimaMol.valor);
+      const cuando = ultimaMol.fecha === hoy ? "hoy" : ultimaMol.fecha === sumarDiasFecha(hoy, -1) ? "ayer" : `el ${fmtF(ultimaMol.fecha)}`;
+      nuevaAlerta({
+        id: `mol-${p.id}`,
+        sev: val >= 7 ? 3 : 2,
+        tipo: "molestia",
+        jugadorId: p.id,
+        titulo: `${p.name} · molestia ${val}/10${ultimaMol.zona ? ` en ${String(ultimaMol.zona).toLowerCase()}` : ""}`,
+        detalle: `Indicada ${cuando} al enviar su sesión. Valora ajustar su próxima sesión.`,
+        acciones: [{ label: "Planificar", tipo: "cal" }, { label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    }
+    const v = variacionPorJugador.get(p.id);
+    if (v && v.pct <= -8) {
+      nuevaAlerta({
+        id: `e1rm-${p.id}`,
+        sev: v.pct <= -12 ? 3 : 2,
+        tipo: "rendimiento",
+        jugadorId: p.id,
+        titulo: `${p.name} · rendimiento a la baja (${Math.round(v.pct)} %)`,
+        detalle: v.peor ? `Lo que más baja: ${v.peor.nombre} (${Math.round(v.peor.pct)} %) frente a su nivel habitual.` : "Frente a su nivel habitual de esta semana.",
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "progreso" }],
+      });
+    }
+    const diasSin = r.ultima ? diasEntreFechas(r.ultima, hoy) : null;
+    if (r.asig14 >= 2 && (diasSin === null || diasSin >= 5)) {
+      nuevaAlerta({
+        id: `inactivo-${p.id}`,
+        sev: 2,
+        tipo: "inactivo",
+        jugadorId: p.id,
+        titulo: `${p.name} · sin registrar ${diasSin === null ? "ninguna sesión" : `desde hace ${diasSin} días`}`,
+        detalle: `Tenía ${r.asig14} sesiones asignadas en las últimas dos semanas.`,
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    } else if (r.asig28 >= 4 && r.cump28 / r.asig28 < 0.6) {
+      nuevaAlerta({
+        id: `adh-${p.id}`,
+        sev: r.cump28 / r.asig28 < 0.4 ? 2 : 1,
+        tipo: "adherencia",
+        jugadorId: p.id,
+        titulo: `${p.name} · adherencia ${Math.round((r.cump28 / r.asig28) * 100)} %`,
+        detalle: "En las últimas 4 semanas cumple menos de lo planificado.",
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    }
+  });
+  // Del entrenador (no de un jugador)
+  sesiones
+    .filter((s) => !s.enviada && (s.tareas === undefined || true))
+    .forEach((s) => {
+      (s.fechas || []).forEach((f) => {
+        if (f !== hoy && f !== manana) return;
+        nuevaAlerta({
+          id: `borrador-${s.id}-${f}`,
+          sev: f === hoy ? 3 : 2,
+          tipo: "borrador",
+          titulo: `Borrador sin publicar para ${f === hoy ? "hoy" : "mañana"}`,
+          detalle: `${s.nombre || "Sesión sin nombre"} · nadie la verá hasta que la publiques.`,
+          acciones: [{ label: "Abrir calendario", tipo: "cal" }],
+        });
+      });
+    });
+  if (solLoaded) {
+    solicitudes.forEach((sol) => {
+      const p = datos.playersById.get(sol.jugador_id);
+      nuevaAlerta({
+        id: `sol-${sol.id}`,
+        sev: 2,
+        tipo: "solicitud",
+        jugadorId: sol.jugador_id,
+        titulo: `${p ? p.name : "Un jugador"} pide sesión${sol.fecha ? ` para el ${fmtF(sol.fecha)}` : ""}`,
+        detalle: sol.nota ? `“${sol.nota}”` : "Pendiente de respuesta en el calendario.",
+        acciones: [{ label: "Responder", tipo: "cal", scopeJugador: true }],
+      });
+    });
+  }
+  const hayAlgoProximo = sesiones.some((s) => (s.fechas || []).some((f) => f >= hoy && f <= sumarDiasFecha(hoy, 2)));
+  if (!hayAlgoProximo) {
+    nuevaAlerta({ id: "vacio-2d", sev: 1, tipo: "vacio", titulo: "No hay nada planificado en los próximos 2 días", detalle: "Planifica la semana desde el calendario.", acciones: [{ label: "Planificar semana", tipo: "cal" }] });
+  }
+  alertas.sort((a, b) => b.sev - a.sev);
+
+  // ---- Estado por jugador ----
+  const filas = new Map();
+  activos.forEach((p) => {
+    const r = met.get(p.id);
+    const al = porJugador.get(p.id) || [];
+    const cmj = estadoCmj && estadoCmj.get ? estadoCmj.get(p.id) : null;
+    const estado = al.some((a) => a.sev >= 2) ? "atencion" : r.asig28 === 0 && r.asig14 === 0 ? "sinplan" : "aldia";
+    filas.set(p.id, {
+      estado,
+      adh28: r.asig28 ? Math.round((r.cump28 / r.asig28) * 100) : null,
+      adhSem: r.asigSem ? Math.round((r.cumpSem / r.asigSem) * 100) : null,
+      ultima: r.ultima,
+      diasSin: r.ultima ? diasEntreFechas(r.ultima, hoy) : null,
+      cmj: cmj ? cmj.status : null,
+      variacion: variacionPorJugador.has(p.id) ? variacionPorJugador.get(p.id).pct : null,
+      alertas: al,
+    });
+  });
+
+  // ---- Hoy ----
+  const sesionesHoy = sesiones
+    .filter((s) => s.enviada && (s.fechas || []).includes(hoy))
+    .map((s) => {
+      const ids = destinatariosEfectivosSesion(s, activos);
+      const completos = [];
+      const parciales = [];
+      const ninguno = [];
+      ids.forEach((id) => {
+        const p = datos.playersById.get(id);
+        if (!p || p.estado !== "activo") return;
+        const fr = fraccion(s.id, hoy, hechas.get(`${id}::${hoy}`), id);
+        if (fr >= 0.999) completos.push(p);
+        else if (fr > 0) parciales.push(p);
+        else ninguno.push(p);
+      });
+      return { sesion: s, completos, parciales, ninguno, total: completos.length + parciales.length + ninguno.length };
+    });
+
+  // ---- Semana ----
+  const semana = Array.from({ length: 7 }, (_, i) => {
+    const f = sumarDiasFecha(lunes, i);
+    const env = sesiones.filter((s) => s.enviada && (s.fechas || []).includes(f));
+    const bor = sesiones.filter((s) => !s.enviada && (s.fechas || []).includes(f));
+    return { fecha: f, dow: ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][i], num: Number(f.slice(8)), env: env.length, bor: bor.length, esHoy: f === hoy, pasado: f < hoy };
+  });
+
+  const cumplSem = (() => {
+    let a = 0;
+    let c = 0;
+    met.forEach((r) => {
+      a += r.asigSem;
+      c += r.cumpSem;
+    });
+    return a ? Math.round((c / a) * 100) : null;
+  })();
+
+  return { loaded: true, activos, playersById: datos.playersById, grupos: datos.grupos, gruposById: datos.gruposById, filas, alertas, sesionesHoy, semana, cumplSem, hoy };
+}
+
+function PuntoSev({ sev }) {
+  return <span style={{ width: 9, height: 9, borderRadius: "50%", background: (SEV_ALERTA[sev] || SEV_ALERTA[1]).color, flexShrink: 0, marginTop: 5 }} />;
+}
+
+// Una fila de la bandeja: qué pasa + botones para resolverlo.
+function FilaAlertaReal({ alerta, onAccion }) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "flex-start", padding: "11px 0", borderTop: `1px solid ${ds.border}`, flexWrap: "wrap" }}>
+      <PuntoSev sev={alerta.sev} />
+      <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+        <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{alerta.titulo}</div>
+        <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>{alerta.detalle}</div>
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {(alerta.acciones || []).map((a, i) => (
+          <button key={a.label} type="button" onClick={() => onAccion(alerta, a)} style={{ fontSize: 12, fontWeight: 700, borderRadius: 8, padding: "6px 11px", cursor: "pointer", border: `1px solid ${i === 0 ? ds.accent : ds.border}`, background: i === 0 ? ds.accentSubtle : "transparent", color: i === 0 ? ds.accent : ds.inkSecondary }}>
+            {a.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
+  const c = useCarteraEntrenador();
+  const ancho = useAnchoVentana();
+  const pendientesCount = useSolicitudesPendientesCount();
+  const [verTodas, setVerTodas] = useState(false);
+  const [abiertas, setAbiertas] = useState({});
+  const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
+
+  const accion = (alerta, a) => {
+    const jugador = alerta.jugadorId ? c.playersById.get(alerta.jugadorId) : null;
+    if (a.tipo === "ficha" && jugador) onOpenHistory?.(jugador, a.pestana);
+    else if (a.tipo === "cal") onAbrirModulo(a.scopeJugador && alerta.jugadorId ? `calendario:j:${alerta.jugadorId}` : jugador && alerta.tipo !== "borrador" ? `calendario:j:${jugador.id}` : "calendario");
+    else if (a.tipo === "fatiga") onAbrirModulo("fatiga");
+  };
+
+  const cuerpo = !c.loaded ? (
+    <LoadingBlock />
+  ) : (
+    <div>
+      <div style={{ marginBottom: 18 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4, textTransform: "uppercase" }}>{hoyLabel}</div>
+        <h1 style={{ fontFamily: dsF.display, fontSize: 26, fontWeight: 700, margin: 0 }}>Inicio</h1>
+      </div>
+
+      {/* HOY */}
+      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Hoy</b>
+          <span style={{ flex: 1 }} />
+          <button type="button" onClick={() => onAbrirModulo("calendario")} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer" }}>Calendario →</button>
+        </div>
+        {c.sesionesHoy.length === 0 && (
+          <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "6px 0 2px" }}>
+            No hay ninguna sesión publicada para hoy.
+            <button type="button" onClick={() => onAbrirModulo("calendario")} style={{ marginLeft: 8, fontSize: 12.5, fontWeight: 700, color: ds.accent, background: "transparent", border: "none", cursor: "pointer" }}>Planificar →</button>
+          </div>
+        )}
+        {c.sesionesHoy.map(({ sesion, completos, parciales, ninguno, total }) => {
+          const pct = total ? Math.round(((completos.length + parciales.length * 0.5) / total) * 100) : 0;
+          const falta = [...ninguno, ...parciales];
+          const abierta = !!abiertas[sesion.id];
+          return (
+            <div key={sesion.id} style={{ padding: "10px 0", borderTop: `1px solid ${ds.border}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 700, color: ds.accent, fontSize: 14, flex: "1 1 200px", minWidth: 0 }}>{sesion.nombre || sesion.objetivo || "Sesión de hoy"}{sesion.md ? <span style={{ marginLeft: 8, fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>{sesion.md}</span> : null}</span>
+                <div style={{ flex: "0 1 150px", minWidth: 80, height: 6, borderRadius: 999, background: ds.border, overflow: "hidden", display: "flex" }}>
+                  <div style={{ width: `${total ? (completos.length / total) * 100 : 0}%`, background: ds.success }} />
+                  <div style={{ width: `${total ? (parciales.length / total) * 100 : 0}%`, background: `${ds.success}66` }} />
+                </div>
+                <span style={{ fontSize: 12.5, fontWeight: 700 }}>{completos.length}/{total} <span style={{ color: ds.inkMuted, fontWeight: 500 }}>· {pct} %</span></span>
+                {falta.length > 0 && (
+                  <button type="button" onClick={() => setAbiertas((a) => ({ ...a, [sesion.id]: !a[sesion.id] }))} style={{ fontSize: 12, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", fontWeight: 600, padding: 0 }}>
+                    {abierta ? "Ocultar" : `Falta registrar (${falta.length})`}
+                  </button>
+                )}
+              </div>
+              {abierta && (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                  {falta.map((p) => (
+                    <button key={p.id} type="button" onClick={() => onOpenHistory?.(p)} style={{ fontSize: 11.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, background: "transparent", borderRadius: 999, padding: "2px 10px", cursor: "pointer" }}>
+                      {p.name}{parciales.includes(p) ? " · parcial" : ""}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* REQUIERE TU ATENCIÓN */}
+      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Requiere tu atención</b>
+          {c.alertas.length > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 800, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "1px 8px" }}>{c.alertas.length}</span>}
+        </div>
+        {c.alertas.length === 0 && <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 0 2px" }}>Nada pendiente. Todo el equipo al día.</div>}
+        {(verTodas ? c.alertas : c.alertas.slice(0, 6)).map((a) => (
+          <FilaAlertaReal key={a.id} alerta={a} onAccion={accion} />
+        ))}
+        {c.alertas.length > 6 && (
+          <button type="button" onClick={() => setVerTodas((v) => !v)} style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+            {verTodas ? "Ver menos" : `Ver las ${c.alertas.length - 6} restantes`}
+          </button>
+        )}
+      </div>
+
+      {/* ESTA SEMANA */}
+      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Esta semana</b>
+          {c.cumplSem !== null && <span style={{ fontSize: 12.5, color: ds.inkSecondary }}>{c.cumplSem} % de cumplimiento hasta hoy</span>}
+          <span style={{ flex: 1 }} />
+          <button type="button" onClick={() => onAbrirModulo("calendario")} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer" }}>Abrir →</button>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
+          {c.semana.map((d) => (
+            <button key={d.fecha} type="button" onClick={() => onAbrirModulo("calendario")} style={{ background: d.esHoy ? ds.accentSubtle : ds.surfaceRaised, border: `1px solid ${d.esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 12, padding: "8px 4px", cursor: "pointer", color: ds.ink, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+              <span style={{ fontSize: 10.5, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase" }}>{d.dow} {d.num}</span>
+              <span style={{ fontSize: 12, fontWeight: 700, color: d.env ? ds.ink : ds.inkMuted }}>{d.env ? `${d.env} ses.` : "—"}</span>
+              <span style={{ fontSize: 10.5, color: d.bor ? ds.warning : "transparent" }}>{d.bor ? `${d.bor} borrador` : "·"}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+
+  if (ancho >= 1000) {
+    return (
+      <PantallaEntrenadorAncha activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+        {cuerpo}
+      </PantallaEntrenadorAncha>
+    );
+  }
+  return (
+    <PantallaBase rol="entrenador" maxWidth={560}>
+      <div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 7, marginBottom: 16 }}>
+          {MODULOS_DASHBOARD.map((m) => (
+            <button key={m.id} onClick={() => onAbrirModulo(m.id)} style={{ position: "relative", display: "flex", flexDirection: "column", alignItems: "center", gap: 5, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 10, padding: "9px 4px", cursor: "pointer", color: ds.ink }}>
+              {m.id === "calendario" && pendientesCount > 0 && <span style={{ position: "absolute", top: 4, right: 4, background: ds.warning, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 8.5, fontWeight: 800, borderRadius: 999, padding: "0 5px" }}>{pendientesCount}</span>}
+              <div style={{ color: ds.inkMuted }}><IconoModulo tipo={m.icono} /></div>
+              <div style={{ fontSize: 9.5, fontWeight: 600, textAlign: "center", lineHeight: 1.15 }}>{m.nombre}</div>
+            </button>
+          ))}
+        </div>
+        {cuerpo}
+        <button type="button" onClick={onCerrarSesion} style={{ marginTop: 6, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Cerrar sesión</button>
+      </div>
+    </PantallaBase>
+  );
+}
+
 function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
-  const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Dashboard", icono: "grid" }, ...MODULOS_DASHBOARD];
+  const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Inicio", icono: "grid" }, ...MODULOS_DASHBOARD];
   // Aviso de peticiones de sesión sin mirar (Calendario → jugador pide un
   // día) — solo dentro de la app, un badge aquí es lo más parecido a una
   // notificación que hay sin infraestructura de push/email.
@@ -4396,7 +4719,7 @@ function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWid
       <PantallaBase rol="entrenador" maxWidth={maxWidthCompacto}>
         <div>
           <button onClick={() => onAbrirModulo("dashboard")} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-            ← Volver a Dashboard
+            ← Volver a Inicio
           </button>
           {children}
         </div>
@@ -4624,134 +4947,6 @@ function useDatosDashboardEntrenador() {
   };
 }
 
-function DashboardEntrenadorSidebarReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
-  const datos = useDatosDashboardEntrenador();
-  if (!datos.loaded) return <LoadingBlock />;
-  const {
-    activos,
-    playersById,
-    grupos,
-    independientes,
-    gruposById,
-    hoyLabel,
-    borradores,
-    heroTitulo,
-    heroAccionLabel,
-    heroAccionModulo,
-    ocurrenciasSemana,
-    ocurrenciasRealizadas,
-    adherenciaActual,
-    cumplidasSemana,
-    asignacionesSemana,
-    semanaDias,
-    jugadoresSinTrabajo,
-    variaciones,
-    atencionSemaforo,
-    sesionHoy,
-    pendientesHoy,
-  } = datos;
-
-  return (
-    <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
-      <GlobalStyles />
-      <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
-
-      {/* ---------- Contenido: columna de alto fijo, nada de scroll de
-          página — solo el bloque de comparativas al final hace scroll
-          propio como red de seguridad si el contenido no cupiera. ---------- */}
-      <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", minHeight: 0, padding: "20px 28px 20px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12, gap: 16, flexShrink: 0 }}>
-          <div style={{ flex: 1, maxWidth: 320, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "7px 12px", color: ds.inkMuted, fontSize: 12.5 }}>
-            🔍 Buscar jugador, ejercicio...
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14, flexShrink: 0 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-              {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
-            </span>
-            <div style={{ width: 30, height: 30, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary }}><Bell size={13} /></div>
-            <DsAvatar size={30}>D</DsAvatar>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, marginBottom: 12, flexWrap: "wrap", flexShrink: 0 }}>
-          <div>
-            <h1 style={{ fontFamily: dsF.display, fontSize: 20, fontWeight: 800, margin: "0 0 2px", letterSpacing: "-0.01em" }}>Buenas, David</h1>
-            <div style={{ fontSize: 11, color: ds.inkMuted, textTransform: "capitalize" }}>
-              {hoyLabel}
-              {borradores > 0 ? ` · ${borradores} ${borradores === 1 ? "borrador pendiente" : "borradores pendientes"}` : ""}
-            </div>
-          </div>
-          <button
-            onClick={() => onAbrirModulo(heroAccionModulo)}
-            title={heroTitulo}
-            style={{ display: "flex", alignItems: "center", gap: 8, background: `linear-gradient(135deg, ${ds.accent}, #D89A1F)`, color: ds.accentInk, fontFamily: dsF.sans, fontWeight: 700, fontSize: 12.5, padding: "9px 16px", borderRadius: dsR.md, border: "none", cursor: "pointer", boxShadow: dsSh.accentGlow, whiteSpace: "nowrap" }}
-          >
-            {heroAccionLabel}
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 12, flexShrink: 0 }}>
-          <MiniStat icon={<User size={12} />} label="Usuarios activos" value={activos.length} />
-          <MiniStat icon={<ClipboardList size={12} />} label="Grupos" value={grupos.length} sub={`${independientes} indep.`} />
-          <MiniStat icon={<Calendar size={12} />} label="Sesiones / semana" value={ocurrenciasSemana} sub={`${ocurrenciasRealizadas} hechas`} />
-          <MiniStat
-            icon={<TrendingUp size={12} />}
-            label="Adherencia · esta semana"
-            value={adherenciaActual != null ? `${adherenciaActual}%` : "—"}
-            sub={asignacionesSemana.length ? `${cumplidasSemana} / ${asignacionesSemana.length} hechas` : "sin datos aún"}
-            accent
-          />
-        </div>
-
-        <PanelSemanaDashboardReal onAbrirModulo={onAbrirModulo} borradores={borradores} semanaDias={semanaDias} jugadoresSinTrabajo={jugadoresSinTrabajo} />
-
-        <PanelFatigaDashboardReal onAbrirModulo={onAbrirModulo} onOpenHistory={onOpenHistory} playersById={playersById} />
-
-        {/* Cada panel tiene AHORA su propio scroll interno (overflowY en el
-            panel, no solo en el contenedor) — así, al haber mucho más de 3
-            jugadores con dato real, la lista se ve entera (sin vaciar el
-            cajón ni truncar a 3) sin desbordar el borde de la tarjeta. */}
-        <div style={{ flex: "1 1 auto", minHeight: 0, display: "grid", gridTemplateColumns: "1.5fr 1fr", gridTemplateRows: "minmax(0, 1fr)", gap: 16 }}>
-          <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2, flexShrink: 0 }}>
-              <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Quién necesita atención</div>
-              <button onClick={() => onAbrirModulo("historial")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver historial →</button>
-            </div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>Fuerza estimada (e1RM) esta semana vs. su nivel habitual</div>
-            {variaciones.length === 0 ? (
-              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Todavía no hay ejercicios repetidos esta semana con historial previo para comparar.</div>
-            ) : (
-              <ListaExpandibleDashboardReal
-                items={variaciones}
-                renderItem={(v) => <FilaAtencionReal key={v.jugador.id} variacion={v} semaforo={atencionSemaforo(v.pct)} onOpenHistory={onOpenHistory} />}
-              />
-            )}
-          </div>
-
-          <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 16, display: "flex", flexDirection: "column", minHeight: 0 }}>
-            <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 2, flexShrink: 0 }}>
-              <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800 }}>Pendientes de hoy</div>
-              <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer" }}>Ver equipo →</button>
-            </div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, marginBottom: 10, flexShrink: 0 }}>
-              {sesionHoy ? "Aún sin registrar la sesión de hoy" : "No hay sesión publicada para hoy"}
-            </div>
-            {!sesionHoy ? (
-              <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "10px 0" }}>Publica la sesión de hoy para ver aquí quién falta por registrarla.</div>
-            ) : pendientesHoy.length === 0 ? (
-              <div style={{ color: ds.success, fontSize: 12.5, padding: "10px 0" }}>Todos los jugadores activos ya han registrado hoy.</div>
-            ) : (
-              <ListaExpandibleDashboardReal
-                items={pendientesHoy}
-                renderItem={(p) => <FilaPendienteReal key={p.id} jugador={p} gruposById={gruposById} onOpenHistory={onOpenHistory} />}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // Tile compacto de estadística: icono + etiqueta arriba, valor + sub abajo,
 // cada línea con su propio elipsis — así una etiqueta larga en un tile
@@ -4796,115 +4991,7 @@ function MiniStat({ icon, label, value, sub, accent, style }) {
   );
 }
 
-// Los mismos 4 datos que MiniStat, pero como una única tira de 4 columnas
-// con separadores en vez de 4 cajas con borde propio — para el Dashboard
-// móvil, donde 4 tarjetas independientes son demasiado "ruido" visual para
-// lo poco que aportan cada una por separado.
-function TiraStatsCompactaReal({ datos }) {
-  const items = [
-    { icon: <User size={11} />, label: "Activos", value: datos.activos.length },
-    { icon: <ClipboardList size={11} />, label: "Grupos", value: datos.grupos.length },
-    { icon: <Calendar size={11} />, label: "Sesión/sem", value: datos.ocurrenciasSemana },
-    { icon: <TrendingUp size={11} />, label: "Adherencia", value: datos.adherenciaActual != null ? `${datos.adherenciaActual}%` : "—" },
-  ];
-  return (
-    <div style={{ display: "flex", alignItems: "stretch", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.lg, padding: "9px 2px", marginBottom: 12, flexShrink: 0 }}>
-      {items.map((it, i) => (
-        <React.Fragment key={it.label}>
-          {i > 0 && <div style={{ width: 1, background: ds.border, flexShrink: 0 }} />}
-          <div style={{ flex: 1, minWidth: 0, textAlign: "center", padding: "0 4px" }}>
-            <div style={{ display: "flex", justifyContent: "center", color: ds.inkMuted, marginBottom: 3 }}>{it.icon}</div>
-            <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 800, color: ds.ink, lineHeight: 1 }}>{it.value}</div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 7.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", marginTop: 3, whiteSpace: "nowrap" }}>{it.label}</div>
-          </div>
-        </React.Fragment>
-      ))}
-    </div>
-  );
-}
 
-// "Tu semana": tira de 7 días (L-D, semana de calendario en curso) + dos
-// alert-chips, tal y como pide el mockup — ya con dato real: el estado de
-// cada día viene de `semanaDias` (useDatosDashboardEntrenador, derivado de
-// `sesiones`) y las dos cifras de las chips son "borradores" (ya se
-// calculaba) y "jugadoresSinTrabajo" (activos sin ningún destino esta
-// semana, enviado o borrador). El mockup contempla un cuarto estado de
-// punto invisible ("dot--none", día sin dato determinable); no se usa aquí
-// porque con `sesiones` siempre se puede decidir honestamente si un día
-// está "ok", "pending" o "empty" — ver el comentario en `semanaDias` dentro
-// del hook. El enlace "Calendario →" del mockup no tiene módulo dedicado
-// todavía en la app, así que apunta a "Programación" (sesión de hoy y
-// próximas), el módulo más cercano — igual que el resto de accesos de este
-// panel, nunca un href muerto.
-function PanelSemanaDashboardReal({ onAbrirModulo, compact, borradores, semanaDias, jugadoresSinTrabajo }) {
-  const nSinDisenar = borradores || 0;
-  const nSinTrabajo = jugadoresSinTrabajo ? jugadoresSinTrabajo.length : 0;
-  const colorDot = (estado) => (estado === "ok" ? ds.success : estado === "pending" ? ds.warning : ds.inkMuted);
-  const opacidadDot = (estado) => (estado === "empty" ? 0.45 : 1);
-
-  return (
-    <div
-      style={{
-        flexShrink: 0,
-        marginBottom: 12,
-        display: "flex",
-        alignItems: "center",
-        gap: compact ? 10 : 16,
-        background: ds.surfaceRaised,
-        border: `1px solid ${ds.borderSoft}`,
-        borderRadius: compact ? dsR.lg : dsR.xl,
-        padding: compact ? "9px 12px" : "10px 16px",
-        flexWrap: compact ? "wrap" : "nowrap",
-      }}
-    >
-      <div style={{ display: "flex", gap: compact ? 3 : 5, flexShrink: 0 }}>
-        {(semanaDias || []).map((d) => (
-          <div
-            key={d.fecha}
-            title={d.fecha}
-            style={{
-              width: compact ? 24 : 34,
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              gap: 4,
-              padding: "4px 1px",
-              borderRadius: dsR.sm,
-              background: d.isToday ? ds.accentSubtle : "transparent",
-            }}
-          >
-            <div style={{ fontFamily: dsF.mono, fontSize: compact ? 7.5 : 8.5, fontWeight: 600, color: ds.inkMuted, textTransform: "uppercase" }}>{d.dow}</div>
-            <div style={{ fontFamily: dsF.display, fontSize: compact ? 10.5 : 12, fontWeight: 700, color: ds.ink }}>{d.dayNum}</div>
-            <span style={{ width: 5, height: 5, borderRadius: "50%", background: colorDot(d.estado), opacity: opacidadDot(d.estado), flexShrink: 0 }} />
-          </div>
-        ))}
-      </div>
-
-      {!compact && <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0, margin: "2px 0" }} />}
-
-      <div style={{ display: "flex", gap: compact ? 14 : 20, flex: 1, alignItems: "center", flexWrap: "wrap", minWidth: compact ? "100%" : 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: compact ? 10.5 : 11.5, fontWeight: 600, color: ds.warning, whiteSpace: "nowrap" }}>
-          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800 }}>{nSinDisenar}</span>
-          sesiones sin diseñar
-          <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.inkSecondary, textDecoration: "underline", textDecorationColor: ds.border, fontWeight: 600, fontSize: compact ? 9.5 : 10.5 }}>
-            Terminar →
-          </button>
-        </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: compact ? 10.5 : 11.5, fontWeight: 600, color: nSinTrabajo > 0 ? ds.danger : ds.inkMuted, whiteSpace: "nowrap" }}>
-          <span style={{ fontFamily: dsF.display, fontSize: compact ? 13 : 15, fontWeight: 800 }}>{nSinTrabajo}</span>
-          jugadores sin trabajo
-          <button onClick={() => onAbrirModulo("roster")} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.inkSecondary, textDecoration: "underline", textDecorationColor: ds.border, fontWeight: 600, fontSize: compact ? 9.5 : 10.5 }}>
-            Ver →
-          </button>
-        </div>
-      </div>
-
-      <button onClick={() => onAbrirModulo("programacion")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: compact ? 10.5 : 11, fontWeight: 600, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" }}>
-        Calendario →
-      </button>
-    </div>
-  );
-}
 
 const SEM_COLOR_DASHBOARD = { red: ds.danger, amber: ds.warning, green: ds.success };
 
@@ -4965,360 +5052,9 @@ function ListaCambiosEjerciciosReal({ cambios, compact }) {
   );
 }
 
-function FilaAtencionReal({ variacion, semaforo, onOpenHistory, compact }) {
-  const { jugador, pct, pctMedia, usaPeor, serieReciente, nombresEjercicios, tareasCount, nEjercicios, peor, cambios } = variacion;
-  const metaTareas = tareasCount ? `${(nombresEjercicios || []).slice(0, 2).join(", ")}${(nombresEjercicios || []).length > 2 ? "…" : ""} · ${tareasCount} tarea${tareasCount === 1 ? "" : "s"}` : "";
-  const positivo = pct >= 0;
-  const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
-  const avatarSize = compact ? 18 : 22;
-  const pad = compact ? "5px 0" : "8px 0";
-  const fontSize = compact ? 11 : 11.5;
-  // Sparkline en ambas variantes: a 38x14 (desktop) / 30x12 (compact) cabe
-  // sin apretar la fila compact, que ya es más baja pero no tan estrecha
-  // como para tener que sacrificarlo — a diferencia del párrafo de detalle,
-  // que sí se omite en compact. Con <2 puntos reales, `sparklinePuntos`
-  // devuelve null y no se pinta nada (ni aquí ni en desktop).
-  const puntos = sparklinePuntos(serieReciente);
-  const sparkW = compact ? 30 : 38;
-  const sparkH = compact ? 12 : 14;
 
-  const fila = (
-    <summary style={{ display: "flex", alignItems: "center", gap: compact ? 7 : 9, padding: pad }}>
-      <span style={{ width: 6, height: 6, borderRadius: "50%", background: SEM_COLOR_DASHBOARD[semaforo], flexShrink: 0 }} />
-      <DsAvatar size={avatarSize} style={{ background: ds.chart2, fontSize: avatarSize * 0.43, flexShrink: 0 }}>{iniciales}</DsAvatar>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {onOpenHistory ? (
-          <button
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onOpenHistory(jugador);
-            }}
-            style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "100%" }}
-          >
-            {jugador.name}
-          </button>
-        ) : (
-          <div style={{ fontSize, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
-        )}
-      </div>
-      {puntos && (
-        <svg width={sparkW} height={sparkH} viewBox="0 0 52 20" style={{ flexShrink: 0 }}>
-          <polyline points={puntos} fill="none" stroke={SEM_COLOR_DASHBOARD[semaforo]} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      )}
-      <span style={{ fontFamily: dsF.mono, fontSize: compact ? 10 : 10.5, fontWeight: 700, color: positivo ? ds.success : ds.danger, flexShrink: 0, minWidth: 34, textAlign: "right" }}>
-        {positivo ? "▲" : "▼"} {Math.abs(pct).toFixed(0)}%
-      </span>
-    </summary>
-  );
 
-  if (compact) {
-    return (
-      <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
-        {fila}
-        <div style={{ padding: "0 0 8px 15px" }}>
-          <ListaCambiosEjerciciosReal cambios={cambios} compact />
-        </div>
-      </details>
-    );
-  }
-  return (
-    <details className="ds-details-plain" style={{ borderBottom: `1px solid ${ds.border}` }}>
-      {fila}
-      <div style={{ padding: "0 0 10px 15px", fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5 }}>
-        <div style={{ marginBottom: 6 }}>
-          <ListaCambiosEjerciciosReal cambios={cambios} />
-        </div>
-        {metaTareas && <div style={{ marginBottom: 2 }}>{metaTareas}</div>}
-        {usaPeor ? (
-          <>
-            {peor.nombre} ha bajado un {Math.abs(peor.pct).toFixed(0)}% respecto a su nivel habitual (fuerza estimada, e1RM). La media de sus {nEjercicios} ejercicios es {pctMedia > 0 ? "+" : ""}
-            {pctMedia.toFixed(0)}%.
-          </>
-        ) : (
-          <>
-            Fuerza estimada (e1RM) {positivo ? "por encima" : "por debajo"} de su nivel habitual en {nEjercicios} ejercicio{nEjercicios === 1 ? "" : "s"} ({positivo ? "+" : ""}
-            {pct.toFixed(0)}%).
-            {peor && nEjercicios > 1 && peor.pct < -3 && (
-              <div style={{ marginTop: 2 }}>
-                Mayor descenso: {peor.nombre} ({peor.pct.toFixed(0)}%)
-              </div>
-            )}
-          </>
-        )}
-      </div>
-    </details>
-  );
-}
 
-// Lista de un panel del Dashboard (escritorio/iPad) con el mismo patrón que
-// el mockup: se ven directamente los primeros `limite` elementos y, si hay
-// más, un "Ver N más" nativo (<details>, sin JS aparte) los despliega — en
-// vez de meter todo en una caja con scroll interno desde el principio.
-// overflowY:auto se deja como red de seguridad si aun así no cupiera.
-function ListaExpandibleDashboardReal({ items, renderItem, limite = 5 }) {
-  const visibles = items.slice(0, limite);
-  const resto = items.slice(limite);
-  return (
-    <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", display: "flex", flexDirection: "column" }}>
-      <div>{visibles.map(renderItem)}</div>
-      {resto.length > 0 && (
-        <details className="ds-details-plain" style={{ marginTop: "auto", paddingTop: 6, flexShrink: 0 }}>
-          <summary style={{ cursor: "pointer", fontSize: 10.5, fontWeight: 600, color: ds.accent, listStyle: "none" }}>
-            Ver {resto.length} más
-          </summary>
-          <div>{resto.map(renderItem)}</div>
-        </details>
-      )}
-    </div>
-  );
-}
-
-// Fila de "Pendientes de hoy" — solo jugadores sin registro hoy; los que ya
-// registraron simplemente no aparecen en la lista. "compact": ver arriba.
-function FilaPendienteReal({ jugador, gruposById, onOpenHistory, compact }) {
-  const iniciales = (jugador.name || "?").split(" ").filter(Boolean).slice(0, 2).map((s) => s[0].toUpperCase()).join("") || "?";
-  const nombreGrupo = (jugador.gruposIds || []).map((id) => gruposById.get(id)).filter(Boolean)[0];
-  const avatarSize = compact ? 18 : 22;
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: compact ? 7 : 10, padding: compact ? "5px 0" : "8px 0", borderBottom: `1px solid ${ds.border}` }}>
-      <DsAvatar size={avatarSize} style={{ background: ds.chart3, fontSize: avatarSize * 0.43, flexShrink: 0 }}>{iniciales}</DsAvatar>
-      <div style={{ flex: 1, minWidth: 0, display: "flex", ...(compact ? { alignItems: "baseline", gap: 6 } : { flexDirection: "column" }) }}>
-        {onOpenHistory ? (
-          <button
-            onClick={() => onOpenHistory(jugador)}
-            style={{ display: compact ? "inline" : "block", background: "transparent", border: "none", padding: 0, cursor: "pointer", fontSize: compact ? 11 : 11.5, fontWeight: 600, color: ds.ink, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: compact ? "60%" : "100%" }}
-          >
-            {jugador.name}
-          </button>
-        ) : (
-          <div style={{ fontSize: compact ? 11 : 11.5, fontWeight: 600, color: ds.ink, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{jugador.name}</div>
-        )}
-        <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.03em", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{nombreGrupo || "Independiente"}</div>
-      </div>
-    </div>
-  );
-}
-
-// Control de fatiga del Dashboard: nada de medias de un dato individual
-// (eso era "información vacía"). En vez de eso, reutiliza el MISMO motor de
-// clasificación rojo/ámbar/verde/gris que ya usa Control de fatiga
-// (cmjBuildPlayers) y muestra la proporción del equipo en cada estado, más
-// quién en concreto está en rojo — mismo principio que "Quién necesita
-// atención".
-function PanelFatigaDashboardReal({ onAbrirModulo, onOpenHistory, playersById }) {
-  // Fase 2: registros de todo el equipo para etiquetar la carga de fuerza de
-  // la semana junto a los jugadores en rojo (ya está en caché por el Dashboard).
-  const { loaded: equipoFuerzaLoaded, items: equipoFuerza } = useEquipoHistory();
-  const { items: refsPanel } = useReferenciasFuerza(null, { todos: true });
-  const [saltos, setSaltos] = useState([]);
-  const [microciclos, setMicrociclos] = useState([]);
-  const [umbral, setUmbral] = useState(null);
-  const [loaded, setLoaded] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null), supabase.from("cmj_microciclos").select("*"), api.config("cmj_umbral")]).then(([saltosRes, microRes, umbralGuardado]) => {
-      if (cancelled) return;
-      if (!saltosRes.error) setSaltos((saltosRes.data || []).filter((s) => !s.excluido));
-      if (!microRes.error) setMicrociclos(microRes.data || []);
-      setUmbral(umbralGuardado || CMJ_UMBRAL_DEFECTO);
-      setLoaded(true);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  if (!loaded || !umbral) {
-    return <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: 14, marginBottom: 12, minHeight: 56, flexShrink: 0 }} />;
-  }
-
-  const filasParaMotor = saltos
-    .filter((s) => playersById.has(s.jugador_id))
-    .map((s) => ({
-      jugadorId: s.jugador_id,
-      nombre: playersById.get(s.jugador_id).name,
-      dateKey: s.fecha,
-      date: s.fecha_hora,
-      peso: s.peso,
-      hp0: s.hp0,
-      altura: s.altura,
-      fuerza: s.fuerza,
-      potencia: s.potencia,
-      velocidad: s.velocidad,
-      kineticsValid: s.kinetics_valid,
-      pesoValid: s.peso_valid,
-      hp0Valid: s.hp0_valid,
-    }));
-
-  const { players: builtPlayers } = cmjBuildPlayers(filasParaMotor, microciclos, umbral.ambarPct, umbral.rojoPct, umbral.individualizar, umbral.protocoloDesde);
-  const total = builtPlayers.length;
-
-  if (total === 0) {
-    return (
-      <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: "12px 16px", marginBottom: 12, flexShrink: 0, fontSize: 12, color: ds.inkMuted }}>
-        Aún no hay pruebas CMJ registradas para calcular el control de fatiga.
-      </div>
-    );
-  }
-
-  const enVerde = builtPlayers.filter((p) => p.combinedStatus === "green").length;
-  const enAmbar = builtPlayers.filter((p) => p.combinedStatus === "amber").length;
-  const enRojo = builtPlayers.filter((p) => p.combinedStatus === "red").length;
-  const jugadoresRojo = builtPlayers
-    .filter((p) => p.combinedStatus === "red")
-    .map((p) => playersById.get(p.jugadorId))
-    .filter(Boolean);
-  const pctVerde = Math.round((enVerde / total) * 100);
-
-  // Carga de fuerza de la semana en curso de cada jugador en rojo: el
-  // microciclo que contiene hoy o, si hoy cae entre dos, el último ya empezado.
-  const ventanasPanel = cmjVentanasMicrociclo(microciclos);
-  const hoyPanel = todayStr();
-  const microActualPanel = cmjMicroDeFecha(hoyPanel, ventanasPanel) || [...ventanasPanel].reverse().find((v) => v.desde <= hoyPanel) || null;
-  // Registros de fuerza atípicos pendientes de revisar, por jugador.
-  const pendientesRevisar = new Map();
-  if (equipoFuerzaLoaded) {
-    detectarRegistrosAtipicos(equipoFuerza).forEach(({ item }) => pendientesRevisar.set(item.jugadorId, (pendientesRevisar.get(item.jugadorId) || 0) + 1));
-  }
-  // Series de fuerza que ya ha registrado hoy: el CMJ llega después, así el
-  // entrenador ve si un jugador en rojo ya ha entrenado fuerza (y cuánto).
-  const seriesFuerzaHoy = (jugadorId) =>
-    equipoFuerzaLoaded
-      ? equipoFuerza
-          .filter((it) => it.jugadorId === jugadorId && it.done && it.bloque === "Fuerza" && it.date === hoyPanel)
-          .reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0)
-      : 0;
-  const etiquetaFuerzaJugador = (jugadorId) => {
-    if (!equipoFuerzaLoaded || !microActualPanel) return null;
-    const cargas = calcularCargaFuerzaPorMicro(
-      [...equipoFuerza, ...refsPanel].filter((it) => it.jugadorId === jugadorId),
-      ventanasPanel
-    );
-    return etiquetaCargaFuerza(cargas.find((c) => c.microId === microActualPanel.id));
-  };
-
-  // "Testados hoy" y "Última prueba" — igual que el resto del panel, salen
-  // del mismo array de saltos ya cargado (no hace falta ninguna consulta
-  // nueva): cuántos jugadores distintos tienen un salto fechado hoy, y cuándo
-  // fue el salto más reciente de todos, con el mismo formato relativo
-  // ("hace N días") que ya usa el dashboard del jugador.
-  const hoyFatiga = todayStr();
-  const testadosHoy = new Set(filasParaMotor.filter((f) => f.dateKey === hoyFatiga).map((f) => f.jugadorId)).size;
-  const fechaUltimaPrueba = filasParaMotor.reduce((max, f) => (!max || f.dateKey > max ? f.dateKey : max), null);
-
-  return (
-    <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.xl, padding: "10px 16px", marginBottom: 12, flexShrink: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 11, flexShrink: 0 }}>
-          <div style={{ width: 24, height: 24, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}><Activity size={13} /></div>
-          <div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>En plena forma</div>
-            <div style={{ fontFamily: dsF.display, fontSize: 16, fontWeight: 800, color: ds.success }}>
-              {pctVerde}% <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, fontWeight: 600 }}>{enVerde} / {total}</span>
-            </div>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
-          <div style={{ display: "flex", width: 140, height: 6, borderRadius: dsR.full, overflow: "hidden", background: ds.border }}>
-            <span style={{ width: `${(enVerde / total) * 100}%`, background: ds.success }} />
-            <span style={{ width: `${(enAmbar / total) * 100}%`, background: ds.warning }} />
-            <span style={{ width: `${(enRojo / total) * 100}%`, background: ds.danger }} />
-          </div>
-          <div style={{ display: "flex", gap: 10 }}>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
-              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.success, display: "inline-block" }} />{enVerde} verde
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
-              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.warning, display: "inline-block" }} />{enAmbar} ámbar
-            </span>
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted }}>
-              <i style={{ width: 5, height: 5, borderRadius: "50%", background: ds.danger, display: "inline-block" }} />{enRojo} rojo
-            </span>
-          </div>
-        </div>
-
-        <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0 }} />
-        <div style={{ flexShrink: 0 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Testados hoy</div>
-          <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 800, color: ds.ink, whiteSpace: "nowrap" }}>
-            {testadosHoy} <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted, fontWeight: 600 }}>/ {total}</span>
-          </div>
-        </div>
-
-        <div style={{ width: 1, alignSelf: "stretch", background: ds.border, flexShrink: 0 }} />
-        <div style={{ flexShrink: 0 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Última prueba</div>
-          <div style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 800, color: ds.ink, whiteSpace: "nowrap", textTransform: "capitalize" }}>
-            {fechaUltimaPrueba ? fmtHaceDias(fechaUltimaPrueba) : "—"}
-          </div>
-        </div>
-
-        <div style={{ flex: 1 }} />
-        <button onClick={() => onAbrirModulo("fatiga")} style={{ background: "transparent", border: "none", color: ds.accent, fontSize: 11, fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>Control de fatiga →</button>
-      </div>
-
-      {jugadoresRojo.length > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "9px 11px", marginTop: 10 }}>
-          <AlertTriangle size={13} color={ds.accent} style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ fontSize: 11, color: ds.ink, lineHeight: 1.45, margin: 0 }}>
-            En rojo hoy:{" "}
-            {jugadoresRojo.map((j, i) => (
-              <React.Fragment key={j.id}>
-                {onOpenHistory ? (
-                  <button
-                    onClick={() => onOpenHistory(j)}
-                    style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.accent, fontWeight: 700, fontSize: 11, borderBottom: `1px solid ${ds.accentBorderSubtle}` }}
-                  >
-                    {j.name}
-                  </button>
-                ) : (
-                  <span style={{ color: ds.accent, fontWeight: 700 }}>{j.name}</span>
-                )}
-                {(etiquetaFuerzaJugador(j.id) || seriesFuerzaHoy(j.id) > 0) && (
-                  <span style={{ color: ds.inkMuted }}>
-                    {" "}({[etiquetaFuerzaJugador(j.id), seriesFuerzaHoy(j.id) > 0 ? `hoy ya: ${seriesFuerzaHoy(j.id)} series de fuerza` : null].filter(Boolean).join(" · ")})
-                  </span>
-                )}
-                {i < jugadoresRojo.length - 1 ? ", " : ""}
-              </React.Fragment>
-            ))}{" "}
-            — por debajo de su umbral individual, revisa antes de subir carga esta semana.
-          </p>
-        </div>
-      )}
-
-      {pendientesRevisar.size > 0 && (
-        <div style={{ display: "flex", gap: 9, alignItems: "flex-start", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "9px 11px", marginTop: 10 }}>
-          <AlertTriangle size={13} color={ds.warning} style={{ flexShrink: 0, marginTop: 1 }} />
-          <p style={{ fontSize: 11, color: ds.ink, lineHeight: 1.45, margin: 0 }}>
-            Datos de fuerza por revisar:{" "}
-            {[...pendientesRevisar.entries()].map(([jid, n], i, arr) => {
-              const j = playersById?.get(jid);
-              if (!j) return null;
-              return (
-                <React.Fragment key={jid}>
-                  {onOpenHistory ? (
-                    <button onClick={() => onOpenHistory(j)} style={{ background: "transparent", border: "none", padding: 0, cursor: "pointer", color: ds.accent, fontWeight: 700, fontSize: 11, borderBottom: `1px solid ${ds.accentBorderSubtle}` }}>
-                      {j.name}
-                    </button>
-                  ) : (
-                    <span style={{ fontWeight: 700 }}>{j.name}</span>
-                  )}{" "}
-                  ({n}){i < arr.length - 1 ? ", " : "."}
-                </React.Fragment>
-              );
-            })}{" "}
-            Un dato mal tecleado distorsiona su e1RM; ábrelo en Progreso para corregirlo o ignorarlo.
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
 
 function IconoGridSidebar() {
   return (
@@ -5331,18 +5067,6 @@ function IconoGridSidebar() {
   );
 }
 
-// Punto de entrada real: en pantallas de escritorio/iPad (≥1000px) se
-// muestra el dashboard con barra lateral; por debajo de eso, el compacto de
-// siempre — el layout con barra lateral fija no está pensado para caber en
-// una pantalla estrecha.
-function DashboardEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) {
-  const ancho = useAnchoVentana();
-  return ancho >= 1000 ? (
-    <DashboardEntrenadorSidebarReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} onOpenHistory={onOpenHistory} />
-  ) : (
-    <DashboardEntrenadorCompactoReal onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} onOpenHistory={onOpenHistory} />
-  );
-}
 
 
 // ---------- HISTORIAL (calcado de historial.jsx) ----------
@@ -6640,249 +6364,7 @@ function claveSesionVisible(s) {
   return `${(s.fechas || []).slice().sort().join(",")}__${s.md || ""}__${s.objetivo || ""}`;
 }
 
-function HistorialPorSesion({ players, sesiones, tareas, registros }) {
-  const [claveSel, setClaveSel] = useState("");
-  const [busqueda, setBusqueda] = useState("");
 
-  const grupos = useMemo(() => {
-    const porClave = new Map();
-    sesiones
-      .filter((s) => s.enviada)
-      .forEach((s) => {
-        const clave = claveSesionVisible(s);
-        if (!porClave.has(clave)) {
-          porClave.set(clave, { clave, fechas: s.fechas || [], md: s.md || "", objetivo: s.objetivo || "", sesionIds: [], jugadoresDestino: null });
-        }
-        const g = porClave.get(clave);
-        g.sesionIds.push(s.id);
-        // Si CUALQUIERA de las filas agrupadas va dirigida a todo el equipo
-        // (sin restricción), se trata como "todo el equipo" — restringir de
-        // más por error es peor que enseñar a alguien de más.
-        if (s.jugadores_destino && s.jugadores_destino.length && g.jugadoresDestino !== false) {
-          g.jugadoresDestino = g.jugadoresDestino ? [...new Set([...g.jugadoresDestino, ...s.jugadores_destino])] : [...s.jugadores_destino];
-        } else {
-          g.jugadoresDestino = false; // false = "todo el equipo", se resuelve abajo
-        }
-      });
-    return [...porClave.values()].sort((a, b) => ((a.fechas[0] || "") < (b.fechas[0] || "") ? 1 : -1));
-  }, [sesiones]);
-
-  const grupoSel = grupos.find((g) => g.clave === claveSel) || grupos[0] || null;
-
-  const tareasGrupo = useMemo(() => {
-    if (!grupoSel) return [];
-    const ids = new Set(grupoSel.sesionIds);
-    return tareas.filter((t) => ids.has(t.sesion_id));
-  }, [grupoSel, tareas]);
-
-  const registrosGrupo = useMemo(() => {
-    if (!tareasGrupo.length) return [];
-    const ids = new Set(tareasGrupo.map((t) => t.id));
-    return registros.filter((r) => ids.has(r.tarea_id));
-  }, [tareasGrupo, registros]);
-
-  if (!grupos.length) {
-    return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no se ha enviado ninguna sesión.</div>;
-  }
-
-  const targets = grupoSel?.jugadoresDestino ? players.filter((p) => grupoSel.jugadoresDestino.includes(p.id)) : players;
-  // Antes exigía TODAS las tareas hechas para contar como "enviada" — una
-  // sola tarea sin registrar (o añadida a mitad de semana) dejaba a un
-  // jugador como "sin enviar" aunque hubiera mandado casi todo. Ahora
-  // "enviada" es "ha mandado algo", con la fracción real al lado (ej. 8/10)
-  // para que se vea de un vistazo cuánto le falta.
-  const todosLosEstados = targets.map((p) => {
-    const hechas = tareasGrupo.filter((t) => registrosGrupo.some((r) => r.tarea_id === t.id && r.jugador_id === p.id && r.hecho)).length;
-    return { jugador: p.name, enviado: hechas > 0, hechas, total: tareasGrupo.length };
-  });
-  const enviadosCount = todosLosEstados.filter((e) => e.enviado).length;
-  const pct = todosLosEstados.length ? Math.round((enviadosCount / todosLosEstados.length) * 100) : 0;
-  const q = busqueda.trim().toLowerCase();
-  const estados = todosLosEstados
-    .filter((e) => !q || e.jugador.toLowerCase().includes(q))
-    .sort((a, b) => (a.enviado === b.enviado ? a.jugador.localeCompare(b.jugador) : a.enviado ? 1 : -1));
-  const circunferencia = 2 * Math.PI * 15.5;
-
-  return (
-    <>
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>SESIÓN</span>
-        <DsSelect value={grupoSel?.clave || ""} onChange={(e) => setClaveSel(e.target.value)} style={{ maxWidth: 320 }}>
-          {grupos.map((g) => (
-            <option key={g.clave} value={g.clave}>
-              {(g.fechas || []).map((f) => fmtDateShort(f)).join(", ")}
-              {g.md ? ` · ${g.md}` : ""}
-              {g.objetivo ? ` · ${g.objetivo}` : ""}
-            </option>
-          ))}
-        </DsSelect>
-      </label>
-
-      <DsCard style={{ padding: "14px 16px", marginBottom: 14, display: "flex", alignItems: "center", gap: 14 }}>
-        <div style={{ position: "relative", width: 52, height: 52, flexShrink: 0 }}>
-          <svg viewBox="0 0 36 36" style={{ width: 52, height: 52, transform: "rotate(-90deg)" }}>
-            <circle cx="18" cy="18" r="15.5" fill="none" stroke={ds.border} strokeWidth="3.5" />
-            <circle
-              cx="18"
-              cy="18"
-              r="15.5"
-              fill="none"
-              stroke={pct === 100 ? ds.success : pct > 0 ? ds.accent : ds.warning}
-              strokeWidth="3.5"
-              strokeLinecap="round"
-              strokeDasharray={`${(pct / 100) * circunferencia} ${circunferencia}`}
-            />
-          </svg>
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: ds.ink }}>{pct}%</div>
-        </div>
-        <div>
-          <div style={{ fontSize: 15, fontWeight: 700, color: ds.ink }}>
-            {enviadosCount}/{todosLosEstados.length} jugadores han enviado
-          </div>
-          <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>
-            {tareasGrupo.length} tarea{tareasGrupo.length === 1 ? "" : "s"} en esta sesión
-            {grupoSel.sesionIds.length > 1 ? ` · combinada de ${grupoSel.sesionIds.length} envíos` : ""}
-          </div>
-        </div>
-      </DsCard>
-
-      {todosLosEstados.length > 6 && (
-        <DsInput placeholder="Buscar jugador…" value={busqueda} onChange={(e) => setBusqueda(e.target.value)} style={{ marginBottom: 10, fontSize: 13 }} />
-      )}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {estados.map((e) => {
-          const completo = e.enviado && e.hechas === e.total;
-          const color = e.enviado ? (completo ? ds.success : ds.accent) : ds.warning;
-          return (
-            <div key={e.jugador} style={{ display: "flex", alignItems: "center", gap: 10, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "10px 14px" }}>
-              <span style={{ width: 9, height: 9, borderRadius: dsR.full, background: e.enviado ? color : ds.border, border: e.enviado ? "none" : `1px solid ${ds.warning}`, flexShrink: 0 }} />
-              <span style={{ flex: 1, fontSize: 13.5, color: ds.ink }}>{e.jugador}</span>
-              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color }}>{e.enviado ? `✓ Enviada (${e.hechas}/${e.total})` : "Sin enviar"}</span>
-            </div>
-          );
-        })}
-        {estados.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Ningún jugador coincide con la búsqueda.</div>}
-      </div>
-    </>
-  );
-}
-
-// ---------- Historial por tarea (para el entrenador) ----------
-// Progresión de carga de UN diseño de tarea concreto para un jugador — no
-// solo el ejercicio en general, sino la combinación exacta de ejercicio +
-// material + modo + reps objetivo + RIR objetivo.
-function HistorialPorTarea({ players, tareasById, ejerciciosById, sesionesById, registros }) {
-  const [jugadorSel, setJugadorSel] = useState(players[0]?.id || "");
-  const [ejercicioSel, setEjercicioSel] = useState("");
-  const [disenoSel, setDisenoSel] = useState("");
-  const items = useMemo(() => {
-    const propios = jugadorSel ? registros.filter((r) => r.jugador_id === jugadorSel) : [];
-    return construirItemsHistorial(propios, tareasById, ejerciciosById, sesionesById);
-  }, [jugadorSel, registros, tareasById, ejerciciosById, sesionesById]);
-
-  if (!players.length) {
-    return <div style={{ color: ds.inkSecondary, fontSize: 14, textAlign: "center", padding: "20px 0" }}>Todavía no hay usuarios dados de alta.</div>;
-  }
-
-  const ejerciciosDisponibles = [...new Set(items.map((it) => it.name))].sort();
-
-  const itemsDelEjercicio = ejercicioSel ? items.filter((it) => it.name === ejercicioSel) : [];
-  const disenosPorClave = new Map();
-  itemsDelEjercicio.forEach((it) => {
-    const eq = materialEfectivo(it);
-    const clave = claveDisenoTarea(it.name, eq, it.unilateral, it.reps, it.rir);
-    if (!disenosPorClave.has(clave)) {
-      disenosPorClave.set(clave, { clave, equipo: eq, unilateral: it.unilateral, reps: it.reps, rir: it.rir, registros: [] });
-    }
-    disenosPorClave.get(clave).registros.push(it);
-  });
-  const disenos = [...disenosPorClave.values()].sort((a, b) => b.registros.length - a.registros.length);
-
-  const disenoActivo = disenoSel ? disenosPorClave.get(disenoSel) : null;
-  const puntos = disenoActivo
-    ? disenoActivo.registros
-        .filter((it) => it.cargaReal !== "" && it.cargaReal != null)
-        .sort((a, b) => (a.date < b.date ? -1 : 1))
-        .map((it) => ({ fecha: it.date, carga: Number(it.cargaReal), rir: it.rirReal, reps: it.repsReal }))
-    : [];
-
-  const etiquetaDiseno = (d) =>
-    `${d.equipo === "std" ? "Sin material" : d.equipo} · ${d.unilateral ? "Unilateral" : "Bilateral"} · ${d.reps || "—"} reps · RIR ${
-      d.rir !== "" && d.rir != null ? d.rir : "—"
-    }`;
-
-  return (
-    <>
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>JUGADOR</span>
-        <DsSelect
-          value={jugadorSel}
-          onChange={(e) => {
-            setJugadorSel(e.target.value);
-            setEjercicioSel("");
-            setDisenoSel("");
-          }}
-          style={{ maxWidth: 240 }}
-        >
-          {players.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </DsSelect>
-      </label>
-
-      <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 12 }}>
-        <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>EJERCICIO</span>
-        <DsSelect
-          value={ejercicioSel}
-          onChange={(e) => {
-            setEjercicioSel(e.target.value);
-            setDisenoSel("");
-          }}
-          style={{ maxWidth: 280 }}
-        >
-          <option value="">— Elige un ejercicio —</option>
-          {ejerciciosDisponibles.map((nombre) => (
-            <option key={nombre} value={nombre}>
-              {nombre}
-            </option>
-          ))}
-        </DsSelect>
-      </label>
-
-      {ejercicioSel && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 16 }}>
-          {disenos.map((d) => (
-            <button
-              key={d.clave}
-              onClick={() => setDisenoSel(d.clave)}
-              style={{
-                fontSize: 12,
-                padding: "6px 10px",
-                borderRadius: dsR.md,
-                border: `1px solid ${disenoSel === d.clave ? ds.accent : ds.border}`,
-                background: disenoSel === d.clave ? ds.accentSubtle : "transparent",
-                color: disenoSel === d.clave ? ds.accent : ds.inkSecondary,
-                cursor: "pointer",
-              }}
-            >
-              {etiquetaDiseno(d)} ({d.registros.length})
-            </button>
-          ))}
-        </div>
-      )}
-
-      {disenoActivo &&
-        (puntos.length ? (
-          <GraficoProgresionCarga puntos={puntos} />
-        ) : (
-          <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin registros de carga todavía para esta variante.</div>
-        ))}
-    </>
-  );
-}
 
 // Gráfico de progresión de carga con SVG plano — sin añadir ninguna
 // librería nueva al proyecto (ni recharts, ni chart.js). Mismo tratamiento
@@ -6963,112 +6445,6 @@ function GraficoProgresionCarga({ puntos }) {
   );
 }
 
-function HistorialReal({ onBack, onAbrirModulo, onCerrarSesion }) {
-  const [players, , playersLoaded, , retryPlayers] = usePlayers();
-  const [vista, setVista] = useState("sesion");
-  const { loaded: datosLoaded, error, sesiones, tareas, registros, ejercicios, retry } = useHistorialData();
-
-  // Cada vez que se entra en Historial se pide todo de cero — ver la nota
-  // en useHistorialData. Los envíos de los jugadores llegan desde sus
-  // propios móviles y esta pantalla no se entera sola de que han pasado.
-  useEffect(() => {
-    retryPlayers();
-    retry();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const tareasById = useMemo(() => new Map(tareas.map((t) => [t.id, t])), [tareas]);
-  const ejerciciosById = useMemo(() => new Map(ejercicios.map((e) => [e.id, e])), [ejercicios]);
-  const sesionesById = useMemo(() => new Map(sesiones.map((s) => [s.id, s])), [sesiones]);
-
-  const cargando = !playersLoaded || !datosLoaded;
-  const actualizando = cargando; // mismo botón sirve para el primer arranque y para "reintentar"
-
-  return (
-    <PantallaEntrenadorAncha activo="historial" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
-      <div>
-        <div style={{ marginBottom: 16, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>HISTORIAL</div>
-            <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Registro diario</h1>
-          </div>
-          <button
-            onClick={() => {
-              retryPlayers();
-              retry();
-            }}
-            disabled={actualizando}
-            style={{
-              fontSize: 12,
-              padding: "7px 12px",
-              borderRadius: dsR.md,
-              border: `1px solid ${ds.border}`,
-              background: "transparent",
-              color: ds.inkSecondary,
-              cursor: actualizando ? "default" : "pointer",
-              flexShrink: 0,
-            }}
-          >
-            {actualizando ? "Actualizando…" : "↻ Actualizar"}
-          </button>
-        </div>
-        <div style={{ display: "flex", gap: 6, marginBottom: 16 }}>
-          {[
-            { id: "sesion", label: "Por sesión" },
-            { id: "jugador", label: "Por jugador" },
-            { id: "tarea", label: "Por tarea" },
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setVista(v.id)}
-              style={{
-                fontSize: 12.5,
-                padding: "7px 12px",
-                borderRadius: dsR.md,
-                border: `1px solid ${vista === v.id ? ds.accent : ds.border}`,
-                background: vista === v.id ? ds.accentSubtle : "transparent",
-                color: vista === v.id ? ds.accent : ds.inkSecondary,
-                cursor: "pointer",
-              }}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
-        {error && (
-          <div
-            style={{
-              fontSize: 12.5,
-              color: ds.danger,
-              background: ds.surface,
-              border: `1px solid ${ds.dangerBorderSubtle}`,
-              borderRadius: dsR.md,
-              padding: "8px 12px",
-              marginBottom: 14,
-            }}
-          >
-            {error}{" "}
-            <button
-              onClick={retry}
-              style={{ color: ds.danger, textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0, font: "inherit" }}
-            >
-              reintentar
-            </button>
-          </div>
-        )}
-        {cargando ? (
-          <LoadingBlock />
-        ) : vista === "sesion" ? (
-          <HistorialPorSesion players={players} sesiones={sesiones} tareas={tareas} registros={registros} />
-        ) : vista === "jugador" ? (
-          <HistorialPorJugador players={players} tareasById={tareasById} ejerciciosById={ejerciciosById} sesionesById={sesionesById} registros={registros} />
-        ) : (
-          <HistorialPorTarea players={players} tareasById={tareasById} ejerciciosById={ejerciciosById} sesionesById={sesionesById} registros={registros} />
-        )}
-      </div>
-    </PantallaEntrenadorAncha>
-  );
-}
 
 // ============================================================
 // CONTROL DE FATIGA (CMJ) — módulo de entrenador
@@ -7159,6 +6535,19 @@ function CmjMicrociclosReal() {
   const [form, setForm] = useState(CMJ_MICROCICLO_FORM_VACIO);
   const [guardando, setGuardando] = useState(false);
   const [error, setError] = useState("");
+  // Fecha del partido para rellenar MD-2 / MD+1 sin teclear (por defecto, el
+  // próximo día de partido definido en el microciclo tipo del Calendario).
+  const { todos: microTipoCmj, loaded: microTipoCmjLoaded } = useMicrociclosTipo();
+  const [partidoRef, setPartidoRef] = useState("");
+  useEffect(() => {
+    if (!microTipoCmjLoaded || partidoRef) return;
+    const m = Object.values(microTipoCmj).find((x) => x && x.diaPartido != null);
+    if (!m) return;
+    const hoyP = todayStr();
+    const f = sumarDiasFecha(inicioSemanaCalendario(hoyP), m.diaPartido);
+    setPartidoRef(f >= hoyP ? f : sumarDiasFecha(f, 7));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [microTipoCmjLoaded]);
 
   const cargar = useCallback(async () => {
     const { data, error } = await supabase.from("cmj_microciclos").select("*");
@@ -7240,6 +6629,14 @@ function CmjMicrociclosReal() {
       </div>
 
       <DsCard style={{ padding: 14, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12, paddingBottom: 12, borderBottom: `1px solid ${ds.border}` }}>
+          <span style={{ fontSize: 12, color: ds.inkSecondary }}>Rellenar desde el partido:</span>
+          <DsInput type="date" value={partidoRef} onChange={(e) => setPartidoRef(e.target.value)} style={{ width: 170 }} />
+          <DsButton size="sm" variant="secondary" disabled={!partidoRef} onClick={() => setForm((f) => ({ ...f, md2: sumarDiasFecha(partidoRef, -2), md1: sumarDiasFecha(partidoRef, 1), inicio: f.inicio || inicioSemanaCalendario(partidoRef) }))}>
+            Calcular MD-2 y MD+1
+          </DsButton>
+          <span style={{ fontSize: 11.5, color: ds.inkMuted }}>El día de partido sale de tu microciclo tipo del Calendario. «Inicio» solo se rellena si está vacío (lunes de esa semana).</span>
+        </div>
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
           <div style={{ minWidth: 90 }}>
             <div style={{ fontSize: 11, color: ds.inkMuted, marginBottom: 4 }}>Número</div>
@@ -8390,218 +7787,6 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
   );
 }
 
-function ProgramacionReal({ players, onBack, onAbrirModulo, onCerrarSesion }) {
-  // Antes: sesiones -> tareas en cadena (ejercicios en paralelo) — 2
-  // peticiones encadenadas. Ahora: 1 sola, con las 3 cosas ya juntas.
-  const { loaded: bootLoaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
-  const estadoCmjProg = useEstadoCmjEquipo(players || []);
-  const [editingSesion, setEditingSesion] = useState(null);
-  const [plantillaSesion, setPlantillaSesion] = useState(null);
-  const [showEditor, setShowEditor] = useState(false);
-  const [verHistorial, setVerHistorial] = useState(false);
-  const [historialVisible, setHistorialVisible] = useState(15);
-  const [verBiblioteca, setVerBiblioteca] = useState(false);
-  const [busquedaBiblioteca, setBusquedaBiblioteca] = useState("");
-  const [errorBorrado, setErrorBorrado] = useState("");
-
-  if (showEditor) {
-    const EditorComponent = DisenoSesionReal;
-    const cerrar = () => {
-      setShowEditor(false);
-      setEditingSesion(null);
-      setPlantillaSesion(null);
-    };
-    return (
-      <EditorComponent
-        sesionExistente={editingSesion || undefined}
-        plantilla={plantillaSesion || undefined}
-        onBack={cerrar}
-        onGuardado={() => {
-          retry();
-          cerrar();
-        }}
-      />
-    );
-  }
-
-
-  if (!bootLoaded) return <LoadingBlock />;
-
-  const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-  // Defensa igual que en el resto de la app: no fiarse de que el backend
-  // haya filtrado de verdad las tareas por sesión.
-  const sesionIdsSet = new Set(sesiones.map((s) => s.id));
-  const tareasBySesion = new Map();
-  tareas
-    .filter((t) => sesionIdsSet.has(t.sesion_id))
-    .forEach((t) => {
-      if (!tareasBySesion.has(t.sesion_id)) tareasBySesion.set(t.sesion_id, []);
-      const e = ejerciciosById.get(t.ejercicio_id) || {};
-      tareasBySesion.get(t.sesion_id).push({ ...t, nombreEjercicio: e.nombre || "(ejercicio eliminado)", gif_url: e.gif_url, sin_lateralidad: e.sin_lateralidad });
-    });
-
-  const today = todayStr();
-  const conTareas = sesiones.map((s) => ({ ...s, tareas: tareasBySesion.get(s.id) || [] }));
-  const hoy = conTareas.filter((s) => (s.fechas || []).includes(today));
-  const futuras = conTareas
-    // Un borrador sin fecha todavía (guardado a medias, para retomar luego)
-    // no encaja en "hoy" ni en "pasadas" — se cuela aquí, en Próximas, que
-    // es donde pediste verlo mezclado con las que sí están listas.
-    .filter((s) => !(s.fechas || []).includes(today) && ((s.fechas || []).some((f) => f > today) || !(s.fechas || []).length))
-    .sort((a, b) => ((a.fechas || [])[0] || "") < ((b.fechas || [])[0] || "") ? -1 : 1);
-  // Historial: todas las fechas de la sesión ya pasaron (ni hoy ni futuras).
-  // Se ordena de la más reciente a la más antigua, que es como interesa
-  // revisarlo — y es también lo que hace más útil "Reutilizar", al tener las
-  // sesiones más parecidas a lo que se necesita ahora arriba del todo.
-  const pasadas = conTareas
-    .filter((s) => !(s.fechas || []).includes(today) && !(s.fechas || []).some((f) => f > today) && (s.fechas || []).length)
-    .sort((a, b) => {
-      const maxA = (a.fechas || []).reduce((m, f) => (f > m ? f : m), "");
-      const maxB = (b.fechas || []).reduce((m, f) => (f > m ? f : m), "");
-      return maxA < maxB ? 1 : -1;
-    });
-
-  // Biblioteca de sesiones: cualquier sesión con nombre puesto por el
-  // entrenador, esté o no ya programada/pasada — es ortogonal al calendario
-  // (igual patrón que TeamBuildr/TrainHeroic: la plantilla vive aparte de
-  // cuándo se usó). Se busca por texto sobre ese nombre, sin distinguir
-  // mayúsculas.
-  const plantillas = conTareas
-    .filter((s) => s.nombre && s.nombre.trim())
-    .filter((s) => !busquedaBiblioteca.trim() || s.nombre.toLowerCase().includes(busquedaBiblioteca.trim().toLowerCase()))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
-
-  const editar = (s) => {
-    setEditingSesion(s);
-    setShowEditor(true);
-  };
-
-  // Reutilizar: abre el editor con el mismo contenido (bloques, tareas,
-  // circuitos, destinatarios, objetivo...) pero como sesión NUEVA — sin id,
-  // sin fechas heredadas (las elige de nuevo el entrenador) y sin arrastrar
-  // los ids de tarea/circuito originales, así guardar no toca ni borra nada
-  // de la sesión de la que se partió.
-  const reutilizar = (s) => {
-    setPlantillaSesion(s);
-    setEditingSesion(null);
-    setShowEditor(true);
-  };
-
-  // Borra la sesión y todo lo que le pertenece (sus tareas y sus circuitos)
-  // — nada queda huérfano apuntando a una sesión que ya no existe. Los
-  // registros que los jugadores ya hubieran enviado de esas tareas se
-  // quedan tal cual en el historial (igual que cuando se borra un ejercicio
-  // de la Biblioteca): dejan de poder resolver el nombre y se muestran como
-  // "(tarea eliminada)", pero no se pierde el dato de que se hizo algo ese día.
-  const eliminarSesion = async (sesionId) => {
-    setErrorBorrado("");
-    try {
-      const tareasDeSesion = tareas.filter((t) => t.sesion_id === sesionId);
-      const circuitoIds = [...new Set(tareasDeSesion.filter((t) => t.circuito_id).map((t) => t.circuito_id))];
-      await Promise.all(tareasDeSesion.map((t) => api.delete("tareas", t.id)));
-      await Promise.all(circuitoIds.map((id) => api.delete("circuitos", id)));
-      await api.delete("sesiones", sesionId);
-      invalidateEntityCache("sesiones");
-      invalidateEntityCache("tareas");
-      invalidateEntityCache("circuitos");
-      invalidateBootstrapCache();
-      retry();
-    } catch (e) {
-      setErrorBorrado("No se pudo borrar la sesión. Comprueba tu conexión e inténtalo de nuevo.");
-    }
-  };
-
-  return (
-    <PantallaEntrenadorAncha activo="programacion" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
-      <div>
-        <div style={{ marginBottom: 18 }}>
-          <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>PROGRAMACIÓN</div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
-          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{hoy.length > 0 ? "Sesión de hoy y próximas programadas" : "Próximas sesiones programadas"}</div>
-        </div>
-        <AvisoCmjProgramacionReal estado={estadoCmjProg} players={players || []} sesiones={sesiones} hoy={today} onEditar={editar} />
-        {errorBorrado && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>{errorBorrado}</div>}
-        {hoy.length > 0 && (
-          <div style={{ marginBottom: 20 }}>
-            <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8 }}>HOY</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {hoy.map((s) => (
-                <TarjetaSesionReal key={s.id} sesion={s} esHoy onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
-              ))}
-            </div>
-          </div>
-        )}
-        <div>
-          <div style={{ fontFamily: dsF.mono, fontSize: 10, letterSpacing: "0.05em", color: ds.inkMuted, marginBottom: 8 }}>PRÓXIMAS</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {futuras.map((s) => (
-              <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
-            ))}
-            {futuras.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>No hay más sesiones programadas</div>}
-          </div>
-        </div>
-
-        <div style={{ marginTop: 24 }}>
-          <button
-            onClick={() => setVerBiblioteca((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}
-          >
-            <BookOpen size={14} color={ds.accent} />
-            Biblioteca de sesiones{plantillas.length || busquedaBiblioteca ? ` (${plantillas.length})` : ""}
-            <span style={{ marginLeft: "auto", color: ds.inkMuted, fontSize: 12, transform: verBiblioteca ? "rotate(90deg)" : "none" }}>›</span>
-          </button>
-          {verBiblioteca && (
-            <div style={{ marginTop: 10 }}>
-              <div style={{ position: "relative", marginBottom: 10 }}>
-                <Search size={14} color={ds.inkMuted} style={{ position: "absolute", left: 10, top: "50%", transform: "translateY(-50%)" }} />
-                <DsInput
-                  value={busquedaBiblioteca}
-                  onChange={(e) => setBusquedaBiblioteca(e.target.value)}
-                  placeholder="Buscar por nombre..."
-                  style={{ paddingLeft: 32 }}
-                />
-              </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {plantillas.map((s) => (
-                  <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
-                ))}
-                {plantillas.length === 0 && (
-                  <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>
-                    {busquedaBiblioteca ? "Ninguna plantilla coincide con esa búsqueda." : 'Todavía no has puesto nombre a ninguna sesión. Ponle uno al diseñarla para que aparezca aquí.'}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div style={{ marginTop: 14 }}>
-          <button
-            onClick={() => setVerHistorial((v) => !v)}
-            style={{ display: "flex", alignItems: "center", gap: 6, width: "100%", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "10px 14px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}
-          >
-            <History size={14} color={ds.inkSecondary} />
-            Historial de sesiones{pasadas.length ? ` (${pasadas.length})` : ""}
-            <span style={{ marginLeft: "auto", color: ds.inkMuted, fontSize: 12, transform: verHistorial ? "rotate(90deg)" : "none" }}>›</span>
-          </button>
-          {verHistorial && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-              {pasadas.slice(0, historialVisible).map((s) => (
-                <TarjetaSesionReal key={s.id} sesion={s} esHoy={false} onEditar={editar} onEliminar={eliminarSesion} onReutilizar={reutilizar} />
-              ))}
-              {pasadas.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "16px 0", textAlign: "center" }}>Todavía no hay sesiones pasadas</div>}
-              {pasadas.length > historialVisible && (
-                <DsButton variant="secondary" size="sm" onClick={() => setHistorialVisible((v) => v + 15)} style={{ alignSelf: "center" }}>
-                  Mostrar más
-                </DsButton>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </PantallaEntrenadorAncha>
-  );
-}
 
 
 
@@ -8715,23 +7900,95 @@ function CalendarioModuloReal({ onBack, onAbrirModulo, onCerrarSesion, scopeInic
 }
 
 // ---------- MICROCICLO TIPO (MD-x) ----------
-// Se guarda en el navegador del entrenador (una clave por ámbito: equipo,
-// grupo o jugador). No toca la base de datos ni la carga de las sesiones.
-const MICRO_KEY = "microciclos_v1";
+// Se guarda en Supabase (tabla microciclos_tipo, una fila por ámbito: equipo,
+// grupo o jugador), así es el mismo en cualquier dispositivo o navegador.
+// No toca la carga de las sesiones.
 const MICRO_TAGS_ORDEN = ["MD-6", "MD-5", "MD-4", "MD-3", "MD-2", "MD-1", "MD", "MD+1", "MD+2"];
-function leerMicrociclos() {
+// Lectura única de lo que una versión anterior guardó en este navegador, solo
+// para subirlo a la base de datos la primera vez (no se vuelve a usar después).
+function leerMicrociclosLegacy() {
   try {
-    return JSON.parse(window.localStorage.getItem(MICRO_KEY) || "{}") || {};
+    return JSON.parse(window.localStorage.getItem("microciclos_v1") || "{}") || {};
   } catch (e) {
     return {};
   }
 }
-function guardarMicrociclos(obj) {
-  try {
-    window.localStorage.setItem(MICRO_KEY, JSON.stringify(obj));
-  } catch (e) {
-    /* sin almacenamiento: se mantiene en memoria durante la sesión */
+function mensajeErrorMicro(error) {
+  const msg = (error && (error.message || String(error))) || "error desconocido";
+  if (/microciclos_tipo/.test(msg) && /(relation|does not exist|schema cache|find the table)/i.test(msg)) {
+    return "Falta crear la tabla «microciclos_tipo» en Supabase: ejecuta add_microciclos_tipo.sql y recarga.";
   }
+  return `No se pudo guardar el microciclo: ${msg}`;
+}
+function useMicrociclosTipo() {
+  const [todos, setTodos] = useState(() => sharedDataCache.get("microciclos_tipo") || null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    if (todos !== null) return undefined;
+    let off = false;
+    (async () => {
+      let mapa = {};
+      try {
+        const { data, error: e } = await supabase.from("microciclos_tipo").select("*");
+        if (e) throw e;
+        (data || []).forEach((r) => {
+          mapa[r.id] = r.config || {};
+        });
+        // Migración única: lo que había en el navegador pasa a la base de datos.
+        const legacy = leerMicrociclosLegacy();
+        const pendientes = Object.entries(legacy).filter(([k, v]) => v && typeof v === "object" && !mapa[k]);
+        if (pendientes.length) {
+          const { error: e2 } = await supabase.from("microciclos_tipo").upsert(pendientes.map(([id, config]) => ({ id, config, updated_at: new Date().toISOString() })), { onConflict: "id" });
+          if (!e2) pendientes.forEach(([k, v]) => (mapa[k] = v));
+        }
+      } catch (e) {
+        if (!off) setError(mensajeErrorMicro(e));
+      }
+      sharedDataCache.set("microciclos_tipo", mapa);
+      if (!off) setTodos(mapa);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const actual = todos || {};
+  const guardar = async (clave, config) => {
+    const previo = actual;
+    const nuevo = { ...actual, [clave]: config };
+    sharedDataCache.set("microciclos_tipo", nuevo);
+    setTodos(nuevo);
+    setError("");
+    try {
+      const { error: e } = await supabase.from("microciclos_tipo").upsert({ id: clave, config, updated_at: new Date().toISOString() }, { onConflict: "id" });
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      sharedDataCache.set("microciclos_tipo", previo);
+      setTodos(previo);
+      setError(mensajeErrorMicro(e));
+      return false;
+    }
+  };
+  const borrar = async (clave) => {
+    const previo = actual;
+    const nuevo = { ...actual };
+    delete nuevo[clave];
+    sharedDataCache.set("microciclos_tipo", nuevo);
+    setTodos(nuevo);
+    setError("");
+    try {
+      const { error: e } = await supabase.from("microciclos_tipo").delete().eq("id", clave);
+      if (e) throw e;
+      return true;
+    } catch (e) {
+      sharedDataCache.set("microciclos_tipo", previo);
+      setTodos(previo);
+      setError(mensajeErrorMicro(e));
+      return false;
+    }
+  };
+  return { todos: actual, loaded: todos !== null, error, guardar, borrar };
 }
 const MICRO_VACIO = { diaPartido: null, sesiones: {}, manual: {} };
 // MD de una fecha: primero el ajuste manual de ese día; si no, por distancia al
@@ -8798,7 +8055,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [lunesRef, setLunesRef] = useState(() => inicioSemanaCalendario(todayStr()));
   const [modoPlan, setModoPlan] = useState(false);
   const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
-  const [microTodos, setMicroTodos] = useState(() => leerMicrociclos());
+  const { todos: microTodos, loaded: microLoaded, error: microError, guardar: guardarMicro, borrar: borrarMicro } = useMicrociclosTipo();
   const [microAbierto, setMicroAbierto] = useState(false);
   const [diasAbiertos, setDiasAbiertos] = useState({}); // fecha -> true/false (por defecto abierto solo hoy)
   const [microGrupoSel, setMicroGrupoSel] = useState(null);
@@ -8959,7 +8216,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const diasSemana = Array.from({ length: 7 }, (_, i) => sumarDiasFecha(lunesRef, i));
   const NOMBRES_DIA = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
   const sesionPorId = new Map(conTareas.map((s) => [s.id, s]));
-  const opcionesBiblioteca = conTareas.filter((s) => (s.nombre || "").trim() && (s.tareas || []).length).sort((a, b) => a.nombre.localeCompare(b.nombre));
+  const opcionesBiblioteca = agruparPlantillas(conTareas).map((g) => g.rep).filter((s) => (s.tareas || []).length).sort((a, b) => a.nombre.localeCompare(b.nombre));
   const idsOpcionesBib = new Set(opcionesBiblioteca.map((s) => s.id));
   const pendientesPlan = Object.keys(asignadas).filter((f) => asignadas[f] && sesionPorId.get(asignadas[f])).sort();
   // El microciclo pertenece al equipo: un jugador de un equipo usa el de su
@@ -8972,9 +8229,8 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const microHeredado = scope.tipo === "jugador" && !!grupoMicroId;
   const micro = { ...MICRO_VACIO, ...(microTodos[microKey] || {}) };
   const cambiarMicro = (parche) => {
-    const nuevo = { ...microTodos, [microKey]: { ...micro, ...parche } };
-    setMicroTodos(nuevo);
-    guardarMicrociclos(nuevo);
+    if (!microLoaded) return;
+    guardarMicro(microKey, { ...micro, ...parche });
   };
   const mdDe = (f) => mdDeFecha(micro, f);
   const fijarMdManual = (f, valor) => {
@@ -8987,10 +8243,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const microActivo = micro.diaPartido != null || Object.keys(micro.manual || {}).length > 0;
   const quitarMicro = () => {
     if (!window.confirm(`¿Quitar el microciclo de ${microNombre}? Se borran el día de partido, las sesiones por MD y los ajustes manuales.`)) return;
-    const nuevo = { ...microTodos };
-    delete nuevo[microKey];
-    setMicroTodos(nuevo);
-    guardarMicrociclos(nuevo);
+    borrarMicro(microKey);
   };
   const microConfigurado = MICRO_TAGS_ORDEN.some((t) => micro.sesiones[t]);
   const aplicarMicrociclo = () => {
@@ -9346,8 +8599,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                   </label>
                 </div>
                 <div style={{ fontSize: 12, color: ds.inkMuted, marginBottom: 10 }}>
-                  Elige qué sesión toca en cada día del microciclo. Cada fecha del calendario se identifica con su MD según el partido (puedes corregir cualquier día con la etiqueta MD de su fila). Las sesiones se aplican tal cual, sin tocar la carga. Se guarda en este navegador.
+                  Elige qué sesión toca en cada día del microciclo. Cada fecha del calendario se identifica con su MD según el partido (puedes corregir cualquier día con la etiqueta MD de su fila). Las sesiones se aplican tal cual, sin tocar la carga.
                 </div>
+                {microError && <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 10 }}>{microError}</div>}
+                {!microLoaded && <div style={{ fontSize: 12.5, color: ds.inkMuted, marginBottom: 10 }}>Cargando microciclo…</div>}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 8 }}>
                   {MICRO_TAGS_ORDEN.map((t) => (
                     <label key={t} style={{ display: "flex", alignItems: "center", gap: 8, background: ds.surfaceRaised, border: `1px solid ${micro.sesiones[t] ? ds.accentBorderSubtle : ds.border}`, borderRadius: 10, padding: "6px 8px" }}>
@@ -10732,6 +9987,8 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const [hechoDraft, setHechoDraft] = useState({}); // local hasta guardar (borrador) o confirmar envío
   const [gifAmpliado, setGifAmpliado] = useState(null);
   const [pidiendoConfirmacion, setPidiendoConfirmacion] = useState(false);
+  const [molestia, setMolestia] = useState(null); // 0-10 o null si no contesta
+  const [molestiaZona, setMolestiaZona] = useState("");
   const [enviado, setEnviado] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [guardandoBorrador, setGuardandoBorrador] = useState(false);
@@ -11543,6 +10800,15 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
       const ok = nuevos.length ? await saveRegistrosJugador([...resto, ...nuevos]) : true;
       if (ok) {
         borrarBorradorLocal(claveBorradorActual); // enviado de verdad: la copia local ya no hace falta
+        // Molestia (opcional): si la tabla no existe o falla, no afecta al envío.
+        if (molestia !== null) {
+          try {
+            await supabase.from("molestias").upsert({ id: `mol_${player.id}_${date}`, jugador_id: player.id, fecha: date, valor: molestia, zona: molestia > 0 ? molestiaZona || null : null }, { onConflict: "id" });
+            sharedDataCache.delete("molestias_rec");
+          } catch (e) {
+            /* sin tabla de molestias: se ignora */
+          }
+        }
         setEnviado(true);
       } else {
         setErrorEnvio("No se pudo enviar. Sigues aquí con tu progreso guardado en pantalla — comprueba tu conexión y vuelve a intentarlo.");
@@ -12255,6 +11521,22 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
             )}
             {pidiendoConfirmacion ? (
               <div style={{ marginTop: 22 }}>
+                <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "12px 12px 10px", marginBottom: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, marginBottom: 2 }}>¿Alguna molestia hoy? <span style={{ fontWeight: 400, color: ds.inkMuted }}>(opcional)</span></div>
+                  <div style={{ fontSize: 11.5, color: ds.inkMuted, marginBottom: 8 }}>0 = ninguna · 10 = muy fuerte. Así tu entrenador puede ajustarte la carga a tiempo.</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {Array.from({ length: 11 }, (_, i) => i).map((n) => (
+                      <button key={n} type="button" onClick={() => setMolestia(molestia === n ? null : n)} style={{ width: 34, height: 34, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer", border: `1px solid ${molestia === n ? (n >= 5 ? ds.danger : ds.accent) : ds.border}`, background: molestia === n ? (n >= 5 ? `${ds.danger}22` : ds.accentSubtle) : "transparent", color: molestia === n ? (n >= 5 ? ds.danger : ds.accent) : ds.inkSecondary }}>{n}</button>
+                    ))}
+                  </div>
+                  {molestia !== null && molestia > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                      {["Isquios", "Cuádriceps", "Gemelo", "Aductores", "Rodilla", "Tobillo", "Espalda", "Hombro", "Otra"].map((z) => (
+                        <button key={z} type="button" onClick={() => setMolestiaZona(molestiaZona === z ? "" : z)} style={{ fontSize: 12, padding: "5px 10px", borderRadius: 999, cursor: "pointer", border: `1px solid ${molestiaZona === z ? ds.accent : ds.border}`, background: molestiaZona === z ? ds.accentSubtle : "transparent", color: molestiaZona === z ? ds.accent : ds.inkSecondary }}>{z}</button>
+                      ))}
+                    </div>
+                  )}
+                </div>
                 {totalHechas < totalTareas && (
                   <div style={{ display: "flex", gap: 8, background: `${ds.warning}18`, border: `1px solid ${ds.warning}55`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 10 }}>
                     <span style={{ color: ds.warning, flexShrink: 0, display: "inline-flex" }}><AlertTriangle size={14} /></span>
@@ -13377,11 +12659,39 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
 // patrón visual que TarjetaFamiliaEjercicioReal: gradiente por bloque +
 // icono). El color/ícono se toma de la primera tarea de la plantilla, igual
 // que MiniaturaEjercicioReal hace con el bloque del ejercicio.
-function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir }) {
+// Una "plantilla" es una sesión con nombre. Al publicar una plantilla en el
+// calendario se crea una copia con el mismo nombre, así que la biblioteca
+// agrupa por nombre: una sola ficha por plantilla (la versión más reciente) y
+// todos sus usos (fecha + a quién) juntos, sin duplicados.
+function agruparPlantillas(sesionesConTareas) {
+  const clave = (n) => (n || "").trim().toLowerCase();
+  const grupos = new Map();
+  sesionesConTareas
+    .filter((s) => clave(s.nombre))
+    .forEach((s, idx) => {
+      const k = clave(s.nombre);
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push({ s, idx });
+    });
+  const hoy = todayStr();
+  return [...grupos.values()].map((items) => {
+    const maxFecha = (x) => (x.s.fechas || []).slice().sort().reverse()[0] || "";
+    // versión de referencia: la que tiene tareas y fecha más reciente (o la última creada)
+    const ordenadas = items.slice().sort((a, b) => ((a.s.tareas || []).length ? 1 : 0) - ((b.s.tareas || []).length ? 1 : 0) || maxFecha(a).localeCompare(maxFecha(b)) || a.idx - b.idx);
+    const rep = ordenadas[ordenadas.length - 1].s;
+    const usos = [];
+    items.forEach(({ s }) => (s.fechas || []).forEach((f) => usos.push({ fecha: f, sesion: s })));
+    usos.sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const pasadosEnviados = usos.filter((u) => u.fecha <= hoy && u.sesion.enviada);
+    return { id: rep.id, rep, nombre: rep.nombre, usos, nUsos: pasadosEnviados.length, ultima: pasadosEnviados[0]?.fecha || null, proxima: [...usos].reverse().find((u) => u.fecha > hoy)?.fecha || null };
+  });
+}
+
+function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir, grupo }) {
   const primeraTarea = plantilla.tareas[0];
   const color = BLOQUE_COLOR_REAL[primeraTarea?.bloque_sesion] || ds.chart2;
   const Icono = BLOQUE_ICONO_REAL[primeraTarea?.bloque_sesion] || ClipboardList;
-  const ultimaFecha = (plantilla.fechas || []).slice().sort().reverse()[0];
+  const ultimaFecha = grupo ? grupo.ultima : (plantilla.fechas || []).slice().sort().reverse()[0];
   const nombresTareas = plantilla.tareas.map((t) => t.nombreEjercicio).filter(Boolean);
   const preview = nombresTareas.length > 3 ? `${nombresTareas.slice(0, 3).join(" · ")} +${nombresTareas.length - 3} más` : nombresTareas.join(" · ") || "Sin tareas todavía";
   return (
@@ -13405,7 +12715,7 @@ function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir }) {
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 8 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, color: ds.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{plantilla.nombre}</div>
-          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{ultimaFecha ? `Última vez: ${fmtHaceDias(ultimaFecha)}` : "Sin usar todavía"}</div>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted, marginTop: 2 }}>{grupo && grupo.nUsos ? `Usada ${grupo.nUsos} ${grupo.nUsos === 1 ? "vez" : "veces"} · última ${fmtHaceDias(ultimaFecha)}` : grupo && grupo.proxima ? "Planificada, aún sin usar" : ultimaFecha ? `Última vez: ${fmtHaceDias(ultimaFecha)}` : "Sin usar todavía"}</div>
         </div>
         <div style={{ width: 30, height: 30, borderRadius: dsR.md, background: `${color}22`, color, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Icono size={15} />
@@ -13428,6 +12738,9 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   const [busqueda, setBusqueda] = useState("");
   const [plantillaSelId, setPlantillaSelId] = useState(null);
   const [modoEditor, setModoEditor] = useState(null); // null | "editar" | "asignar"
+  const [playersBib] = usePlayers();
+  const [gruposBib] = useEntityList("grupos");
+  const [registrosBib] = useEntityList("registros");
 
   if (!loaded) return <LoadingBlock />;
 
@@ -13449,12 +12762,13 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   // Mismo criterio que "Biblioteca de sesiones" en Programación: cualquier
   // sesión con nombre puesto por el entrenador es una plantilla, esté o no
   // ya programada/pasada.
-  const plantillas = conTareas
-    .filter((s) => s.nombre && s.nombre.trim())
-    .filter((s) => !busqueda.trim() || s.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
+  const todasPlantillas = agruparPlantillas(conTareas);
+  const plantillas = todasPlantillas
+    .filter((g) => !busqueda.trim() || g.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
     .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
-  const plantillaSel = plantillaSelId ? conTareas.find((s) => s.id === plantillaSelId) : null;
+  const grupoSel = plantillaSelId ? todasPlantillas.find((g) => g.id === plantillaSelId) : null;
+  const plantillaSel = grupoSel ? grupoSel.rep : null;
 
   if (modoEditor && plantillaSel) {
     const EditorComponent = DisenoSesionReal;
@@ -13499,7 +12813,7 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
               </div>
               <div>
                 <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Última vez</div>
-                <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink }}>{ultimaFecha ? fmtHaceDias(ultimaFecha) : "Sin fecha todavía"}</div>
+                <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink }}>{grupoSel.nUsos ? `${fmtHaceDias(grupoSel.ultima)} · ${grupoSel.nUsos} ${grupoSel.nUsos === 1 ? "uso" : "usos"}` : ultimaFecha ? fmtHaceDias(ultimaFecha) : "Sin usar todavía"}</div>
               </div>
               <div>
                 <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 2 }}>Destinatarios</div>
@@ -13528,43 +12842,34 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
             ))}
             {tareasSel.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "10px 0" }}>Esta plantilla todavía no tiene tareas.</div>}
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div
-              style={{
-                borderRadius: dsR.xl,
-                aspectRatio: "16 / 8",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                border: `1px solid ${ds.borderSoft}`,
-                background: `linear-gradient(135deg, ${color}, ${ds.surfaceRaised})`,
-              }}
-            >
-              <Icono size={40} color="#fff" style={{ opacity: 0.45 }} />
-            </div>
-            {primeraTarea && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
-                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Modo de carga</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{esPct1rm ? "% 1RM" : "RIR"}</div>
-                </div>
-                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
-                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>Series × reps</div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>
-                    {primeraTarea.series ? `${primeraTarea.series} × ` : ""}
-                    {primeraTarea.cantidad ?? "—"}
+          <div>
+            <div style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700, marginBottom: 8 }}>Historial de uso</div>
+            {grupoSel.usos.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted, padding: "8px 0" }}>Todavía no se ha programado en ninguna fecha. Pulsa «Asignar» para usarla.</div>}
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {grupoSel.usos.map(({ fecha, sesion }) => {
+                const hoyB = todayStr();
+                const activosB = playersBib.filter((p) => p.estado === "activo");
+                const ids = destinatariosEfectivosSesion(sesion, activosB);
+                const tareasDia = (conTareas.find((x) => x.id === sesion.id)?.tareas || []).filter((t) => !t.fecha || t.fecha === fecha);
+                let completos = 0;
+                if (fecha <= hoyB && sesion.enviada && tareasDia.length) {
+                  ids.forEach((id) => {
+                    const n = tareasDia.filter((t) => registrosBib.some((r) => r.jugador_id === id && r.tarea_id === t.id && r.fecha === fecha && (r.enviado === true || r.enviado === "true"))).length;
+                    if (n === tareasDia.length) completos += 1;
+                  });
+                }
+                const mostrarCumpl = fecha <= hoyB && sesion.enviada && ids.length > 0 && tareasDia.length > 0;
+                return (
+                  <div key={`${sesion.id}-${fecha}`} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "9px 12px" }}>
+                    <b style={{ fontSize: 12.5, minWidth: 92 }}>{new Date(fecha + "T00:00:00").toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short", year: "2-digit" })}</b>
+                    <span style={{ flex: 1, minWidth: 120, fontSize: 12, color: ds.inkSecondary }}>{etiquetaDestinoSesion(sesion, playersBib, gruposBib)}</span>
+                    {sesion.md ? <span style={{ fontFamily: dsF.mono, fontSize: 11, color: ds.inkSecondary }}>{sesion.md}</span> : null}
+                    {!sesion.enviada && <span style={{ fontSize: 10.5, color: ds.warning, border: `1px solid ${ds.warning}66`, borderRadius: 999, padding: "1px 8px" }}>borrador</span>}
+                    {fecha > hoyB && sesion.enviada && <span style={{ fontSize: 10.5, color: ds.chart2, border: `1px solid ${ds.chart2}66`, borderRadius: 999, padding: "1px 8px" }}>próxima</span>}
+                    {mostrarCumpl && <span style={{ fontSize: 12, fontWeight: 700, color: completos / ids.length >= 0.8 ? ds.success : completos / ids.length >= 0.5 ? ds.warning : ds.danger }}>{completos}/{ids.length} completa</span>}
                   </div>
-                </div>
-                <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
-                  <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>
-                    {esPct1rm ? "% 1RM objetivo" : "RIR objetivo"}
-                  </div>
-                  <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.ink }}>{esPct1rm ? primeraTarea.pct1rm ?? "—" : primeraTarea.rir ?? "—"}</div>
-                </div>
-              </div>
-            )}
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, lineHeight: 1.5, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px" }}>
-              Esta configuración es la real de la app (no la de un mockup): series/RIR o %1RM con carga sugerida a partir del e1RM del jugador — se edita desde "Editar", igual que siempre.
+                );
+              })}
             </div>
           </div>
         </div>
@@ -13579,7 +12884,7 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
           <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
           <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{plantillas.length} plantillas guardadas</div>
         </div>
-        <DsButton onClick={() => onAbrirModulo && onAbrirModulo("programacion")}>+ Diseñar sesión</DsButton>
+        <DsButton onClick={() => onAbrirModulo && onAbrirModulo("diseno")}>+ Diseñar sesión</DsButton>
       </div>
       <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar plantilla..." style={{ marginBottom: 14, maxWidth: 320 }} />
       {plantillas.length === 0 ? (
@@ -13589,7 +12894,7 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
           {plantillas.map((p) => (
-            <TarjetaPlantillaBibliotecaReal key={p.id} plantilla={p} onAbrir={() => setPlantillaSelId(p.id)} />
+            <TarjetaPlantillaBibliotecaReal key={p.id} plantilla={p.rep} grupo={p} onAbrir={() => setPlantillaSelId(p.id)} />
           ))}
         </div>
       )}
@@ -16879,7 +16184,7 @@ function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destina
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         <div style={{ flexShrink: 0, maxHeight: "44%", overflowY: "auto" }}>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-          ← Volver a Dashboard
+          ← Volver a Inicio
         </button>
         {readOnly && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
@@ -17556,7 +16861,26 @@ export default function App() {
   );
 }
 
-function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setCoachModulo, historialJugador, setHistorialJugador }) {
+function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo: coachModuloProp, setCoachModulo: setCoachModuloProp, historialJugador, setHistorialJugador }) {
+  // Los módulos "programacion" e "historial" ya no existen: Programación vive
+  // en Calendario y el historial de cada jugador dentro de su ficha. Y se puede
+  // abrir Calendario ya filtrado: "calendario:j:<id>" / "calendario:g:<id>".
+  const [calScope, setCalScope] = useState(null);
+  const [fichaPestana, setFichaPestana] = useState("resumen");
+  const abrirFicha = (jugador, pestana) => {
+    setFichaPestana(pestana || "resumen");
+    setHistorialJugador(jugador);
+  };
+  const setCoachModulo = (m) => {
+    if (typeof m === "string" && m.startsWith("calendario:")) {
+      setCalScope(m.slice("calendario:".length));
+      setCoachModuloProp("calendario");
+    } else {
+      if (m === "calendario" || m === "programacion") setCalScope(null);
+      setCoachModuloProp(m === "programacion" ? "calendario" : m === "historial" ? "roster" : m);
+    }
+  };
+  const coachModulo = coachModuloProp === "programacion" ? "calendario" : coachModuloProp === "historial" ? "roster" : coachModuloProp;
 
   if (screen === "portal") {
     return (
@@ -17582,6 +16906,7 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
     return (
       <FichaJugadorModuloReal
         jugador={historialJugador}
+        pestanaInicial={fichaPestana}
         onBack={() => setHistorialJugador(null)}
         onAbrirModulo={(m) => {
           // Navegar desde el rail lateral de la ficha (a otro módulo del
@@ -17599,10 +16924,7 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
     );
   }
   if (coachModulo === "roster") {
-    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={setHistorialJugador} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
-  }
-  if (coachModulo === "historial") {
-    return <HistorialReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
+    return <GestionRosterReal onBack={() => setCoachModulo(null)} onOpenHistory={abrirFicha} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "biblioteca") {
     return <BibliotecaEjerciciosReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
@@ -17610,25 +16932,16 @@ function AppRouter({ screen, setScreen, playerId, setPlayerId, coachModulo, setC
   if (coachModulo === "diseno") {
     return <DisenoSesionReal onBack={() => setCoachModulo(null)} onGuardado={() => setCoachModulo(null)} />;
   }
-  if (coachModulo === "programacion") {
-    return <ProgramacionModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
-  }
   if (coachModulo === "calendario") {
-    return <CalendarioModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
+    return <CalendarioModuloReal key={calScope || "equipo"} scopeInicial={calScope || undefined} onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
   if (coachModulo === "fatiga") {
     return <ControlFatigaModuloReal onBack={() => setCoachModulo(null)} onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} />;
   }
 
-  return <DashboardEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} onOpenHistory={setHistorialJugador} />;
+  return <InicioEntrenadorReal onAbrirModulo={setCoachModulo} onCerrarSesion={() => setScreen("portal")} onOpenHistory={abrirFicha} />;
 }
 
-// Envoltorio: ProgramacionReal necesita la lista de jugadores para el editor de sesiones.
-function ProgramacionModuloReal({ onBack, onAbrirModulo, onCerrarSesion }) {
-  const [players, , playersLoaded] = usePlayers();
-  if (!playersLoaded) return <LoadingBlock />;
-  return <ProgramacionReal players={players} onBack={onBack} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />;
-}
 
 // Cabecera de identidad de la ficha de jugador. Reutiliza exactamente las
 // mismas piezas visuales que ya existían en FilaJugadorReal (punto de
@@ -19587,11 +18900,42 @@ function CalendarioFichaJugadorReal({ jugador, onAbrirModulo }) {
   );
 }
 
-function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion }) {
+// Arriba del Resumen de la ficha: cómo va y qué requiere atención de este
+// jugador (mismas reglas que la bandeja de Inicio), con acceso directo a su semana.
+function FichaAtencionReal({ jugador, onNavigateTab, onAbrirModulo }) {
+  const c = useCarteraEntrenador();
+  if (!c.loaded) return null;
+  const f = c.filas.get(jugador.id);
+  if (!f) return null;
+  const meta = ESTADO_JUGADOR_META[f.estado];
+  const accion = (alerta, a) => {
+    if (a.tipo === "ficha") onNavigateTab(a.pestana || "resumen");
+    else if (a.tipo === "cal") onAbrirModulo(`calendario:j:${jugador.id}`);
+    else if (a.tipo === "fatiga") onAbrirModulo("fatiga");
+  };
+  return (
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 12 }}>
+        <span style={{ fontSize: 11.5, fontWeight: 700, color: meta.color, border: `1px solid ${meta.color}66`, background: `${meta.color}14`, borderRadius: 999, padding: "2px 10px" }}>{meta.label}</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" onClick={() => onAbrirModulo(`calendario:j:${jugador.id}`)} style={{ fontSize: 12.5, fontWeight: 700, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "7px 12px", cursor: "pointer" }}>Ver / planificar su semana →</button>
+      </div>
+      <div>
+        <b style={{ fontSize: 13 }}>Requiere tu atención</b>
+        {f.alertas.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginTop: 4 }}>Nada pendiente con {jugador.name.split(" ")[0]}. Todo al día.</div>}
+        {f.alertas.map((a) => (
+          <FilaAlertaReal key={a.id} alerta={a} onAccion={accion} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion, pestanaInicial }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
-  const [pestana, setPestana] = useState("resumen");
+  const [pestana, setPestana] = useState(pestanaInicial || "resumen");
   const [errorAccion, setErrorAccion] = useState("");
   const { loaded: historialLoaded, sesiones, tareas, registros, ejercicios, retry: retryHistorial } = useHistorialData();
   useEffect(() => {
@@ -19630,7 +18974,7 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
 
   if (!actual) {
     return (
-      <PantallaEntrenadorAncha activo="usuarios" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+      <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -19643,7 +18987,7 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
   }
 
   return (
-    <PantallaEntrenadorAncha activo="usuarios" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+    <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <button
           onClick={onBack}
@@ -19686,7 +19030,10 @@ function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion
           </nav>
           <div style={{ flex: 1, minWidth: 0 }}>
             {pestana === "resumen" ? (
-              <ResumenFichaJugadorReal jugador={actual} onNavigateTab={setPestana} onGuardarObjetivo={guardarObjetivo} />
+              <>
+                <FichaAtencionReal jugador={actual} onNavigateTab={setPestana} onAbrirModulo={onAbrirModulo} />
+                <ResumenFichaJugadorReal jugador={actual} onNavigateTab={setPestana} onGuardarObjetivo={guardarObjetivo} />
+              </>
             ) : pestana === "calendario" ? (
               <CalendarioFichaJugadorReal jugador={actual} onAbrirModulo={onAbrirModulo} />
             ) : pestana === "historial" ? (
