@@ -16,6 +16,34 @@ import {
   sumarMeses,
   labelMes,
 } from "./src/calc/fechas.js";
+import {
+  SEG_POR_REP,
+  SEG_TRANSICION,
+  SEG_TRANSICION_CIRCUITO,
+  SEG_ENTRE_RONDAS,
+  UMBRAL_DESCANSO_ALTERNAR,
+  aSegundosDiseno,
+  descansoRecomendadoSeg,
+  descansoEfectivoSeg,
+  trabajoSerieSeg,
+  estimarTareaSeg,
+  estimarParSeg,
+  estimarResistenciaSeg,
+  estimarCircuitoSeg,
+  emparejarTareasAlternadas,
+  estimarBloqueTareasSeg,
+  sugerirAlternancias,
+  formatearDuracionDiseno,
+} from "./src/calc/duracionTarea.js";
+import {
+  parseResistenciaData,
+  SEG_ADHERENCIA_POR_DEFECTO,
+  pesoTareaAdherencia,
+  tareaEsParaJugador,
+  crearFraccionCumplida,
+  tareasHechasPorJugadorFecha,
+  calcularCumplimientoPauta,
+} from "./src/calc/adherencia.js";
 
 // ============================================================
 // SISTEMA DE DISEÑO "FUERZA" — incrustado aquí mismo (antes eran 3
@@ -1125,64 +1153,9 @@ function useReferenciasFuerza(jugadorId, { todos = false } = {}) {
   return { loaded, rows: inactivo ? [] : rows, items: inactivo ? [] : referenciasComoItems(rows), recargar };
 }
 
-// ---------- Adherencia ponderada por tareas (ENT-07) ----------
-// Antes una sesión contaba como cumplida si el jugador registraba CUALQUIER
-// cosa ese día (con hacer la activación ya salía 100 %). Ahora cada sesión-día
-// vale la fracción de su trabajo que se hizo, ponderando por bloque: lo que
-// más pesa para el rendimiento (Fuerza) cuenta más que lo accesorio. CMJ no
-// pesa (es una medición, no trabajo). Si la sesión no tiene tareas con peso
-// (o no se cargaron), se cae a la regla antigua: algo registrado = cumplida.
-// Peso de una tarea = su duración estimada en segundos (mismo cálculo que el
-// tiempo de sesión del diseñador). Así 40 min de carrera pesan mucho más que
-// dos tareas de core, en vez de contar cada tarea como "una".
-const SEG_ADHERENCIA_POR_DEFECTO = { Fuerza: 600, Resistencia: 1200, Core: 300, Preventivo: 180, Movilidad: 300, "Activación": 300 };
-function pesoTareaAdherencia(t) {
-  const bloque = t.bloque_sesion;
-  if (bloque === "CMJ") return 0;
-  let seg = 0;
-  try {
-    if (bloque === "Resistencia") {
-      const r = parseResistenciaData(t.resistencia_data) || {};
-      seg = estimarResistenciaSeg({ ...r, tipoResistenciaCardio: r.tipo || "" });
-    } else {
-      seg = estimarTareaSeg(
-        { modo: t.modo || "reps", series: t.series, cantidad: t.cantidad, lateralidad: t.lateralidad, descanso: t.descanso_seg, modoCarga: t.modo_carga, pct1rm: t.pct1rm, rir: t.rir },
-        bloque === "Fuerza" ? "Fuerza" : "Core"
-      );
-    }
-  } catch {
-    seg = 0;
-  }
-  return seg > 0 ? seg : SEG_ADHERENCIA_POR_DEFECTO[bloque] ?? 180;
-}
-function crearFraccionCumplida(tareas) {
-  const porSesion = new Map();
-  (tareas || []).forEach((t) => {
-    if (!porSesion.has(t.sesion_id)) porSesion.set(t.sesion_id, []);
-    porSesion.get(t.sesion_id).push(t);
-  });
-  // idsHechos: Set con los ids de las tareas que el jugador tiene hechas ese día.
-  return (sesionId, fecha, idsHechos, jugadorId) => {
-    const hechos = idsHechos || new Set();
-    const relevantes = (porSesion.get(sesionId) || []).filter((t) => (!t.fecha || normalizarFecha(t.fecha) === fecha) && (jugadorId == null || tareaEsParaJugador(t, jugadorId)));
-    const pesoDe = (t) => pesoTareaAdherencia(t);
-    const total = relevantes.reduce((sum, t) => sum + pesoDe(t), 0);
-    if (total <= 0) return hechos.size > 0 ? 1 : 0;
-    const hecho = relevantes.reduce((sum, t) => sum + (hechos.has(t.id) ? pesoDe(t) : 0), 0);
-    return Math.min(1, hecho / total);
-  };
-}
-// jugador::fecha -> Set de ids de tarea hechas, a partir de los items del historial.
-function tareasHechasPorJugadorFecha(items) {
-  const mapa = new Map();
-  items.forEach((it) => {
-    if (!it.done || !it.tareaId) return;
-    const clave = `${it.jugadorId ?? ""}::${it.date}`;
-    if (!mapa.has(clave)) mapa.set(clave, new Set());
-    mapa.get(clave).add(it.tareaId);
-  });
-  return mapa;
-}
+// Adherencia (pesoTareaAdherencia, crearFraccionCumplida,
+// tareasHechasPorJugadorFecha) ahora en src/calc/adherencia.js — importadas
+// arriba.
 
 // ---------- Guardado de sesión tolerante a fallos ----------
 // Guardar una sesión son muchas escrituras seguidas (sesión, tareas,
@@ -1639,19 +1612,7 @@ function parseMateriales(material) {
   }
 }
 
-// Todo lo propio de una tarea de Resistencia (tipo continuo/HIIT/RSA y sus
-// campos) se guarda como JSON en la columna `resistencia_data`. Este par de
-// helpers lo interpreta de forma segura y construye el texto legible que ve
-// tanto el entrenador (Programación) como el jugador — un solo sitio para
-// los dos, así no se desincronizan.
-function parseResistenciaData(json) {
-  if (!json) return null;
-  try {
-    return JSON.parse(json);
-  } catch {
-    return null;
-  }
-}
+// parseResistenciaData ahora en src/calc/adherencia.js — importada arriba.
 
 // Convierte un registro de "tareas" del backend en el objeto de trabajo
 // (draft) que usan los editores de sesión — un solo mapeo compartido para
@@ -12296,49 +12257,8 @@ function evaluarRendimientoEquipo(itemsPorJugador, jugadores, inicio, fin) {
   return { resultados, sistemicos };
 }
 
-// Cumplimiento de la pauta (ejecutado frente a prescrito): compara lo que el
-// jugador registró con lo que la tarea pedía, sin necesitar más datos que los
-// que ya se recogen. Tres lecturas independientes, cada una solo con las
-// tareas donde tiene sentido (nunca se rellena con supuestos):
-// - series: series hechas / series pautadas (solo registros con series_hechas).
-// - reps: en cuántas tareas la serie top llegó al objetivo de repeticiones.
-// - RIR: diferencia media entre el RIR real y el objetivo (negativa = fue
-//   más cerca del fallo de lo pautado; positiva = se guardó más de lo pautado).
-// Excluye Resistencia y CMJ. Devuelve null en cada lectura sin datos.
-function calcularCumplimientoPauta(items, desde, hasta) {
-  const regs = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.date >= desde && it.date <= hasta);
-  let seriesHechas = 0;
-  let seriesPautadas = 0;
-  let repsOk = 0;
-  let repsTotal = 0;
-  let rirDifSuma = 0;
-  let rirN = 0;
-  regs.forEach((it) => {
-    const pautadas = Number(it.sets);
-    if (it.seriesHechas !== "" && it.seriesHechas != null && Number.isFinite(pautadas) && pautadas > 0) {
-      seriesHechas += Number(it.seriesHechas) || 0;
-      seriesPautadas += pautadas;
-    }
-    const repsObj = Number(it.reps);
-    const repsReal = Number(it.repsReal);
-    if (it.unidad === "reps" && it.repsReal !== "" && Number.isFinite(repsObj) && repsObj > 0 && Number.isFinite(repsReal)) {
-      repsTotal++;
-      if (repsReal >= repsObj) repsOk++;
-    }
-    const rirObj = it.rir !== "" && it.rir != null ? Number(it.rir) : NaN;
-    const rirReal = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : NaN;
-    if (Number.isFinite(rirObj) && Number.isFinite(rirReal)) {
-      rirDifSuma += rirReal - rirObj;
-      rirN++;
-    }
-  });
-  return {
-    tareas: regs.length,
-    series: seriesPautadas ? { hechas: seriesHechas, pautadas: seriesPautadas, pct: Math.round((seriesHechas / seriesPautadas) * 100) } : null,
-    reps: repsTotal ? { ok: repsOk, total: repsTotal, pct: Math.round((repsOk / repsTotal) * 100) } : null,
-    rirDif: rirN ? { media: rirDifSuma / rirN, n: rirN } : null,
-  };
-}
+// calcularCumplimientoPauta ahora en src/calc/adherencia.js — importada
+// arriba.
 
 // ---------- Fase 2 · carga de fuerza por microciclo ----------
 // Vincula las sesiones de fuerza con los microciclos del CMJ SOLO por fecha
@@ -13955,170 +13875,12 @@ function IconoBloqueDiseno({ id }) {
   }
 }
 
-// ---------- Tiempo estimado de sesión y descanso recomendado ----------
-// Estimación orientativa para el diseñador: tiempo de trabajo de cada serie
-// (reps × ritmo medio, o el tiempo pautado) + descanso entre series. El
-// descanso sale de lo que escribas en la tarea o, si lo dejas en blanco, de
-// una recomendación según la intensidad (%1RM / RIR). Alternar dos ejercicios
-// de zonas distintas esconde el descanso de uno dentro del trabajo del otro.
-const SEG_POR_REP = 4;
-const SEG_TRANSICION = 30; // cambio de ejercicio / colocar material
-const SEG_TRANSICION_CIRCUITO = 15;
-const SEG_ENTRE_RONDAS = 60;
-const UMBRAL_DESCANSO_ALTERNAR = 90; // solo se sugiere alternar si el descanso da para ello
-
-function aSegundosDiseno(valor, unidad) {
-  const n = Number(valor);
-  if (!n || Number.isNaN(n) || n < 0) return 0;
-  return /^min/i.test(unidad || "") ? n * 60 : n;
-}
-
-function descansoRecomendadoSeg(t, bloque) {
-  if (bloque !== "Fuerza") return 45;
-  if (t.modo && t.modo !== "reps") return 60;
-  if (t.modoCarga === "pct1rm") {
-    const p = Number(t.pct1rm);
-    if (!p || Number.isNaN(p)) return 120;
-    if (p >= 90) return 240;
-    if (p >= 85) return 210;
-    if (p >= 80) return 180;
-    if (p >= 70) return 150;
-    if (p >= 60) return 120;
-    return 90;
-  }
-  if (t.rir === "" || t.rir == null || Number.isNaN(Number(t.rir))) return 120;
-  const r = Number(t.rir);
-  if (r <= 1) return 180;
-  if (r <= 2) return 150;
-  if (r <= 3) return 120;
-  return 90;
-}
-
-function descansoEfectivoSeg(t, bloque) {
-  const d = Number(t.descanso);
-  return d > 0 ? d : descansoRecomendadoSeg(t, bloque);
-}
-
-function trabajoSerieSeg(t) {
-  const c = Number(t.cantidad);
-  if (!c || Number.isNaN(c)) return 0;
-  const base = t.modo === "tiempo" ? c : t.modo === "minutos" ? c * 60 : t.modo === "metros" ? 30 : c * SEG_POR_REP;
-  return t.lateralidad === "unilateral" ? base * 2 : base;
-}
-
-function estimarTareaSeg(t, bloque) {
-  const trabajo = trabajoSerieSeg(t);
-  if (!trabajo) return 0;
-  const series = Math.max(1, Number(t.series) || 1);
-  return series * trabajo + (series - 1) * descansoEfectivoSeg(t, bloque) + SEG_TRANSICION;
-}
-
-// Dos ejercicios alternados (A, B, A, B…): entre dos series seguidas de A
-// transcurre el trabajo de B más lo que haga falta de espera, y viceversa.
-function estimarParSeg(a, b, bloque) {
-  const tA = trabajoSerieSeg(a);
-  const tB = trabajoSerieSeg(b);
-  if (!tA || !tB) return estimarTareaSeg(a, bloque) + estimarTareaSeg(b, bloque);
-  const sA = Math.max(1, Number(a.series) || 1);
-  const sB = Math.max(1, Number(b.series) || 1);
-  const rA = descansoEfectivoSeg(a, bloque);
-  const rB = descansoEfectivoSeg(b, bloque);
-  const ciclo = Math.max(tA + tB, tA + rA, tB + rB);
-  const comunes = Math.min(sA, sB);
-  const sobraA = sA - comunes;
-  const sobraB = sB - comunes;
-  return comunes * ciclo + sobraA * (tA + rA) + sobraB * (tB + rB) + SEG_TRANSICION;
-}
-
-function estimarResistenciaSeg(t) {
-  const tipo = t.tipoResistenciaCardio || "";
-  const tiempo = aSegundosDiseno(t.tiempo, t.tiempoUnidad);
-  const recup = aSegundosDiseno(t.recuperacion, t.recuperacionUnidad);
-  const bloques = Math.max(1, Number(t.bloques) || 1);
-  if (tipo === "continuo") {
-    const series = Math.max(1, Number(t.series) || 1);
-    return tiempo ? series * tiempo + (series - 1) * recup : 0;
-  }
-  if (tipo === "hiit") {
-    const intervalos = Number(t.intervalos) || 0;
-    if (!intervalos || !tiempo) return 0;
-    return bloques * (intervalos * tiempo + (intervalos - 1) * recup) + (bloques - 1) * recup;
-  }
-  if (tipo === "rsa") {
-    const series = Number(t.series) || 0;
-    const trabajo = Number(t.duracion) || (Number(t.distancia) ? Number(t.distancia) / 5 : 0);
-    if (!series || !trabajo) return 0;
-    return bloques * (series * trabajo + (series - 1) * recup) + (bloques - 1) * recup;
-  }
-  return 0;
-}
-
-function estimarCircuitoSeg(c, bloque) {
-  const rondas = Math.max(1, Number(c.rondas) || 1);
-  const porRonda = (c.tareas || []).reduce((sum, t) => sum + trabajoSerieSeg(t) + SEG_TRANSICION_CIRCUITO, 0);
-  return porRonda ? rondas * porRonda + (rondas - 1) * SEG_ENTRE_RONDAS + SEG_TRANSICION : 0;
-}
-
-// Empareja tareas sueltas de un bloque según `alternaCon` (id de ejercicio del
-// compañero). Devuelve { pares: [[a, b]], sueltas: [t…] }.
-function emparejarTareasAlternadas(tareas) {
-  const usadas = new Set();
-  const pares = [];
-  tareas.forEach((a) => {
-    if (usadas.has(a.key) || !a.alternaCon) return;
-    const b = tareas.find((x) => x.key !== a.key && !usadas.has(x.key) && x.ejercicioId === a.alternaCon);
-    if (!b) return;
-    usadas.add(a.key);
-    usadas.add(b.key);
-    pares.push([a, b]);
-  });
-  return { pares, sueltas: tareas.filter((t) => !usadas.has(t.key)) };
-}
-
-function estimarBloqueTareasSeg(tareas, circuitos, bloque) {
-  const { pares, sueltas } = emparejarTareasAlternadas(tareas);
-  return (
-    pares.reduce((sum, [a, b]) => sum + estimarParSeg(a, b, bloque), 0) +
-    sueltas.reduce((sum, t) => sum + estimarTareaSeg(t, bloque), 0) +
-    circuitos.reduce((sum, c) => sum + estimarCircuitoSeg(c, bloque), 0)
-  );
-}
-
-// Sugerencias: parejas de tareas sueltas de zonas distintas en las que una de
-// ellas tiene descanso largo. Ahorro mínimo 2 min para no llenar de ruido.
-function sugerirAlternancias(tareas, bloque, zonaDe) {
-  const { sueltas } = emparejarTareasAlternadas(tareas);
-  const candidatas = sueltas.filter((t) => trabajoSerieSeg(t) > 0);
-  const opciones = [];
-  candidatas.forEach((a, i) => {
-    if ((Number(a.series) || 1) < 2 || descansoEfectivoSeg(a, bloque) < UMBRAL_DESCANSO_ALTERNAR) return;
-    candidatas.forEach((b, j) => {
-      if (i === j) return;
-      const za = zonaDe(a);
-      const zb = zonaDe(b);
-      if (!za || !zb || za === zb) return;
-      const ahorro = estimarTareaSeg(a, bloque) + estimarTareaSeg(b, bloque) - estimarParSeg(a, b, bloque);
-      if (ahorro >= 120) opciones.push({ a, b, ahorro });
-    });
-  });
-  opciones.sort((x, y) => y.ahorro - x.ahorro);
-  const usadas = new Set();
-  const out = [];
-  opciones.forEach((o) => {
-    if (usadas.has(o.a.key) || usadas.has(o.b.key)) return;
-    usadas.add(o.a.key);
-    usadas.add(o.b.key);
-    out.push(o);
-  });
-  return out;
-}
-
-function formatearDuracionDiseno(seg) {
-  if (!seg) return "—";
-  const min = Math.round(seg / 60);
-  if (min < 60) return `${min} min`;
-  return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
-}
+// El motor de "tiempo estimado de sesión y descanso recomendado"
+// (aSegundosDiseno, descansoRecomendadoSeg, descansoEfectivoSeg,
+// trabajoSerieSeg, estimarTareaSeg, estimarParSeg, estimarResistenciaSeg,
+// estimarCircuitoSeg, emparejarTareasAlternadas, estimarBloqueTareasSeg,
+// sugerirAlternancias, formatearDuracionDiseno) ahora en
+// src/calc/duracionTarea.js — importado arriba.
 
 function CampoEtiquetadoDiseno({ etiqueta, children, w }) {
   return (
@@ -15285,17 +15047,7 @@ function repartoPreventivoPorCategoria(targetPlayerIds, allPlayers) {
   });
   return { porCategoria, sinCategoriaUnica };
 }
-// Una tarea con `para_jugadores` (JSON de ids) solo es para esos jugadores;
-// vacía = para todos los destinatarios de la sesión.
-function tareaEsParaJugador(t, jugadorId) {
-  if (!t || !t.para_jugadores) return true;
-  try {
-    const ids = JSON.parse(t.para_jugadores);
-    return !Array.isArray(ids) || !ids.length || ids.includes(jugadorId);
-  } catch {
-    return true;
-  }
-}
+// tareaEsParaJugador ahora en src/calc/adherencia.js — importada arriba.
 
 function ListaJugadoresCheckReal({ players, seleccionados, onCambiar, grupos = [] }) {
   const alternar = (id) => {

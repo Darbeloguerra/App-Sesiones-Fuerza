@@ -55,7 +55,15 @@ Storage no está creado y que ningún botón de la app la llama. No se toca.
 
 No se ha confirmado si sigue en uso. No se toca sin preguntar.
 
-## 7. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
+## 7. Adherencia estaba acoplada al motor de duración de tareas (resuelto en el Paso 2)
+
+`pesoTareaAdherencia` dependía de `estimarTareaSeg`/`estimarResistenciaSeg`,
+que vivían ~12.700 líneas más abajo (zona del Diseñador de sesiones). Se
+decidió (con el usuario) extraer también ese motor de duración a
+`src/calc/duracionTarea.js`, y `src/calc/adherencia.js` lo importa de ahí.
+Sin cambios de comportamiento, con 16 tests propios del motor de duración.
+
+## 8. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
 
 Detectado al hacer `npm install` en el Paso 0. No se ha tocado ninguna
 dependencia (instrucción explícita del usuario). Anotado para que se decida
