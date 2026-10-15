@@ -1,0 +1,26 @@
+# Proyecto: app de fuerza y control de fatiga (fútbol sub-19)
+
+## Qué es
+App web para un entrenador (tablet/escritorio) y sus jugadores (móvil).
+- Entrenador: Inicio con alertas, Calendario, Usuarios y fichas, Biblioteca de ejercicios y plantillas, Diseñador de sesiones, Control de fatiga (CMJ).
+- Jugador: Dashboard, sesión de hoy (registro de carga/reps/RIR), Calendario, Progreso, CMJ.
+
+## Stack
+React + Vite, Supabase (Postgres + RLS), lucide-react, desplegado en Vercel (cada cambio en main se publica solo). Acceso por código/PIN mediante funciones RPC de Supabase (entrar, acceso_activo, quien_soy, salir).
+
+## Estructura actual
+Todo el código real está en App.jsx (raíz del repositorio, ~19.000 líneas). Los demás .jsx de la raíz (biblioteca-ejercicios, dashboard-entrenador, diseno-sesion, gestion-roster, pantalla-jugador, portal-acceso, programacion) son versiones antiguas o de diseño: NO se usan, ignóralos salvo que te lo pida.
+
+## Decisiones de dominio (no cambiar sin preguntarme)
+- El progreso de fuerza se mide por 1RM estimado (e1RM) por EJERCICIO + MATERIAL. Multipower y barra libre son progresos distintos.
+- e1RM = carga / %1RM(RTF), con RTF = reps + RIR. Solo series de hasta 12 repeticiones con RIR informado.
+- Adherencia ponderada por duración estimada de cada tarea. Semana cumplida = adherencia >= 80 %.
+- Registros con enviado=false son borradores y no cuentan en estadísticas.
+- Fechas siempre en hora local del dispositivo, nunca UTC.
+
+## Cómo trabajar conmigo
+- Soy entrenador, no programador: explícame las cosas en lenguaje sencillo.
+- En cambios grandes, primero plan y espero mi aprobación.
+- Trabaja siempre en una rama nueva, nunca directamente en main.
+- Si detectas un bug fuera del alcance, anótalo en BUGS_ENCONTRADOS.md en vez de arreglarlo en silencio.
+- No cambies el esquema de Supabase ni las políticas RLS sin avisarme.
