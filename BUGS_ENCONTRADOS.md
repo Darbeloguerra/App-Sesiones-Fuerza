@@ -63,7 +63,19 @@ decidió (con el usuario) extraer también ese motor de duración a
 `src/calc/duracionTarea.js`, y `src/calc/adherencia.js` lo importa de ahí.
 Sin cambios de comportamiento, con 16 tests propios del motor de duración.
 
-## 8. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
+## 8. El motor CMJ tenía 3 constantes de color mezcladas con el cálculo (resuelto en el Paso 3)
+
+`CMJ_STATUS_META`, `CMJ_TAG_META` y `CMJ_METRIC_CHART_COLOR` vivían dentro
+del bloque que el propio código describía como "funciones puras — no
+dependen de React" (comentario original), pero las 3 referencian `ds`
+(paleta de colores) para pintar etiquetas y gráficas. Se dejaron en App.jsx
+(donde vive `ds`) y el resto del motor se movió a `src/calc/cmj.js`. Donde
+`cmjHoyDe` necesitaba solo el TEXTO de `CMJ_TAG_META` (no el color), se
+duplicó como `CMJ_TAG_LABELS` dentro de cmj.js — 3 strings, comentado,
+sin riesgo de desincronización salvo que alguien cambie esas 3 etiquetas
+de texto sin acordarse de este duplicado.
+
+## 9. `npm audit` reporta 2 vulnerabilidades (1 moderada, 1 alta)
 
 Detectado al hacer `npm install` en el Paso 0. No se ha tocado ninguna
 dependencia (instrucción explícita del usuario). Anotado para que se decida
