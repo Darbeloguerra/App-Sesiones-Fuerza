@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
-import { ds, dsF, dsR } from "./designSystem.jsx";
-import { extractYouTubeId, esVideoDirecto } from "./hooks.js";
+import { Loader2, Play, AlertTriangle } from "lucide-react";
+import { ds, dsF, dsR, DsButton } from "./designSystem.jsx";
+import { extractYouTubeId, esVideoDirecto, miniaturaTarea, parseMateriales, formatearDetalleTareaCoach } from "./hooks.js";
 import { fmtDateLabel, fmtDateShort } from "../calc/fechas.js";
 
 // Reproductor incrustado. Tres casos:
@@ -386,6 +386,206 @@ export function GraficaProgresoCargaReal({ puntos, unidad = "kg", mostrarListaCo
             </div>
           );
         })()
+      )}
+    </div>
+  );
+}
+
+export function TareaVisualReal({ tarea }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
+      {tarea.gif ? (
+        <div style={{ position: "relative", width: 42, height: 42, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {miniaturaTarea(tarea.gif) && (
+            <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 42, height: 42, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+          )}
+          {(extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
+              <Play size={13} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
+            </div>
+          )}
+        </div>
+      ) : (
+        <div style={{ width: 42, height: 42, borderRadius: dsR.md, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: ds.inkMuted, fontSize: 9, fontFamily: dsF.mono }}>
+          VÍDEO
+        </div>
+      )}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 12.5, color: ds.ink }}>{tarea.nombre}</div>
+        <div style={{ fontSize: 10.5, color: ds.inkMuted, fontFamily: dsF.mono }}>{tarea.detalle}</div>
+        {tarea.materiales && tarea.materiales.length > 0 && (
+          <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginTop: 3 }}>
+            {tarea.materiales.map((m) => (
+              <span key={m} style={{ fontSize: 9.5, color: ds.accent, fontFamily: dsF.mono }}>
+                {m}
+              </span>
+            ))}
+          </div>
+        )}
+        {tarea.nota && (
+          <div style={{ display: "flex", gap: 4, marginTop: 3, fontSize: 10, color: ds.inkSecondary }}>
+            <span style={{ color: ds.warning, display: "inline-flex" }}><AlertTriangle size={12} /></span>
+            <span>{tarea.nota}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// formatearDetalleTareaCoach ahora en src/core/hooks.js — importada arriba.
+
+// useReferenciasPorEjercicio ahora en src/screens/DisenoSesion.jsx (único
+// consumidor: el Diseñador de sesiones).
+
+export function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, soloLectura, compacta, abiertaInicial, jugadoresConRegistros = 0 }) {
+  const [abierta, setAbierta] = useState(abiertaInicial ?? esHoy);
+  const [confirmando, setConfirmando] = useState(false);
+  const [borrando, setBorrando] = useState(false);
+  const bloques = {};
+  const circuitoBuffer = {};
+  (sesion.tareas || []).forEach((t) => {
+    // Si la tarea tiene fecha propia (Movilidad/Preventivo con varias fechas
+    // en la misma sesión), se agrupa aparte con su fecha en la etiqueta, para
+    // no mezclar el ejercicio de un día con el de otro bajo el mismo nombre.
+    const nombreBloque = t.fecha ? `${t.bloque_sesion || "General"} · ${fmtDateShort(t.fecha)}` : t.bloque_sesion || "General";
+    if (t.circuito_id) {
+      if (!circuitoBuffer[t.circuito_id]) circuitoBuffer[t.circuito_id] = { nombreBloque, tareas: [] };
+      circuitoBuffer[t.circuito_id].tareas.push(t);
+    } else {
+      if (!bloques[nombreBloque]) bloques[nombreBloque] = [];
+      bloques[nombreBloque].push({ tipo: "suelta", tarea: t });
+    }
+  });
+  Object.entries(circuitoBuffer).forEach(([circuitoId, datos]) => {
+    if (!bloques[datos.nombreBloque]) bloques[datos.nombreBloque] = [];
+    bloques[datos.nombreBloque].push({
+      tipo: "circuito",
+      circuitoId,
+      tareas: datos.tareas.slice().sort((a, b) => (Number(a.orden_en_circuito) || 999) - (Number(b.orden_en_circuito) || 999)),
+    });
+  });
+
+  return (
+    <div style={{ background: ds.surface, border: `1px solid ${esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: dsR.lg, overflow: "hidden" }}>
+      <div onClick={() => setAbierta((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, padding: "14px 16px", cursor: "pointer" }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {sesion.nombre && <div style={{ fontSize: 13.5, fontWeight: 700, color: ds.accent, marginBottom: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{sesion.nombre}</div>}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            {esHoy && !compacta && (
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>
+                HOY
+              </span>
+            )}
+            {!compacta && (sesion.fechas || []).map((f) => (
+              <span key={f} style={{ fontSize: 13, fontWeight: 600, color: ds.ink }}>
+                {fmtDateShort(f)}
+              </span>
+            ))}
+            {!compacta && !(sesion.fechas || []).length && <span style={{ fontSize: 13, fontWeight: 600, color: ds.inkMuted }}>Sin fecha todavía</span>}
+            {sesion.md && (
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 4, padding: "1px 6px" }}>{sesion.md}</span>
+            )}
+            {sesion.enviada ? (
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.success, border: `1px solid ${ds.successBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>✓ ENVIADA</span>
+            ) : (
+              <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.warning, border: `1px solid ${ds.warning}55`, borderRadius: 4, padding: "1px 6px" }}>BORRADOR</span>
+            )}
+          </div>
+          <div style={{ fontSize: 11.5, color: ds.inkMuted, marginTop: 3 }}>
+            {!sesion.jugadores_destino || !sesion.jugadores_destino.length ? "Todo el equipo" : `${sesion.jugadores_destino.length} jugador(es)`}
+            {(sesion.fechas || []).length > 1 && (compacta ? ` · también: ${sesion.fechas.slice().sort().map((f) => fmtDateShort(f)).join(", ")}` : ` · lote de ${sesion.fechas.length} fechas`)}
+          </div>
+        </div>
+        <span style={{ color: ds.inkMuted, fontSize: 12, transform: abierta ? "rotate(90deg)" : "none" }}>›</span>
+      </div>
+      {abierta && (
+        <div style={{ borderTop: `1px solid ${ds.border}`, padding: "12px 16px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {sesion.objetivo && (
+            <div style={{ fontSize: 12, color: ds.inkSecondary }}>
+              <strong style={{ color: ds.ink }}>Objetivo:</strong> {sesion.objetivo}
+            </div>
+          )}
+          {Object.entries(bloques).map(([nombreBloque, items]) => (
+            <div key={nombreBloque}>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: ds.inkSecondary, marginBottom: 6 }}>{nombreBloque}</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {items.map((item) =>
+                  item.tipo === "circuito" ? (
+                    <div key={item.circuitoId} style={{ border: `1.5px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: `${ds.surface}40` }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.05em", color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 4, padding: "1px 6px" }}>CIRCUITO</span>
+                      </div>
+                      {item.tareas.map((t, i) => (
+                        <TareaVisualReal
+                          key={t.id}
+                          tarea={{
+                            nombre: `${i + 1}. ${t.nombreEjercicio}`,
+                            detalle: formatearDetalleTareaCoach(t),
+                            gif: t.gif_url,
+                            nota: t.nota,
+                            materiales: parseMateriales(t.material),
+                          }}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <TareaVisualReal
+                      key={item.tarea.id}
+                      tarea={{
+                        nombre: item.tarea.nombreEjercicio,
+                        detalle: formatearDetalleTareaCoach(item.tarea),
+                        gif: item.tarea.gif_url,
+                        nota: item.tarea.nota,
+                        materiales: parseMateriales(item.tarea.material),
+                      }}
+                    />
+                  )
+                )}
+              </div>
+            </div>
+          ))}
+          {!soloLectura && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", paddingTop: 4, borderTop: `1px solid ${ds.border}`, marginTop: 2 }}>
+              <DsButton variant="secondary" size="sm" onClick={() => onEditar(sesion)} >
+                Editar esta sesión
+              </DsButton>
+              {onReutilizar && (
+                <DsButton variant="secondary" size="sm" onClick={() => onReutilizar(sesion)} style={{ borderColor: ds.accentBorderSubtle, color: ds.accent }}>
+                  Reutilizar como nueva
+                </DsButton>
+              )}
+              {confirmando ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <span style={{ fontSize: 12, color: ds.danger }}>
+                    {jugadoresConRegistros > 0
+                      ? `${jugadoresConRegistros} jugador${jugadoresConRegistros === 1 ? "" : "es"} ya registr${jugadoresConRegistros === 1 ? "ó" : "aron"} esta sesión. Si la eliminas, su entrenamiento se conserva pero ya no podrá asociarse a ella. ¿Eliminarla igualmente?`
+                      : sesion.enviada
+                      ? "Esta sesión ya se envió — ¿eliminarla igualmente?"
+                      : "¿Eliminar esta sesión? No se puede deshacer."}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      setBorrando(true);
+                      await onEliminar(sesion.id);
+                    }}
+                    disabled={borrando}
+                    style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.danger}`, background: `${ds.danger}22`, color: ds.danger, cursor: "pointer", fontWeight: 600, opacity: borrando ? 0.6 : 1 }}
+                  >
+                    {borrando ? "Eliminando..." : "Sí, eliminar"}
+                  </button>
+                  <button onClick={() => setConfirmando(false)} disabled={borrando} style={{ fontSize: 12, padding: "6px 12px", borderRadius: dsR.sm, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}>
+                    Cancelar
+                  </button>
+                </div>
+              ) : (
+                <DsButton variant="danger" size="sm" onClick={() => setConfirmando(true)} style={{ marginLeft: "auto" }}>
+                  Eliminar sesión
+                </DsButton>
+              )}
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

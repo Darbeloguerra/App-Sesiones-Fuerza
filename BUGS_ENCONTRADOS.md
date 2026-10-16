@@ -312,3 +312,53 @@ desde `Dashboard.jsx` y se importa en `App.jsx`. A diferencia de los
 puntos 16-19, este no llegó a estar roto en ningún commit — lo cogió la
 rutina de verificación (ambos scripts relanzados contra `App.jsx` tras
 cada extracción) antes de guardar el paso.
+
+## 22. Tres funciones más de código muerto, ya desde el original — anotadas, no tocadas
+
+Al extraer la Ficha de jugador se encontraron otras tres piezas sin
+ningún uso real en todo el archivo: `claveSesionVisible` y
+`GraficoProgresionCarga` (junto a `HistorialPorJugador`) y
+`etiquetaCargaFuerza` (junto a `resumenFuerzaSalto`). Comprobado contra
+el primer commit: las tres ya estaban igual de huérfanas entonces — se
+suman a la lista del punto 20 (`LISTA_MOVIL_MAX_ALTO`,
+`SEM_COLOR_DASHBOARD`, `sparklinePuntos`). Parecen más restos de
+versiones anteriores de la pantalla.
+
+**No se tocan** (no se borra código). Se mueven junto con el resto del
+bloque al que pertenecían físicamente, a `src/screens/FichaJugador.jsx`,
+sin usarlas — quedan anotadas aquí para una limpieza futura a propósito.
+
+## 23. BUGS (detectados antes de comprometerlos): 3 funciones usadas por la Ficha de jugador que quedaron atrás en App.jsx
+
+Al extraer `CabeceraFichaJugadorReal`, `ResumenFichaJugadorReal`,
+`CmjFichaJugadorReal`, `DatosPorRevisarFuerzaReal`,
+`DatosPorRevisarCmjReal`, `CalendarioFichaJugadorReal`,
+`FichaJugadorModuloReal` y el resto de la Ficha de jugador a
+`src/screens/FichaJugador.jsx`, el script de llamadas a función
+encontró 3 funciones que la Ficha de jugador usa pero que habían
+quedado atrás en `App.jsx`, sin exportar ni importar en ningún sitio:
+
+- `detectarRegistrosAtipicos` y `detectarCmjAtipicos` (con su constante
+  `MIN_REGISTROS_PARA_REVISAR`) — la detección de registros de carga y
+  saltos CMJ atípicos, usada por las pestañas "Datos por revisar" de la
+  Ficha.
+- `resumenFuerzaSalto` (con `NIVEL_CARGA_FUERZA_META`) — el cruce entre
+  carga de fuerza y caída de salto en `CmjFichaJugadorReal`.
+
+Las tres estaban físicamente muy lejos de donde se usan (la primera
+cerca de la cabecera del archivo, en la zona de "Datos por revisar";
+`resumenFuerzaSalto` cerca del final, junto a piezas de Biblioteca) —
+otro caso del mismo patrón de funciones "mal archivadas" por el uso
+intensivo de hoisting del código original (ver puntos 13 y 15).
+
+También se encontró que `estadoDiaCalendario` — definida junto al resto
+de helpers de Calendario (todavía sin extraer) — en realidad no la usa
+Calendario en absoluto: solo la usa el mini-calendario de la propia
+Ficha de jugador. Se mueve con ella, dejando el resto de Calendario
+intacto para su propio sub-paso.
+
+**Corregido antes de comprometer el paso:** las 4 piezas (y
+`NIVEL_CARGA_FUERZA_META`/`MIN_REGISTROS_PARA_REVISAR`) se mueven a
+`src/screens/FichaJugador.jsx`. Ninguna llegó a estar rota en un
+commit — las encontró la rutina de verificación (script de llamadas a
+función relanzado contra `FichaJugador.jsx`) antes de guardar el paso.
