@@ -107,20 +107,18 @@ tenía la app en sus 5 copias (no es algo que haya introducido esta
 reorganización) y en la práctica `repsReal` casi nunca llega vacío desde
 los formularios. Queda anotado por si se quiere endurecer el guard.
 
-## 12. Funciones de "récord de carga"/"cambios de e1RM" no se movieron a src/calc/e1rm.js
+## 12. Funciones de "récord de carga"/"cambios de e1RM" no se movieron a src/calc/e1rm.js — RESUELTO en el Paso 5.5b
 
-`calcularRecordsCargaJugador`, `calcularCambiosE1rm`, `cambiosRobustosE1rm`,
-`evaluarRendimientoEquipo`, `calcularCargaFuerzaPorMicro` y
-`calcularCargaSugerida` siguen en App.jsx (no en `src/calc/e1rm.js`) porque
-dependen de `materialEfectivo`/`EQUIPOS_AMBIGUOS`/`claveDisenoTarea`/
-`medianaNum` — utilidades de propósito general usadas por muchas pantallas
-(Diseñador de sesiones, Historial, Ficha de jugador...), no solo por el
-e1RM. Moverlas habría arrastrado esa infraestructura más amplia fuera de
-alcance de "unificar el e1RM". Estas funciones ya delegan en la función
-compartida `e1rmDeValores` (importada de `src/calc/e1rm.js`) para el
-cálculo en sí, así que la duplicación de la FÓRMULA queda resuelta igual;
-solo el "dónde vive el archivo" se queda en App.jsx por ahora. Candidatas a
-mover en una fase posterior, junto con `materialEfectivo` y compañía.
+En el Paso 4 se decidió dejar `calcularRecordsCargaJugador`,
+`calcularCambiosE1rm`, `cambiosRobustosE1rm`, `evaluarRendimientoEquipo`,
+`calcularCargaFuerzaPorMicro` y `calcularCargaSugerida` en App.jsx porque
+dependían de `materialEfectivo`/`EQUIPOS_AMBIGUOS`/`claveDisenoTarea`/
+`medianaNum`, infraestructura más amplia fuera de alcance de aquel paso.
+Al llegar al Paso 5 (separar Roster), `useCarteraEntrenador` —compartida
+por Roster, Dashboard y Ficha— resultó depender de este mismo motor, así
+que se promovió entero a `src/calc/e1rm.js`, junto con
+`materialEfectivo`/`EQUIPOS_AMBIGUOS`/`claveDisenoTarea`/`medianaNum`,
+con 14 tests nuevos.
 
 ## 13. `useMicrociclosTipo`/`usePartidos` vivían "dentro" de Calendario aunque las usa también CMJ y Dashboard (resuelto en el Paso 5, pantalla CMJ)
 
@@ -187,3 +185,26 @@ haberla importado nunca.
 (comparar las etiquetas JSX en mayúscula de cada pantalla contra sus
 imports) que se añade a partir de ahora a la rutina de cada sub-paso,
 precisamente para detectar este tipo de fallo antes de comprometerlo.
+
+## 17. BUGS REALES: 3 funciones más sin importar en pantallas ya separadas — CORREGIDOS
+
+El script del punto 16 solo comparaba etiquetas JSX en MAYÚSCULA
+(componentes). Al preparar Roster se construyó un segundo script que
+también revisa llamadas a función en minúscula, y encontró 3 fallos más
+que ya estaban comprometidos en commits anteriores:
+
+- `src/screens/BibliotecaEjercicios.jsx`: usaba `destinatariosEfectivosSesion`,
+  `etiquetaDestinoSesion` y `fmtHaceDias` sin importarlas (Paso 5.4).
+- `src/screens/ControlFatiga.jsx`: usaba `sumarDiasFecha` e
+  `inicioSemanaCalendario` sin importarlas (Paso 5.3).
+
+Ninguno de los 4 se había disparado en las comprobaciones visuales
+anteriores porque esas rutas de código (vincular un partido en CMJ,
+mostrar "última vez usada" de una plantilla en Biblioteca) no se llegaron
+a ejercitar sin credenciales de entrenador reales.
+
+**Corregido** en el Paso 5.6 (promoviendo `destinatariosEfectivosSesion` y
+`etiquetaDestinoSesion` a `src/core/hooks.js`, ya que también las
+necesita Calendario). El segundo script de verificación (llamadas a
+función en minúscula, no solo componentes JSX) se suma a la rutina de
+cada sub-paso siguiente, junto con el del punto 16.

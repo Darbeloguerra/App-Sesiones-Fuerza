@@ -17,8 +17,10 @@ import {
   extractYouTubeId,
   esVideoDirecto,
   invalidateBootstrapCache,
+  destinatariosEfectivosSesion,
+  etiquetaDestinoSesion,
 } from "../core/hooks.js";
-import { todayStr } from "../calc/fechas.js";
+import { todayStr, fmtHaceDias } from "../calc/fechas.js";
 import { DisenoSesionReal } from "./DisenoSesion.jsx";
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];

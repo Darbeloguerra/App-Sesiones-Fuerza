@@ -192,6 +192,8 @@ import {
   useBootstrapProgramacion,
   useMicrociclosTipo,
   usePartidos,
+  destinatariosEfectivosSesion,
+  etiquetaDestinoSesion,
 } from "./src/core/hooks.js";
 import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "./src/core/cmjDisplay.jsx";
 import { PortalAccesoRaiz } from "./src/screens/Portal.jsx";
@@ -3676,31 +3678,8 @@ function TarjetaSesionReal({ sesion, esHoy, onEditar, onEliminar, onReutilizar, 
 // ids) que ya usa el resto de la app — "grupo" y "jugador" aquí son solo
 // FORMAS DE MIRAR ese mismo dato, no una columna nueva.
 
-// Destinatarios efectivos de una sesión — mismo criterio que
-// useDatosDashboardEntrenador / bootstrapJugador: si no hay
-// jugadores_destino explícito, la sesión llega a todos los activos.
-function destinatariosEfectivosSesion(sesion, activos) {
-  return sesion.jugadores_destino && sesion.jugadores_destino.length ? sesion.jugadores_destino : activos.map((p) => p.id);
-}
-
-// Etiqueta "para quién es" una sesión en el Calendario. Si su destino
-// explícito coincide EXACTAMENTE con el roster activo de un grupo, se
-// etiqueta con el nombre de ese grupo; si no, se describe tal cual — nunca
-// se inventa una relación con un grupo que el dato no tiene.
-function etiquetaDestinoSesion(sesion, players, grupos) {
-  const destino = sesion.jugadores_destino;
-  if (!destino || !destino.length) return "Todo el equipo";
-  if (destino.length === 1) {
-    const j = players.find((p) => p.id === destino[0]);
-    return j ? `${j.name} — individual` : "1 jugador — individual";
-  }
-  const destinoSet = new Set(destino);
-  const grupoExacto = grupos.find((g) => {
-    const rosterActivo = players.filter((p) => p.estado === "activo" && (p.gruposIds || []).includes(g.id)).map((p) => p.id);
-    return rosterActivo.length === destino.length && rosterActivo.every((id) => destinoSet.has(id));
-  });
-  return grupoExacto ? `${grupoExacto.nombre} (${destino.length} jug.)` : `${destino.length} jugadores`;
-}
+// destinatariosEfectivosSesion y etiquetaDestinoSesion ahora en
+// src/core/hooks.js — importadas arriba.
 
 // ¿Se ve esta sesión dentro del ámbito elegido en el Calendario?
 // scope = { tipo: "equipo" } | { tipo: "grupo", grupoId } | { tipo: "jugador", jugadorId }

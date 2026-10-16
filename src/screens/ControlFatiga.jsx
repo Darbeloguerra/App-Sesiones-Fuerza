@@ -5,7 +5,7 @@ import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
 import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "../core/cmjDisplay.jsx";
 import { api, supabase, genId } from "../core/backend.js";
 import { sharedDataCache, usePlayers, useMicrociclosTipo, usePartidos } from "../core/hooks.js";
-import { todayStr, fmtDateShort } from "../calc/fechas.js";
+import { todayStr, fmtDateShort, sumarDiasFecha, inicioSemanaCalendario } from "../calc/fechas.js";
 import {
   CMJ_FIELDS,
   CMJ_METRICS,

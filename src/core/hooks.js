@@ -1322,6 +1322,32 @@ export function usePartidos() {
   return { todos: actual, loaded: lista !== null, error, guardar, borrar };
 }
 
+// Destinatarios efectivos de una sesión — mismo criterio que
+// useDatosDashboardEntrenador / bootstrapJugador: si no hay
+// jugadores_destino explícito, la sesión llega a todos los activos.
+export function destinatariosEfectivosSesion(sesion, activos) {
+  return sesion.jugadores_destino && sesion.jugadores_destino.length ? sesion.jugadores_destino : activos.map((p) => p.id);
+}
+
+// Etiqueta "para quién es" una sesión en el Calendario. Si su destino
+// explícito coincide EXACTAMENTE con el roster activo de un grupo, se
+// etiqueta con el nombre de ese grupo; si no, se describe tal cual — nunca
+// se inventa una relación con un grupo que el dato no tiene.
+export function etiquetaDestinoSesion(sesion, players, grupos) {
+  const destino = sesion.jugadores_destino;
+  if (!destino || !destino.length) return "Todo el equipo";
+  if (destino.length === 1) {
+    const j = players.find((p) => p.id === destino[0]);
+    return j ? `${j.name} — individual` : "1 jugador — individual";
+  }
+  const destinoSet = new Set(destino);
+  const grupoExacto = grupos.find((g) => {
+    const rosterActivo = players.filter((p) => p.estado === "activo" && (p.gruposIds || []).includes(g.id)).map((p) => p.id);
+    return rosterActivo.length === destino.length && rosterActivo.every((id) => destinoSet.has(id));
+  });
+  return grupoExacto ? `${grupoExacto.nombre} (${destino.length} jug.)` : `${destino.length} jugadores`;
+}
+
 // Clave para el vídeo de demostración de una variante concreta. Más simple
 // que claveDisenoTarea a propósito: el gesto no cambia con el RIR ni con las
 // reps objetivo, solo con el material usado y si es uni o bilateral.
