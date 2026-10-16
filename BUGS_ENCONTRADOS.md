@@ -362,3 +362,14 @@ intacto para su propio sub-paso.
 `src/screens/FichaJugador.jsx`. Ninguna llegó a estar rota en un
 commit — las encontró la rutina de verificación (script de llamadas a
 función relanzado contra `FichaJugador.jsx`) antes de guardar el paso.
+
+## 24. Otra pieza de código muerto ya desde el original: `useTareasForSesiones`
+
+Al extraer la Pantalla del jugador se encontró que `useTareasForSesiones`
+no la usa nada en todo el archivo (ni siquiera un comentario real, más
+allá de mencionarla como "el mecanismo antiguo" ya sustituido por
+`useHistorialData`). Comprobado contra el primer commit: ya estaba así
+de huérfana entonces. Se suma a la lista de los puntos 20 y 22.
+
+**No se toca.** Se mueve con el resto de su bloque a
+`src/screens/PantallaJugador.jsx`, sin usarla.
