@@ -144,3 +144,24 @@ aquí para que quede constancia del control de calidad usado, no porque
 quede ningún cambio sin corregir — en ese commit la línea ya estaba
 restaurada. A partir de este punto, esa misma auditoría se repite tras
 cada sub-paso siguiente.
+
+## 15. Varias piezas "archivadas" lejos de su pantalla, encontradas al separar el Diseñador de sesiones (resuelto en el Paso 5)
+
+Mismo patrón que el punto 13, varias veces más en un único sub-paso:
+
+- `ChipReal`, `TagChipReal`, `campoSelectReal`, `TAGS_DESCRIPTIVOS_BIBLIOTECA`:
+  usadas por Roster, Biblioteca, Ficha de jugador **y** el Diseñador de
+  sesiones — movidas a `src/core/components.jsx`.
+- `formatearDetalleTareaCoach`: usada por Diseñador, Calendario y
+  Biblioteca — movida a `src/core/hooks.js`.
+- `useReferenciasPorEjercicio`, `AvisoCmjDestinatariosReal`,
+  `nuevoEstadoParcial`/`guardarFilaConParcial`, `useCmjMicrociclos`,
+  `tareaADraft`/`agruparCircuitosDeTareas`: estas sí eran de uso exclusivo
+  del Diseñador, pero estaban declaradas físicamente muy lejos (algunas
+  cerca del principio del archivo, antes incluso del backend) — se
+  trasladaron íntegras a `src/screens/DisenoSesion.jsx`, junto a su único
+  consumidor.
+
+Sin cambios de comportamiento en ningún caso — solo cambia dónde vive cada
+pieza. Verificado con build limpio, 72 tests, auditoría de declaraciones
+(0 perdidas de las 378 originales) y carga sin errores en el navegador.

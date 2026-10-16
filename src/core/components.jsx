@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
-import { ds } from "./designSystem.jsx";
+import { ds, dsF, dsR } from "./designSystem.jsx";
 import { extractYouTubeId, esVideoDirecto } from "./hooks.js";
 
 // Reproductor incrustado. Tres casos:
@@ -82,4 +82,58 @@ export function CerrablePorFuera({ onCerrar, children }) {
       {children}
     </>
   );
+}
+
+export function ChipReal({ children, tono = "neutro" }) {
+  const tonos = {
+    neutro: { color: ds.inkSecondary, border: `${ds.border}99` },
+    verde: { color: ds.accent, border: ds.accentBorderSubtle },
+    ambar: { color: ds.warning, border: `${ds.warning}55` },
+    azul: { color: ds.chart2, border: `${ds.chart2}55` },
+  };
+  const t = tonos[tono];
+  return (
+    <span
+      style={{
+        fontFamily: dsF.mono,
+        fontSize: 10,
+        letterSpacing: "0.03em",
+        color: t.color,
+        border: `1px solid ${t.border}`,
+        borderRadius: 4,
+        padding: "1px 6px",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {children}
+    </span>
+  );
+}
+
+export const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior", "Zona media", "Global"];
+
+export function TagChipReal({ tag, activo, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        fontFamily: dsF.mono,
+        fontSize: 11,
+        letterSpacing: "0.02em",
+        color: activo ? ds.accentInk : ds.inkSecondary,
+        background: activo ? ds.accent : "transparent",
+        border: `1px solid ${activo ? ds.accent : ds.border}`,
+        borderRadius: dsR.sm,
+        padding: "4px 9px",
+        cursor: "pointer",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {tag}
+    </button>
+  );
+}
+
+export function campoSelectReal(extra = {}) {
+  return { background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.ink, fontSize: 13, padding: "8px 9px", ...extra };
 }

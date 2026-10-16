@@ -615,6 +615,33 @@ export function formatearObjetivoResistencia(r) {
   return "";
 }
 
+// Línea de detalle de una tarea en el resumen del entrenador (Programación).
+// Antes daba por hecho que toda tarea era "series × cantidad" tipo Fuerza —
+// una tarea por tiempo (Activación, modo "minutos"/"tiempo", sin series) se
+// quedaba en "× 8" sin unidad, porque el molde no sabía que ese modo existe.
+// Aquí sí se usa el modo real de la tarea para elegir el formato y la
+// unidad — igual que ya hace la pantalla del jugador con UNIDAD_POR_MODO.
+export function formatearDetalleTareaCoach(t) {
+  if (t.bloque_sesion === "Resistencia") return formatearObjetivoResistencia(parseResistenciaData(t.resistencia_data));
+  const porTiempo = t.modo === "minutos" || t.modo === "tiempo";
+  // Antes, si la tarea era "por tiempo" (isométricos: plancha, puente...),
+  // se descartaba el dato de series aunque estuviera guardado — aquí, igual
+  // que en la pantalla del jugador, las series se muestran siempre que
+  // existan, sea cual sea el modo (reps/tiempo/minutos/metros).
+  const unidad = porTiempo ? ` ${UNIDAD_POR_MODO[t.modo] || ""}`.trimEnd() : "";
+  const cantidad = `${t.series ? `${t.series} × ` : ""}${t.cantidad}${unidad}`;
+  // Igual que en la pantalla del jugador: la lateralidad depende solo de si
+  // el ejercicio la tiene desactivada, no de si la tarea es por tiempo.
+  const lateralidad = t.sin_lateralidad !== "si" ? ` · ${t.lateralidad === "unilateral" ? "Unilateral" : "Bilateral"}` : "";
+  const cargaObjetivo =
+    t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null
+      ? ` · ${t.pct1rm}% 1RM`
+      : t.rir !== "" && t.rir != null
+      ? ` · RIR ${t.rir}`
+      : "";
+  return `${cantidad}${lateralidad}${cargaObjetivo}`;
+}
+
 // ---------- Resistencia: capacidad objetivo, pauta recomendada, semáforo y
 // traducción del % a algo ejecutable para el jugador (ritmo o pulso) ----------
 // Traslado fiel de la lógica ya diseñada y aprobada en
