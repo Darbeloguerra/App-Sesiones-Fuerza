@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { ds, dsF, dsR } from "./designSystem.jsx";
 import { extractYouTubeId, esVideoDirecto } from "./hooks.js";
+import { fmtDateLabel, fmtDateShort } from "../calc/fechas.js";
 
 // Reproductor incrustado. Tres casos:
 // - YouTube: iframe embebido (16:9, sin marca ni vídeos relacionados de más).
@@ -203,6 +204,189 @@ export function MiniStat({ icon, label, value, sub, accent, style }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// Gráfica simple de progreso de carga en el tiempo para una tarea concreta —
+// SVG a mano, sin librería externa (esta app no tiene ninguna cargada).
+// Cada punto es un registro con carga válida; se traza una línea recta entre
+// ellos en el orden de las fechas.
+// P4 (Fase 3): punto → detalle de esa sesión, en vez de una gráfica muda.
+// El punto pulsado (táctil o click, no solo hover — en móvil no hay hover)
+// queda seleccionado y su ficha se lee justo encima, con todo lo que el
+// registro trae (reps, RIR) además de la fecha y el valor que ya se veían.
+// Por defecto el último punto está seleccionado, para no cambiar lo que ya
+// se veía si nadie toca nada.
+export function GraficaProgresoCargaReal({ puntos, unidad = "kg", mostrarListaCompleta = true }) {
+  // Id único por instancia: puede haber varias de estas gráficas montadas a
+  // la vez en la misma pantalla (una por tarea), y los <defs> de SVG son
+  // globales al documento — sin esto, dos gráficas compartirían el mismo
+  // degradado y una de las dos se vería mal.
+  const [gradId] = useState(() => `gpc-${Math.random().toString(36).slice(2, 9)}`);
+  const [seleccionado, setSeleccionado] = useState(puntos.length - 1);
+  // Si cambian los puntos (p. ej. se elige otra tarea en el desplegable) y
+  // el índice seleccionado ya no existe, vuelve a caer en el último.
+  const indiceActivo = seleccionado != null && seleccionado < puntos.length ? seleccionado : puntos.length - 1;
+
+  if (puntos.length < 2) {
+    return (
+      <div style={{ color: ds.inkMuted, fontSize: 12.5, padding: "24px 0", textAlign: "center" }}>
+        {puntos.length === 0 ? "Sin registros de carga para esta tarea en este rango." : "Hace falta al menos 2 registros para trazar la evolución."}
+      </div>
+    );
+  }
+  const width = 640;
+  const height = 210;
+  const padX = 6;
+  const padTop = 34;
+  const padBottom = 30;
+  const valores = puntos.map((p) => p.valor);
+  const minV = Math.min(...valores);
+  const maxV = Math.max(...valores);
+  const rango = maxV - minV || 1;
+  const stepX = puntos.length > 1 ? (width - padX * 2) / (puntos.length - 1) : 0;
+  const coordX = (i) => padX + i * stepX;
+  const coordY = (v) => height - padBottom - ((v - minV) / rango) * (height - padTop - padBottom);
+  const pathD = puntos.map((p, i) => `${i === 0 ? "M" : "L"} ${coordX(i).toFixed(1)} ${coordY(p.valor).toFixed(1)}`).join(" ");
+  const areaD = `${pathD} L ${coordX(puntos.length - 1).toFixed(1)} ${height - padBottom} L ${coordX(0).toFixed(1)} ${height - padBottom} Z`;
+  const primero = puntos[0];
+  const ultimo = puntos[puntos.length - 1];
+  const activo = puntos[indiceActivo];
+  // Sin ejes ni cuadrícula — minimalista, al estilo de referencia: el valor
+  // inicial y el final se leen pegados a su propio punto de la línea, no en
+  // una columna de ejes aparte.
+  const yUltimo = coordY(ultimo.valor);
+  const yPrimero = coordY(primero.valor);
+  const labelUltimoArriba = yUltimo < height / 2;
+
+  return (
+    <div>
+      {/* Ficha de la sesión seleccionada — lo que antes solo estaba en la
+          fila de la lista de abajo, ahora también arriba del todo, pegado
+          al punto que se acaba de tocar. */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6, flexWrap: "wrap", rowGap: 4 }}>
+        <div style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkMuted }}>{fmtDateLabel(activo.date)}</div>
+        <div style={{ fontFamily: dsF.mono, fontSize: 12.5, color: ds.ink, fontWeight: 700 }}>
+          {activo.valor}{unidad}
+          {activo.reps !== "" && activo.reps != null && <span style={{ color: ds.inkSecondary, fontWeight: 400 }}> · {activo.reps} reps</span>}
+          {activo.rir !== "" && activo.rir != null && <span style={{ color: ds.inkSecondary, fontWeight: 400 }}> · RIR {activo.rir}</span>}
+        </div>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} style={{ width: "100%", height: 210, display: "block", overflow: "visible" }}>
+        <defs>
+          <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={ds.accent} stopOpacity="0.30" />
+            <stop offset="100%" stopColor={ds.accent} stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={areaD} fill={`url(#${gradId})`} stroke="none" />
+        {/* Línea de referencia a su propia mejor marca del periodo — no es un
+            umbral clínico inventado, es simplemente su máximo real, para leer
+            cada punto contra sí mismo (mismo principio que ya usamos en CMJ:
+            comparar contra la referencia individual, no contra un valor fijo). */}
+        <line x1={padX} y1={coordY(maxV)} x2={width - padX} y2={coordY(maxV)} stroke={ds.inkMuted} strokeWidth={1} strokeOpacity={0.4} strokeDasharray="4 4" />
+        <text x={width - padX} y={coordY(maxV) - 5} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">mejor marca · {maxV}{unidad}</text>
+        <path d={pathD} fill="none" stroke={ds.accent} strokeWidth={2.75} strokeLinejoin="round" strokeLinecap="round" />
+        {indiceActivo != null && (
+          <line x1={coordX(indiceActivo)} y1={padTop - 10} x2={coordX(indiceActivo)} y2={height - padBottom} stroke={ds.accent} strokeWidth={1} strokeOpacity={0.35} strokeDasharray="3 3" />
+        )}
+        {puntos.map((p, i) => {
+          const esRecord = p.valor === maxV;
+          return (
+            <g key={i} onClick={() => setSeleccionado(i)} style={{ cursor: "pointer" }}>
+              {/* Círculo invisible más grande solo para que el dedo tenga margen de sobra al tocar — el visible sigue fino */}
+              <circle cx={coordX(i)} cy={coordY(p.valor)} r={14} fill="transparent" />
+              {esRecord && (
+                <circle cx={coordX(i)} cy={coordY(p.valor)} r={i === indiceActivo ? 9 : 7.5} fill="none" stroke={ds.success} strokeWidth={2} />
+              )}
+              <circle
+                cx={coordX(i)}
+                cy={coordY(p.valor)}
+                r={i === indiceActivo ? 5.5 : i === 0 || i === puntos.length - 1 ? 4 : 3}
+                fill={i === indiceActivo ? ds.accent : ds.canvas}
+                stroke={ds.accent}
+                strokeWidth={2.25}
+              />
+            </g>
+          );
+        })}
+        <text x={coordX(0)} y={yPrimero + (labelUltimoArriba ? 18 : -12)} fontSize="10.5" fill={ds.inkMuted} textAnchor="start">{primero.valor}{unidad}</text>
+        <text x={coordX(puntos.length - 1)} y={yUltimo + (labelUltimoArriba ? -12 : 18)} fontSize="11.5" fontWeight="700" fill={ds.ink} textAnchor="end">{ultimo.valor}{unidad}</text>
+        <text x={coordX(0)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="start">{fmtDateShort(primero.date)}</text>
+        <text x={coordX(puntos.length - 1)} y={height - 6} fontSize="9.5" fill={ds.inkMuted} textAnchor="end">{fmtDateShort(ultimo.date)}</text>
+      </svg>
+      {puntos.some((p) => p.valor === maxV) && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10.5, color: ds.inkMuted, marginTop: 4 }}>
+          <span style={{ width: 9, height: 9, borderRadius: "50%", border: `2px solid ${ds.success}`, flexShrink: 0 }} />
+          récord personal en este periodo
+        </div>
+      )}
+      {mostrarListaCompleta ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: 10 }}>
+          {[...puntos].reverse().map((p, iRev) => {
+            const i = puntos.length - 1 - iRev;
+            const esActivo = i === indiceActivo;
+            return (
+              <div
+                key={i}
+                onClick={() => setSeleccionado(i)}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: ds.inkSecondary,
+                  fontFamily: dsF.mono,
+                  cursor: "pointer",
+                  padding: "3px 6px",
+                  margin: "0 -6px",
+                  borderRadius: dsR.sm,
+                  background: esActivo ? ds.accentSubtle : "transparent",
+                }}
+              >
+                <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(p.date)}</span>
+                <span style={{ color: ds.ink }}>
+                  {p.valor}{unidad}{p.rir !== "" && p.rir != null ? ` · RIR${p.rir}` : ""}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        // Vista jugador: no se enseña el histórico completo (eso lo reserva
+        // el entrenador), solo el registro más reciente — la ficha de arriba
+        // ya cubre el resto al tocar cualquier punto de la gráfica.
+        (() => {
+          const iUltimo = puntos.length - 1;
+          const pUltimo = puntos[iUltimo];
+          const esActivo = iUltimo === indiceActivo;
+          return (
+            <div style={{ marginTop: 10 }}>
+              <div style={{ fontFamily: dsF.mono, fontSize: 9, color: ds.inkMuted, marginBottom: 4 }}>MÁS RECIENTE</div>
+              <div
+                onClick={() => setSeleccionado(iUltimo)}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 11.5,
+                  color: ds.inkSecondary,
+                  fontFamily: dsF.mono,
+                  cursor: "pointer",
+                  padding: "3px 6px",
+                  margin: "0 -6px",
+                  borderRadius: dsR.sm,
+                  background: esActivo ? ds.accentSubtle : "transparent",
+                }}
+              >
+                <span style={{ color: esActivo ? ds.accent : ds.inkSecondary, fontWeight: esActivo ? 700 : 400 }}>{fmtDateShort(pUltimo.date)}</span>
+                <span style={{ color: ds.ink }}>
+                  {pUltimo.valor}{unidad}{pUltimo.rir !== "" && pUltimo.rir != null ? ` · RIR${pUltimo.rir}` : ""}
+                </span>
+              </div>
+            </div>
+          );
+        })()
+      )}
     </div>
   );
 }
