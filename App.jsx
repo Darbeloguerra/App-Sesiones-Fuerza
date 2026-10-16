@@ -126,7 +126,24 @@ import {
   cmjVentanasMicrociclo,
   cmjMicroDeFecha,
 } from "./src/calc/cmj.js";
-import { REPS_MAX_RIR_FIABLE, pct1RMporRTF, e1rmDeValores } from "./src/calc/e1rm.js";
+import {
+  REPS_MAX_RIR_FIABLE,
+  pct1RMporRTF,
+  e1rmDeValores,
+  e1rmDeItem,
+  medianaNum,
+  ACCESORIOS_SIN_CARGA,
+  EQUIPOS_AMBIGUOS,
+  materialEfectivo,
+  claveDisenoTarea,
+  calcularRecordsCargaJugador,
+  calcularCambiosE1rm,
+  RENDIMIENTO_CFG,
+  cambiosRobustosE1rm,
+  evaluarRendimientoEquipo,
+  calcularCargaFuerzaPorMicro,
+  calcularCargaSugerida,
+} from "./src/calc/e1rm.js";
 import { TEMA, useAlturaVentana, useAnchoVentana, PantallaBase } from "./src/core/layout.jsx";
 import { VideoEmbed, LoadingBlock, CerrablePorFuera } from "./src/core/components.jsx";
 import {
@@ -214,13 +231,7 @@ import { BibliotecaEjerciciosReal } from "./src/screens/BibliotecaEjercicios.jsx
 // (CMJ). Un 1000 en vez de 100 kg distorsiona e1RM, semáforos y carga durante
 // semanas. Estas funciones marcan lo que se sale de lo habitual DE ESE JUGADOR
 // y ese ejercicio; nunca corrigen ni borran nada solas: decide el entrenador.
-function medianaNum(arr) {
-  if (!arr.length) return null;
-  const o = [...arr].sort((a, b) => a - b);
-  const m = Math.floor(o.length / 2);
-  return o.length % 2 ? o[m] : (o[m - 1] + o[m]) / 2;
-}
-// e1rmDeValores ahora en src/calc/e1rm.js — importada arriba.
+// medianaNum y e1rmDeValores ahora en src/calc/e1rm.js — importadas arriba.
 const MIN_REGISTROS_PARA_REVISAR = 4;
 function detectarRegistrosAtipicos(items) {
   const candidatos = items.filter((it) => it.done && !it.esReferencia && !it.esResistencia && it.bloque !== "CMJ" && it.cargaOriginal !== "" && it.cargaOriginal != null);
@@ -1489,31 +1500,8 @@ function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesio
   );
 }
 
-// Iniciales para el avatar-stack de una tarjeta de equipo — mismo criterio
-// que ya usa CabeceraFichaJugadorReal para el avatar grande de la ficha.
-function inicialesNombre(name) {
-  return (
-    (name || "")
-      .split(" ")
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((p) => p[0].toUpperCase())
-      .join("") || "?"
-  );
-}
-// Paleta decorativa para el avatar-stack — solo variación visual (quién es
-// cada iniciales ya se ve en el título al pasar el ratón), no un dato nuevo.
-const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
-
-// Mismo color de avatar para el mismo jugador en toda la app (fila de
-// Usuarios, cabecera de su ficha...) — determinista a partir de su id, no
-// aleatorio, así "reconoces" a alguien por su color de un vistazo en vez de
-// que cambie cada vez que se vuelve a renderizar.
-function colorAvatarJugador(id) {
-  let hash = 0;
-  for (let i = 0; i < String(id).length; i++) hash = (hash * 31 + String(id).charCodeAt(i)) >>> 0;
-  return AVATAR_STACK_COLORES[hash % AVATAR_STACK_COLORES.length];
-}
+// inicialesNombre y colorAvatarJugador ahora en src/core/components.jsx —
+// importadas arriba (usadas por Roster y por la Ficha de jugador).
 
 // Tarjeta de un equipo (grupo real) en la vista Equipos — nombre, avatar-
 // stack de sus jugadores y las 3 stats agregadas (jugadores / adherencia
@@ -7466,297 +7454,10 @@ function PantallaJugadorReal({ presetPlayerId, onExit }) {
 // cargas y de preguntar al jugador cuál usa) salvo que sea un accesorio sin
 // carga. Antes era una lista cerrada (Barra, Mancuerna...) y materiales como
 // Polea nunca disparaban la pregunta de "¿con qué material?".
-const ACCESORIOS_SIN_CARGA = ["ninguno", "std", "banco", "step", "cajón", "caja", "colchoneta", "suelo", "pared", "banda", "goma", "bosu", "fitball", "foam roller", "rodillo", "valla", "cono", "aro", "escalera"].map((x) => x.toLowerCase());
-const EQUIPOS_AMBIGUOS = {
-  includes: (m) => !!m && !ACCESORIOS_SIN_CARGA.includes(String(m).trim().toLowerCase()),
-};
-
-// Define qué hace que dos tareas sean "la misma" a efectos de comparar
-// carga entre sesiones: mismo ejercicio, mismo equipo efectivamente usado,
-// mismo modo (uni/bilateral) y mismo objetivo de reps + RIR. Las series NO
-// entran en la clave — cambiar el número de series es solo volumen, no un
-// diseño de tarea distinto.
-function materialEfectivo(it) {
-  const mats = it.materiales || [];
-  const ambiguos = mats.filter((m) => EQUIPOS_AMBIGUOS.includes(m));
-  if (ambiguos.length >= 2) return it.subtipoCorporal || ambiguos[0];
-  if (ambiguos.length === 1) return ambiguos[0];
-  return mats[0] || "std";
-}
-
-function claveDisenoTarea(nombre, equipo, unilateral, repsObjetivo, rirObjetivo) {
-  return [(nombre || "").toLowerCase(), equipo || "std", unilateral ? "uni" : "bi", repsObjetivo ?? "", rirObjetivo ?? ""].join("::");
-}
-
-// TABLA_PCT_1RM_POR_RTF, REPS_MAX_RIR_FIABLE y pct1RMporRTF ahora en
-// src/calc/e1rm.js — importadas arriba.
-
-// Motor de "récord de carga" (e1RM) del jugador, extraído a una función
-// reutilizable — es EXACTAMENTE el mismo cálculo que ya vive dentro de la
-// pantalla del jugador (agrupar por ejercicio+equipo con materialEfectivo,
-// e1RM por marca con e1rmDeRegistro/pct1RMporRTF, mejor marca vs. segunda
-// mejor para el "% sobre tu récord anterior"), aquí compartido por la ficha
-// del entrenador: el record-callout de Resumen y "Récords personales" de
-// Progreso (Fase 6 → Equipos y usuarios) NO reinventan el cálculo, lo leen
-// de aquí. Devuelve un registro por ejercicio+equipo con al menos un e1RM
-// válido, con su mejor marca actual, la fecha en que se logró, el % sobre
-// la siguiente mejor marca, y la serie cronológica completa de e1RM (para
-// la mini-gráfica "línea discontinua en la mejor marca + anillo verde").
-function calcularRecordsCargaJugador(items) {
-  const registrosConCarga = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ" && it.cargaReal !== "" && it.cargaReal != null);
-  const equiposPorNombre = new Map();
-  items
-    .filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ")
-    .forEach((it) => {
-      const eq = materialEfectivo(it);
-      if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
-      equiposPorNombre.get(it.name).add(eq);
-    });
-  const etiqueta = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
-  const e1rmDeRegistro = (it) => e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
-  const registrosPorEjercicio = new Map();
-  registrosConCarga.forEach((it) => {
-    const equipo = materialEfectivo(it);
-    const clave = `${it.name}::${equipo}`;
-    if (!registrosPorEjercicio.has(clave)) registrosPorEjercicio.set(clave, { nombre: it.name, equipo, regs: [] });
-    registrosPorEjercicio.get(clave).regs.push(it);
-  });
-  const records = [];
-  registrosPorEjercicio.forEach(({ nombre, equipo, regs }, clave) => {
-    const conE1rm = regs.map((it) => ({ it, e1rm: e1rmDeRegistro(it) })).filter((x) => x.e1rm != null);
-    if (!conE1rm.length) return;
-    const ordenados = [...conE1rm].sort((a, b) => b.e1rm - a.e1rm);
-    const maxActual = ordenados[0];
-    const maxAnterior = ordenados.find((x) => x.it.id !== maxActual.it.id && x.e1rm < maxActual.e1rm);
-    const pctSobreAnterior = maxAnterior ? ((maxActual.e1rm - maxAnterior.e1rm) / maxAnterior.e1rm) * 100 : null;
-    const puntosCron = [...conE1rm].sort((a, b) => new Date(a.it.date) - new Date(b.it.date));
-    records.push({
-      clave,
-      nombre: etiqueta(nombre, equipo),
-      valor: Math.round(maxActual.e1rm),
-      fecha: maxActual.it.date,
-      pctSobreAnterior,
-      puntos: puntosCron.map(({ it, e1rm }) => ({ date: it.date, valor: Math.round(e1rm), reps: it.repsReal, rir: it.rirReal })),
-    });
-  });
-  return records;
-}
-
-// Variación de fuerza por ejercicio+equipo (ENT-01), compartida por el
-// Dashboard del entrenador ("Quién necesita atención") y la ficha del
-// jugador. Es la MISMA lógica que "Cambios esta semana" de la pantalla del
-// jugador: por cada ejercicio+equipo compara el valor estimado de lo último
-// hecho dentro de la ventana [inicio, fin] con la media de todo lo hecho
-// ANTES de la ventana. El valor es el e1RM (carga / %1RM del RTF = reps +
-// RIR) si ese ejercicio maneja carga, o las reps al fallo (reps + RIR) si
-// nunca la lleva (p. ej. dominadas). Sustituye a la media de kg de todos los
-// ejercicios mezclados, que no significaba nada (una semana con más
-// ejercicios ligeros parecía un "descenso" sin serlo). Solo entran
-// ejercicios con dato dentro de la ventana Y antes de ella; sin eso no hay
-// nada que comparar. `serie` son los últimos valores del ejercicio (para el
-// sparkline).
-function calcularCambiosE1rm(items, inicio, fin) {
-  const validos = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque !== "CMJ");
-  const equiposPorNombre = new Map();
-  const porClave = new Map();
-  const claveConCarga = new Set();
-  validos.forEach((it) => {
-    const equipo = materialEfectivo(it);
-    if (!equiposPorNombre.has(it.name)) equiposPorNombre.set(it.name, new Set());
-    equiposPorNombre.get(it.name).add(equipo);
-    const clave = `${it.name}::${equipo}`;
-    if (!porClave.has(clave)) porClave.set(clave, { nombre: it.name, equipo, regs: [] });
-    porClave.get(clave).regs.push(it);
-    if (it.cargaReal !== "" && it.cargaReal != null) claveConCarga.add(clave);
-  });
-  const etiqueta = (nombre, equipo) => ((equiposPorNombre.get(nombre)?.size || 0) > 1 && equipo && equipo !== "std" ? `${nombre} (${equipo})` : nombre);
-  const cambios = [];
-  porClave.forEach(({ nombre, equipo, regs }, clave) => {
-    const conCarga = claveConCarga.has(clave);
-    const valorEstimado = (it) => {
-      if (conCarga) return e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
-      const reps = Number(it.repsReal);
-      const rir = it.rirReal !== "" && it.rirReal != null ? Number(it.rirReal) : null;
-      if (Number.isNaN(reps) || rir == null || Number.isNaN(rir)) return null;
-      return reps + rir;
-    };
-    const conValor = regs
-      .map((it) => ({ it, v: valorEstimado(it) }))
-      .filter((x) => x.v != null)
-      .sort((a, b) => (a.it.date < b.it.date ? -1 : a.it.date > b.it.date ? 1 : 0));
-    const dentro = conValor.filter((x) => x.it.date >= inicio && x.it.date <= fin);
-    const antes = conValor.filter((x) => x.it.date < inicio);
-    if (!dentro.length || !antes.length) return;
-    const mediaAntes = antes.reduce((sum, x) => sum + x.v, 0) / antes.length;
-    if (mediaAntes <= 0) return;
-    const ultimo = dentro[dentro.length - 1];
-    cambios.push({
-      clave,
-      nombre: etiqueta(nombre, equipo),
-      pct: ((ultimo.v - mediaAntes) / mediaAntes) * 100,
-      conCarga,
-      nRegistros: dentro.length,
-      serie: conValor.slice(-5).map((x) => x.v),
-      // Para poder explicar cada ejercicio: valor de ahora, su nivel habitual
-      // (media de lo anterior), cuándo fue y si es kg (e1RM) o repeticiones.
-      actual: ultimo.v,
-      habitual: mediaAntes,
-      fecha: ultimo.it.date,
-    });
-  });
-  return cambios;
-}
-
-// ---------- Rendimiento (e1RM) calibrado con datos reales ----------
-// Calibrado con 7 semanas de histórico (3.357 registros de Fuerza, 877 series
-// jugador-ejercicio con carga). La regla anterior marcaba entre 7 y 21
-// jugadores por semana (de 13-23 con datos): casi toda la plantilla, por ruido
-// y por cambios de ejercicio (p. ej. un ejercicio con -59 % en 17 jugadores a
-// la vez, que no es rendimiento sino otro material/unidad). La regla calibrada
-// da 0-2 avisos por semana y separa los cambios que afectan a muchos
-// jugadores a la vez como "revisar datos".
-//   - Solo ejercicios con carga y e1RM calculable (reps <= 12, con RIR).
-//   - Base = mediana de las últimas 5 marcas anteriores (mín. 2).
-//   - Cae si baja más de max(10 %, 2 x su ruido propio (MAD)).
-//   - Aviso al jugador: >= 2 ejercicios caen y son >= 50 % de los comparables.
-//   - Cambio sistémico: un ejercicio con >= 5 jugadores y mediana de cambio
-//     >= 30 % (en valor absoluto) se excluye y se avisa para revisar datos.
-const RENDIMIENTO_CFG = { minPrevios: 2, ventana: 5, umbralMin: 0.1, kRuido: 2, minEjerciciosBajan: 2, fraccionBajan: 0.5, cambioSistemico: 0.3, minJugadoresSistemico: 5 };
-function cambiosRobustosE1rm(items, inicio, fin) {
-  const cfg = RENDIMIENTO_CFG;
-  const porClave = new Map();
-  items.forEach((it) => {
-    if (!it.done || it.esResistencia || it.esElastica || it.bloque === "CMJ") return;
-    const clave = `${it.name}::${materialEfectivo(it)}`;
-    if (!porClave.has(clave)) porClave.set(clave, { nombre: it.name, regs: [], conCarga: false });
-    const g = porClave.get(clave);
-    g.regs.push(it);
-    if (it.cargaReal !== "" && it.cargaReal != null) g.conCarga = true;
-  });
-  const res = [];
-  porClave.forEach(({ nombre, regs, conCarga }, clave) => {
-    if (!conCarga) return;
-    const serie = regs
-      .map((it) => {
-        const e1 = e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
-        return e1 ? { fecha: it.date, v: e1 } : null;
-      })
-      .filter(Boolean)
-      .sort((a, b) => (a.fecha < b.fecha ? -1 : a.fecha > b.fecha ? 1 : 0));
-    const dentro = serie.filter((x) => x.fecha >= inicio && x.fecha <= fin);
-    const antes = serie.filter((x) => x.fecha < inicio).slice(-cfg.ventana);
-    if (!dentro.length || antes.length < cfg.minPrevios) return;
-    const base = medianaNum(antes.map((x) => x.v));
-    if (!base) return;
-    const ruido = antes.length >= 3 ? (medianaNum(antes.map((x) => Math.abs(x.v - base))) * 1.4826) / base : 0;
-    const ultimo = dentro[dentro.length - 1].v;
-    res.push({ clave, nombre, base, ultimo, cambio: (ultimo - base) / base, ruido, serie: serie.slice(-5).map((x) => x.v) });
-  });
-  return res;
-}
-function evaluarRendimientoEquipo(itemsPorJugador, jugadores, inicio, fin) {
-  const cfg = RENDIMIENTO_CFG;
-  const porJugador = new Map();
-  const porEjercicio = new Map();
-  jugadores.forEach((p) => {
-    const cambios = cambiosRobustosE1rm(itemsPorJugador.get(p.id) || [], inicio, fin);
-    if (!cambios.length) return;
-    porJugador.set(p.id, cambios);
-    cambios.forEach((c) => {
-      if (!porEjercicio.has(c.clave)) porEjercicio.set(c.clave, { nombre: c.nombre, cambios: [] });
-      porEjercicio.get(c.clave).cambios.push(c.cambio);
-    });
-  });
-  const sistemicos = [];
-  const excluidos = new Set();
-  porEjercicio.forEach((g, clave) => {
-    if (g.cambios.length < cfg.minJugadoresSistemico) return;
-    const med = medianaNum(g.cambios);
-    if (Math.abs(med) >= cfg.cambioSistemico) {
-      excluidos.add(clave);
-      sistemicos.push({ clave, nombre: g.nombre, jugadores: g.cambios.length, pct: Math.round(med * 100) });
-    }
-  });
-  const resultados = new Map();
-  porJugador.forEach((cambios, id) => {
-    const validos = cambios.filter((c) => !excluidos.has(c.clave));
-    if (!validos.length) return;
-    const bajan = validos.filter((c) => c.cambio <= -Math.max(cfg.umbralMin, cfg.kRuido * c.ruido));
-    const alerta = bajan.length >= cfg.minEjerciciosBajan && bajan.length / validos.length >= cfg.fraccionBajan;
-    const media = validos.reduce((sum, c) => sum + c.cambio, 0) / validos.length;
-    const peor = [...validos].sort((a, b) => a.cambio - b.cambio)[0];
-    resultados.set(id, { alerta, pct: media * 100, bajan, comparables: validos.length, peor: { nombre: peor.nombre, pct: peor.cambio * 100 } });
-  });
-  return { resultados, sistemicos };
-}
-
-// calcularCumplimientoPauta ahora en src/calc/adherencia.js — importada
-// arriba.
-
-// cmjVentanasMicrociclo y cmjMicroDeFecha ahora en src/calc/cmj.js —
-// importadas arriba.
-
-// e1RM de un registro — delega en la función compartida (src/calc/e1rm.js).
-function e1rmDeItem(it) {
-  return e1rmDeValores(it.cargaReal, it.repsReal, it.rirReal);
-}
-
-// Carga de fuerza de un jugador en cada microciclo, con los datos que ya se
-// recogen (solo el bloque Fuerza): series hechas (o pautadas si el registro es
-// anterior a series_hechas), intensidad media (kg de la serie top / mejor e1RM
-// que llevaba hasta ese día en el mismo ejercicio+equipo), nº de sesiones y
-// fechas de sesiones pesadas (>= 85 % del 1RM). "Relativa" compara las series
-// con la media de sus hasta 4 microciclos anteriores con datos (necesita al
-// menos 2): baja < 75 %, alta > 125 %.
-function calcularCargaFuerzaPorMicro(items, ventanas) {
-  const fuerza = items.filter((it) => it.done && !it.esResistencia && !it.esElastica && it.bloque === "Fuerza");
-  const porClave = new Map();
-  fuerza.forEach((it) => {
-    const clave = `${it.name}::${materialEfectivo(it)}`;
-    if (!porClave.has(clave)) porClave.set(clave, []);
-    porClave.get(clave).push(it);
-  });
-  const pctPorItem = new Map();
-  porClave.forEach((regs) => {
-    let mejor = 0;
-    [...regs]
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-      .forEach((it) => {
-        const e = e1rmDeItem(it);
-        if (e == null) return;
-        mejor = Math.max(mejor, e);
-        pctPorItem.set(it.id, Number(it.cargaReal) / mejor);
-      });
-  });
-  const cargas = ventanas.map((v) => {
-    const enMicro = fuerza.filter((it) => !it.esReferencia && it.date >= v.desde && it.date <= v.hasta);
-    const series = enMicro.reduce((sum, it) => sum + (it.seriesHechas !== "" && it.seriesHechas != null ? Number(it.seriesHechas) || 0 : Number(it.sets) || 0), 0);
-    const pcts = enMicro.map((it) => pctPorItem.get(it.id)).filter((x) => x != null && Number.isFinite(x));
-    const fechasPesadas = [...new Set(enMicro.filter((it) => (pctPorItem.get(it.id) ?? 0) >= 0.85).map((it) => it.date))].sort();
-    return {
-      microId: v.id,
-      numero: v.numero,
-      desde: v.desde,
-      hasta: v.hasta,
-      hayDatos: enMicro.length > 0,
-      series,
-      sesiones: new Set(enMicro.map((it) => it.date)).size,
-      intensidad: pcts.length ? pcts.reduce((a, b) => a + b, 0) / pcts.length : null,
-      fechasPesadas,
-      relativa: null,
-      nivel: null,
-    };
-  });
-  cargas.forEach((c, i) => {
-    if (c.series <= 0) return;
-    const previos = cargas.slice(Math.max(0, i - 4), i).filter((x) => x.series > 0);
-    if (previos.length < 2) return;
-    const media = previos.reduce((sum, x) => sum + x.series, 0) / previos.length;
-    c.relativa = c.series / media;
-    c.nivel = c.relativa > 1.25 ? "alta" : c.relativa < 0.75 ? "baja" : "normal";
-  });
-  return cargas;
-}
+// ACCESORIOS_SIN_CARGA, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea,
+// calcularRecordsCargaJugador, calcularCambiosE1rm, cambiosRobustosE1rm,
+// evaluarRendimientoEquipo, e1rmDeItem y calcularCargaFuerzaPorMicro ahora
+// en src/calc/e1rm.js — importadas arriba.
 const NIVEL_CARGA_FUERZA_META = {
   alta: { label: "Alta", color: () => ds.warning },
   normal: { label: "Normal", color: () => ds.inkSecondary },
@@ -7788,29 +7489,7 @@ function resumenFuerzaSalto(filas) {
 }
 
 // A partir de una marca previa con OTRO diseño (reps/RIR distinto al de
-// hoy), estima una carga de partida para el diseño de hoy: calcula el e1RM
-// implícito en la marca previa (carga / %1RM de su RTF) y lo vuelve a bajar
-// al %1RM del RTF de hoy. Es una estimación de PARTIDA para que el jugador
-// ajuste en el primer set según cómo se sienta el RIR real — no una
-// prescripción cerrada. Por eso, si el salto de reps es mayor de 4, se
-// prefiere no sugerir nada (el margen de error ya no es útil) antes que dar
-// un número con falsa precisión.
-function calcularCargaSugerida(registroRef, repsHoy, rirHoy, redondeo = 2.5) {
-  if (!registroRef) return null;
-  const repsRef = Number(registroRef.repsReal);
-  const rirRef = registroRef.rirReal !== "" && registroRef.rirReal != null ? Number(registroRef.rirReal) : null;
-  const cargaRef = Number(registroRef.cargaReal);
-  const repsObjetivo = Number(repsHoy);
-  const rirObjetivo = rirHoy !== "" && rirHoy != null ? Number(rirHoy) : null;
-  if (!cargaRef || Number.isNaN(cargaRef) || Number.isNaN(repsRef) || rirRef == null || Number.isNaN(repsObjetivo) || rirObjetivo == null) return null;
-  if (repsRef > REPS_MAX_RIR_FIABLE || repsObjetivo > REPS_MAX_RIR_FIABLE) return null;
-  if (Math.abs(repsObjetivo - repsRef) > 4) return null;
-  const pctRef = pct1RMporRTF(repsRef + rirRef);
-  const pctHoy = pct1RMporRTF(repsObjetivo + rirObjetivo);
-  if (!pctRef) return null;
-  const e1RM = cargaRef / pctRef;
-  return Math.round((e1RM * pctHoy) / redondeo) * redondeo;
-}
+// calcularCargaSugerida ahora en src/calc/e1rm.js — importada arriba.
 
 // claveVideoVariante y videoEfectivoTarea ahora en src/core/hooks.js —
 // importadas arriba (usadas por la Pantalla del jugador y por Biblioteca).

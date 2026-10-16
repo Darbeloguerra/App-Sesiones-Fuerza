@@ -137,3 +137,29 @@ export function TagChipReal({ tag, activo, onClick }) {
 export function campoSelectReal(extra = {}) {
   return { background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.ink, fontSize: 13, padding: "8px 9px", ...extra };
 }
+
+// Iniciales para el avatar-stack de una tarjeta de equipo — mismo criterio
+// que usa la cabecera de la ficha de jugador para su avatar grande.
+export function inicialesNombre(name) {
+  return (
+    (name || "")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((p) => p[0].toUpperCase())
+      .join("") || "?"
+  );
+}
+// Paleta decorativa para el avatar-stack — solo variación visual (quién es
+// cada iniciales ya se ve en el título al pasar el ratón), no un dato nuevo.
+const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
+
+// Mismo color de avatar para el mismo jugador en toda la app (fila de
+// Usuarios, cabecera de su ficha...) — determinista a partir de su id, no
+// aleatorio, así "reconoces" a alguien por su color de un vistazo en vez de
+// que cambie cada vez que se vuelve a renderizar.
+export function colorAvatarJugador(id) {
+  let hash = 0;
+  for (let i = 0; i < String(id).length; i++) hash = (hash * 31 + String(id).charCodeAt(i)) >>> 0;
+  return AVATAR_STACK_COLORES[hash % AVATAR_STACK_COLORES.length];
+}
