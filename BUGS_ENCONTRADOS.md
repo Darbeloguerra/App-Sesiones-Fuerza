@@ -165,3 +165,25 @@ Mismo patrón que el punto 13, varias veces más en un único sub-paso:
 Sin cambios de comportamiento en ningún caso — solo cambia dónde vive cada
 pieza. Verificado con build limpio, 72 tests, auditoría de declaraciones
 (0 perdidas de las 378 originales) y carga sin errores en el navegador.
+
+## 16. BUG REAL: a `ControlFatigaModuloReal` (Paso 5.3) le faltaba un import — CORREGIDO
+
+Al separar la pantalla de Control de fatiga en el Paso 5.3,
+`PantallaEntrenadorAncha` (el envoltorio con la barra lateral que usan
+casi todas las pantallas del entrenador) se quedó sin importar en el
+archivo nuevo. El build de Vite no lo detectó (comprueba que los imports
+resuelvan, no que cada etiqueta JSX usada exista) y la comprobación
+visual de aquel paso solo llegó hasta el Portal de acceso — nunca se
+entró al módulo de Control de fatiga en sí, porque no hay credenciales
+de entrenador para probarlo de verdad.
+
+**Cómo se detectó:** al preparar el siguiente sub-paso (Biblioteca), un
+barrido más completo de dependencias encontró que `PantallaEntrenadorAncha`
+también le hacía falta a Biblioteca, y al ir a comprobar dónde vivía
+ahora mismo esa pieza, saltó que `ControlFatiga.jsx` la usaba sin
+haberla importado nunca.
+
+**Corregido** en el Paso 5.4b, junto con un script de verificación nuevo
+(comparar las etiquetas JSX en mayúscula de cada pantalla contra sus
+imports) que se añade a partir de ahora a la rutina de cada sub-paso,
+precisamente para detectar este tipo de fallo antes de comprometerlo.
