@@ -254,3 +254,29 @@ incluye explícitamente lanzar ambos scripts contra `App.jsx` completo,
 no solo contra la pantalla recién separada — este bug solo salió a la
 luz por una comprobación manual puntual (buscar si `ChipReal` ya estaba
 importado antes de añadirlo), no porque el proceso ya lo cubriera.
+
+## 19. BUG REAL: `AVATAR_STACK_COLORES` sin exportar ni importar — rompía la vista "Equipos" — CORREGIDO
+
+Al preparar la extracción de Roster (`TarjetaEquipoReal`, la tarjeta de
+cada equipo en la vista "Equipos y usuarios") se encontró que esa tarjeta
+usa `AVATAR_STACK_COLORES[i % AVATAR_STACK_COLORES.length]` para colorear
+el avatar-stack de sus jugadores, pero esa constante:
+
+- vive como `const` privada (sin `export`) dentro de
+  `src/core/components.jsx` (se creó ahí solo para que la usara
+  `colorAvatarJugador`, en el Paso 5.5 prep),
+- y **nunca se importó en `App.jsx`**, que es donde seguía viviendo
+  `TarjetaEquipoReal` hasta este mismo paso.
+
+Ninguno de los dos scripts de verificación (puntos 16-18) lo detectó
+porque ambos buscan etiquetas JSX en mayúscula o llamadas a función
+(`identificador(`); `AVATAR_STACK_COLORES[...]` es un acceso a array, un
+patrón que todavía no cubrían. Cualquier entrenador que hubiera abierto
+la pestaña "Equipos" habría visto esa pantalla romperse (`ReferenceError:
+AVATAR_STACK_COLORES is not defined`) desde el Paso 5.5.
+
+**Corregido** en el Paso 5.6/5.7 (extracción de Roster): se añade
+`export` a `AVATAR_STACK_COLORES` en `components.jsx` y se importa donde
+corresponde (ahora en `src/screens/Roster.jsx`, junto al resto de piezas
+de `TarjetaEquipoReal`). Verificado con build limpio, 86 tests en verde
+y auditoría de declaraciones sin pérdidas.

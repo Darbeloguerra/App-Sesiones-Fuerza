@@ -152,7 +152,7 @@ export function inicialesNombre(name) {
 }
 // Paleta decorativa para el avatar-stack — solo variación visual (quién es
 // cada iniciales ya se ve en el título al pasar el ratón), no un dato nuevo.
-const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
+export const AVATAR_STACK_COLORES = [ds.chart2, ds.chart3, ds.accent, ds.success, ds.chart1];
 
 // Mismo color de avatar para el mismo jugador en toda la app (fila de
 // Usuarios, cabecera de su ficha...) — determinista a partir de su id, no
