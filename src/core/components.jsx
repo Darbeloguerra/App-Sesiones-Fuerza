@@ -163,3 +163,46 @@ export function colorAvatarJugador(id) {
   for (let i = 0; i < String(id).length; i++) hash = (hash * 31 + String(id).charCodeAt(i)) >>> 0;
   return AVATAR_STACK_COLORES[hash % AVATAR_STACK_COLORES.length];
 }
+
+// Tile compacto de estadística: icono + etiqueta arriba, valor + sub abajo,
+// cada línea con su propio elipsis — así una etiqueta larga en un tile
+// estrecho se recorta con "…" (con el texto completo en el title, al pasar
+// el ratón) en vez de desbordarse por encima del tile vecino, y la altura
+// del tile no depende de si "sub" cabe o no en una línea (antes, si
+// envolvía, ese tile salía más alto que el resto de la fila). "accent" = el
+// tile con más peso visual (p. ej. Adherencia).
+export function MiniStat({ icon, label, value, sub, accent, style }) {
+  const elidido = { whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 };
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: 7,
+        minWidth: 0,
+        background: accent ? `linear-gradient(160deg, ${ds.accent}1a, ${ds.surfaceRaised} 60%)` : ds.surfaceRaised,
+        border: `1px solid ${accent ? ds.accentBorderSubtle : ds.borderSoft}`,
+        borderRadius: dsR.lg,
+        padding: "11px 13px",
+        ...style,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 7, minWidth: 0 }}>
+        <div style={{ width: 18, height: 18, borderRadius: dsR.sm, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{icon}</div>
+        <div title={label} style={{ fontFamily: dsF.mono, fontSize: 9, fontWeight: 600, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.04em", ...elidido }}>
+          {label}
+        </div>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div title={typeof value === "string" ? value : undefined} style={{ fontFamily: dsF.display, fontSize: 17, fontWeight: 800, letterSpacing: "-0.01em", color: ds.ink, lineHeight: 1.2, ...elidido }}>
+          {value}
+        </div>
+        {sub && (
+          <div title={sub} style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, marginTop: 2, ...elidido }}>
+            {sub}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

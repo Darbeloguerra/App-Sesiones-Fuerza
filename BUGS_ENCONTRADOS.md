@@ -208,3 +208,49 @@ a ejercitar sin credenciales de entrenador reales.
 necesita Calendario). El segundo script de verificación (llamadas a
 función en minúscula, no solo componentes JSX) se suma a la rutina de
 cada sub-paso siguiente, junto con el del punto 16.
+
+## 18. BUG REAL MÁS SERIO: el propio App.jsx usaba 11 piezas sin importarlas — CORREGIDO
+
+Hasta el Paso 5.6, los dos scripts de verificación (puntos 16 y 17) solo
+se habían ejecutado contra las pantallas ya separadas (`ControlFatiga.jsx`,
+`BibliotecaEjercicios.jsx`, etc.), nunca contra `App.jsx` mismo — que
+sigue siendo, por ahora, el archivo que renderiza Roster, el Dashboard
+del entrenador, la Ficha de jugador, la Pantalla de jugador y el
+Calendario, todos todavía sin extraer.
+
+Al ejecutarlos por primera vez contra `App.jsx` completo, aparecieron 11
+fallos reales, todos "usa esto pero no lo importa", introducidos al ir
+sacando piezas a `src/core/components.jsx` y `src/core/hooks.js` en
+pasos anteriores sin añadir el import de vuelta en `App.jsx`:
+
+- De `src/core/components.jsx`: `ChipReal`, `TagChipReal`,
+  `campoSelectReal`, `TAGS_DESCRIPTIVOS_BIBLIOTECA`, `inicialesNombre`,
+  `colorAvatarJugador`, `MiniStat`.
+- De `src/core/hooks.js`: `agruparPlantillas`, `claveVideoVariante`,
+  `videoEfectivoTarea`, `formatearDetalleTareaCoach`.
+
+El más grave de los 11 es `ChipReal`: se usa en el listado de Roster para
+la etiqueta "SUSPENDIDO" junto al nombre de un jugador dado de baja. Ese
+import faltaba desde el Paso 5.4 (cuando `ChipReal` se movió a
+`components.jsx`) — es decir, cualquier entrenador que hubiera entrado a
+Roster desde entonces se habría encontrado esa pantalla rota (error de
+JavaScript en blanco), sin que ningún build ni comprobación visual
+anterior lo detectara, porque Vite solo valida que los imports declarados
+resuelvan a un archivo real, no que todo lo usado esté importado, y la
+comprobación visual de cada sub-paso solo llegaba hasta el Portal de
+acceso (no hay credenciales de entrenador reales para entrar más allá).
+
+**Corregido** en el Paso 5.6, añadiendo las 11 piezas a los imports ya
+existentes en la cabecera de `App.jsx`. Verificado con: build de Vite
+limpio, 86 tests en verde, auditoría de declaraciones (0 perdidas frente
+al original) y ambos scripts de verificación relanzados tanto contra
+`App.jsx` como contra las 4 pantallas ya separadas — sin fallos
+pendientes salvo falsos positivos ya conocidos (variables locales como
+`EditorComponent`, `Icono`, o claves `on-`/`save-`/`guardar-` que vienen
+de desestructurar hooks, no de imports).
+
+A partir de este punto, la rutina de verificación de cada sub-paso
+incluye explícitamente lanzar ambos scripts contra `App.jsx` completo,
+no solo contra la pantalla recién separada — este bug solo salió a la
+luz por una comprobación manual puntual (buscar si `ChipReal` ya estaba
+importado antes de añadirlo), no porque el proceso ya lo cubriera.

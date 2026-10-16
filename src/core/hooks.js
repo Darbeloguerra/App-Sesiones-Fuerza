@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ds } from "./designSystem.jsx";
 import { api, supabase, genId } from "./backend.js";
-import { normalizarFecha, todayStr } from "../calc/fechas.js";
-import { parseResistenciaData } from "../calc/adherencia.js";
+import { normalizarFecha, todayStr, sumarDiasFecha, inicioSemanaCalendario, diasEntreFechas } from "../calc/fechas.js";
+import { parseResistenciaData, tareasHechasPorJugadorFecha, crearFraccionCumplida } from "../calc/adherencia.js";
 import { CMJ_UMBRAL_DEFECTO, cmjBuildPlayers } from "../calc/cmj.js";
+import { evaluarRendimientoEquipo, calcularCambiosE1rm } from "../calc/e1rm.js";
 
 export const genPin = () => String(Math.floor(1000 + Math.random() * 9000));
 
@@ -1395,4 +1396,491 @@ export function videoEfectivoTarea(tarea, registro) {
     return tarea.videosPorEquipo?.[elegido] || tarea.gif || null;
   }
   return tarea.gif || null;
+}
+
+// ---------- CARTERA DE JUGADORES + INICIO (bandeja de atención) ----------
+// Un único cálculo compartido por Inicio, la lista de Usuarios y la ficha:
+// para cada jugador activo, cómo va (adherencia 4 semanas, última actividad,
+// CMJ, rendimiento) y qué requiere atención. Todo sale de datos que ya
+// existen; no se guarda nada nuevo.
+export const SEV_ALERTA = { 3: { color: ds.danger, label: "Urgente" }, 2: { color: ds.warning, label: "Atención" }, 1: { color: ds.inkMuted, label: "Aviso" } };
+export const ESTADO_JUGADOR_META = {
+  atencion: { label: "Atención", color: ds.warning },
+  aldia: { label: "Al día", color: ds.success },
+  sinplan: { label: "Sin plan", color: ds.inkMuted },
+};
+
+// Molestias que han indicado los jugadores en las últimas dos semanas. Tolerante:
+// si la tabla "molestias" no existe todavía, devuelve una lista vacía.
+export function useMolestiasRecientes() {
+  const [rows, setRows] = useState(() => sharedDataCache.get("molestias_rec") || null);
+  useEffect(() => {
+    if (rows !== null) return undefined;
+    let off = false;
+    (async () => {
+      let lista = [];
+      try {
+        const { data, error } = await supabase.from("molestias").select("*").gte("fecha", sumarDiasFecha(todayStr(), -13));
+        lista = error ? [] : data || [];
+      } catch (e) {
+        lista = [];
+      }
+      sharedDataCache.set("molestias_rec", lista);
+      if (!off) setRows(lista);
+    })();
+    return () => {
+      off = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return rows || [];
+}
+
+export function useDatosDashboardEntrenador() {
+  const [players, , playersLoaded] = usePlayers();
+  const [grupos, , gruposLoaded] = useEntityList("grupos");
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
+  const { items: equipoHistory, loaded: historyLoaded } = useEquipoHistory();
+  const { items: refsEquipo, loaded: refsEquipoLoaded } = useReferenciasFuerza(null, { todos: true });
+  const loaded = playersLoaded && gruposLoaded && progLoaded && historyLoaded;
+
+  if (!loaded) return { loaded: false };
+
+  const hoy = todayStr();
+  const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  const activos = players.filter((p) => p.estado === "activo");
+  const playersById = new Map(players.map((p) => [p.id, p]));
+  const independientes = activos.filter((p) => (p.gruposIds || []).length === 0).length;
+  const gruposById = new Map(grupos.map((g) => [g.id, g.nombre || g.name || "Grupo"]));
+
+  const sesionHoy = sesiones.find((s) => s.enviada && (s.fechas || []).includes(hoy));
+  const borradorHoy = sesiones.find((s) => !s.enviada && (s.fechas || []).includes(hoy));
+  const borradores = sesiones.filter((s) => !s.enviada).length;
+
+  // CTA de la cabecera (escritorio/iPad y móvil): estado del día resuelto
+  // aquí, compartido por ambas variantes del Dashboard.
+  let heroTitulo, heroAccionLabel, heroAccionModulo;
+  if (sesionHoy) {
+    heroTitulo = "Trabajo de hoy publicado";
+    heroAccionLabel = "Ver quién ha registrado";
+    heroAccionModulo = "historial";
+  } else if (borradorHoy) {
+    heroTitulo = "Hay un borrador de hoy sin publicar";
+    heroAccionLabel = "Retomar borrador";
+    heroAccionModulo = "programacion";
+  } else {
+    heroTitulo = "Nada planificado para hoy";
+    heroAccionLabel = "Diseñar sesión de hoy";
+    heroAccionModulo = "diseno";
+  }
+
+  const lunes = inicioSemanaCalendario(hoy);
+  const domingo = sumarDiasFecha(lunes, 6);
+
+  // Ocurrencias de sesión (sesión × fecha) dentro de la semana de
+  // calendario, y cuántas de esas fechas ya han llegado (<= hoy).
+  let ocurrenciasSemana = 0;
+  let ocurrenciasRealizadas = 0;
+  const asignacionesSemana = []; // [{ jugadorId, date }] — solo fechas ya llegadas, para adherencia
+  // Para "Tu semana" (panel L-D) y "jugadores sin trabajo": mismas fechas
+  // enviadas/borrador dentro de la semana, pero acumuladas por fecha (para
+  // el punto de estado de cada día) y por jugador (para saber quién tiene
+  // algún destino asignado esta semana, publicado o no). Reutiliza el mismo
+  // bucle de arriba en vez de recorrer `sesiones` una tercera vez.
+  const fechasConEnviada = new Set(); // fechas de la semana con >=1 sesión ENVIADA ese día
+  const fechasConCualquiera = new Set(); // fechas de la semana con >=1 sesión (enviada o borrador)
+  const jugadoresConTrabajoSemana = new Set(); // jugadorId con algún destino (enviado o borrador) esta semana, cualquier fecha
+  sesiones.forEach((s) => {
+    const destino = s.jugadores_destino && s.jugadores_destino.length ? s.jugadores_destino : activos.map((p) => p.id);
+    (s.fechas || []).forEach((f) => {
+      if (f < lunes || f > domingo) return;
+      if (s.enviada) {
+        ocurrenciasSemana++;
+        fechasConEnviada.add(f);
+        if (f <= hoy) {
+          ocurrenciasRealizadas++;
+          destino.forEach((jugadorId) => asignacionesSemana.push({ jugadorId, date: f, sesionId: s.id }));
+        }
+      }
+      fechasConCualquiera.add(f);
+      destino.forEach((jugadorId) => jugadoresConTrabajoSemana.add(jugadorId));
+    });
+  });
+
+  // "Tu semana": un punto de estado por día L-D. Regla honesta y simple
+  // (documentada también en el mockup): "ok" = sesión ENVIADA ese día y ya
+  // ha pasado (o es hoy); "pending" = alguna sesión (enviada o borrador)
+  // ese día y todavía no ha pasado (es hoy o futuro); en cualquier otro
+  // caso, "empty" — incluido el caso borde de un borrador en un día YA
+  // pasado y nunca publicado, que no encaja honestamente en "ok" (no se
+  // publicó) ni en "pending" (ya pasó). El mockup contempla un cuarto
+  // estado invisible ("dot--none", día sin dato determinable) que aquí NO
+  // se usa: con `sesiones` ya sabemos siempre si hubo o no trabajo ese
+  // día, así que "empty" siempre es un dato real, nunca un placeholder.
+  const semanaDias = [];
+  for (let i = 0; i < 7; i++) {
+    const f = sumarDiasFecha(lunes, i);
+    let estado;
+    if (f <= hoy && fechasConEnviada.has(f)) estado = "ok";
+    else if (f >= hoy && fechasConCualquiera.has(f)) estado = "pending";
+    else estado = "empty";
+    semanaDias.push({ fecha: f, dow: ["L", "M", "X", "J", "V", "S", "D"][i], dayNum: new Date(f + "T00:00:00").getDate(), isToday: f === hoy, estado });
+  }
+
+  // "N jugadores sin trabajo": activos que no aparecen como destino de
+  // ninguna sesión (enviada o borrador) en ningún día de la semana en
+  // curso — sin la restricción `f <= hoy` de la adherencia, porque aquí
+  // interesa si ya tienen algo planificado para el resto de la semana, no
+  // solo lo ya ocurrido.
+  const jugadoresSinTrabajo = activos.filter((p) => !jugadoresConTrabajoSemana.has(p.id));
+
+  // Adherencia: SOLO la semana en curso, con el dato que la sostiene
+  // (cumplidas / planificadas). Ya NO se compara contra la semana anterior
+  // — esa comparación mezclaba cumplimiento real con disponibilidad de
+  // calendario (una semana con menos sesiones planificadas no es "peor
+  // adherencia"). Ver la corrección documentada en Fase 6 → Dashboard del
+  // entrenador.
+  const hechasSemana = tareasHechasPorJugadorFecha(equipoHistory);
+  const fraccionCumplidaSemana = crearFraccionCumplida(tareasProg);
+  const cumplidasSemana = asignacionesSemana.reduce((sum, { jugadorId, date, sesionId }) => sum + fraccionCumplidaSemana(sesionId, date, hechasSemana.get(`${jugadorId}::${date}`), jugadorId), 0);
+  const adherenciaActual = asignacionesSemana.length ? Math.round((cumplidasSemana / asignacionesSemana.length) * 100) : null;
+
+  // "Quién necesita atención" (ENT-01): cómo está cada jugador ESTA semana
+  // frente a su nivel habitual, ejercicio a ejercicio. Antes era la media de
+  // kg de todos los ejercicios mezclados (sentadilla con curl), que no
+  // significaba nada. Ahora, por cada ejercicio+equipo con dato esta semana
+  // y antes, se compara el e1RM estimado (o las reps al fallo si no lleva
+  // carga) — ver calcularCambiosE1rm, la misma lógica que ve el jugador en
+  // su pantalla — y el resultado del jugador es la media de esas variaciones
+  // (cada ejercicio pesa igual). Una media puede esconder una caída fuerte
+  // en un solo básico (sentadilla -10 % con dominadas +10 % da 0 %), así
+  // que si el ejercicio que más ha bajado cae 12 % o más, ESE es el titular
+  // de la fila y del semáforo, y el detalle explica la media.
+  // Tareas de Resistencia y bloque CMJ quedan fuera por no ser carga
+  // comparable de la misma forma.
+  const itemsPorJugador = new Map();
+  [...equipoHistory, ...refsEquipo].forEach((it) => {
+    if (!itemsPorJugador.has(it.jugadorId)) itemsPorJugador.set(it.jugadorId, []);
+    itemsPorJugador.get(it.jugadorId).push(it);
+  });
+  const rendimiento = evaluarRendimientoEquipo(itemsPorJugador, activos, lunes, hoy);
+  const variaciones = activos
+    .map((p) => {
+      const cambios = calcularCambiosE1rm(itemsPorJugador.get(p.id) || [], lunes, hoy);
+      if (!cambios.length) return null;
+      const pctMedia = cambios.reduce((sum, c) => sum + c.pct, 0) / cambios.length;
+      const ordenados = [...cambios].sort((a, b) => a.pct - b.pct);
+      const peor = ordenados[0];
+      const mejor = ordenados[ordenados.length - 1];
+      const usaPeor = cambios.length > 1 && peor.pct <= -12 && peor.pct < pctMedia;
+      const pct = usaPeor ? peor.pct : pctMedia;
+      // El sparkline enseña el ejercicio que explica el semáforo: el que
+      // más ha bajado si el jugador va a la baja, el que más ha subido si no.
+      const guia = usaPeor || pct < 0 ? peor : mejor;
+      return {
+        jugador: p,
+        pct,
+        pctMedia,
+        usaPeor,
+        serieReciente: guia.serie,
+        nombresEjercicios: ordenados.map((c) => c.nombre),
+        tareasCount: cambios.reduce((sum, c) => sum + c.nRegistros, 0),
+        nEjercicios: cambios.length,
+        peor,
+        cambios: ordenados,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.pct - b.pct);
+  // Umbrales sobre la media de variaciones de e1RM: el e1RM sale de un RIR
+  // reportado por el jugador, así que oscila unos puntos de una semana a
+  // otra sin que haya pasado nada. Hasta -3 % se considera ruido (verde).
+  const atencionSemaforo = (pct) => (pct <= -8 ? "red" : pct < -3 ? "amber" : "green");
+
+  // "Pendientes de hoy" (antes "Usuarios"): solo jugadores activos que
+  // todavía no han registrado la sesión de hoy — si hoy no hay sesión
+  // publicada, no hay nadie "pendiente" que mostrar.
+  const registroPorJugadorFecha = new Set(equipoHistory.map((it) => `${it.jugadorId}::${it.date}`));
+  const pendientesHoy = sesionHoy ? activos.filter((p) => !registroPorJugadorFecha.has(`${p.id}::${hoy}`)) : [];
+
+  return {
+    loaded: true,
+    activos,
+    playersById,
+    grupos,
+    independientes,
+    gruposById,
+    hoyLabel,
+    borradores,
+    heroTitulo,
+    heroAccionLabel,
+    heroAccionModulo,
+    ocurrenciasSemana,
+    ocurrenciasRealizadas,
+    adherenciaActual,
+    cumplidasSemana,
+    asignacionesSemana,
+    semanaDias,
+    jugadoresSinTrabajo,
+    variaciones,
+    rendimiento,
+    atencionSemaforo,
+    sesionHoy,
+    pendientesHoy,
+  };
+}
+
+export function useCarteraEntrenador() {
+  const datos = useDatosDashboardEntrenador();
+  const [playersAll, , playersLoaded] = usePlayers();
+  const { items: hist, loaded: histLoaded } = useEquipoHistory();
+  const { sesiones, tareas: tareasProg, loaded: progLoaded } = useBootstrapProgramacion();
+  const [solicitudes, , solLoaded] = useEntityList("solicitudesSesion", { estado: "pendiente" });
+  const estadoCmj = useEstadoCmjEquipo(playersAll);
+  const molestias = useMolestiasRecientes();
+  if (!datos.loaded || !playersLoaded || !histLoaded || !progLoaded) return { loaded: false };
+
+  const hoy = todayStr();
+  const manana = sumarDiasFecha(hoy, 1);
+  const lunes = inicioSemanaCalendario(hoy);
+  const desde28 = sumarDiasFecha(hoy, -27);
+  const desde14 = sumarDiasFecha(hoy, -13);
+  const activos = datos.activos;
+  const hechas = tareasHechasPorJugadorFecha(hist);
+  const fraccion = crearFraccionCumplida(tareasProg);
+
+  const met = new Map();
+  activos.forEach((p) => met.set(p.id, { asig28: 0, cump28: 0, asigSem: 0, cumpSem: 0, asig14: 0, ultima: null }));
+  sesiones
+    .filter((s) => s.enviada)
+    .forEach((s) => {
+      const destino = destinatariosEfectivosSesion(s, activos);
+      (s.fechas || []).forEach((f) => {
+        if (f < desde28 || f > hoy) return;
+        destino.forEach((id) => {
+          const r = met.get(id);
+          if (!r) return;
+          const fr = fraccion(s.id, f, hechas.get(`${id}::${f}`), id);
+          if (f === hoy && fr <= 0) return; // hoy todavía puede hacerla
+          r.asig28 += 1;
+          r.cump28 += fr;
+          if (f >= lunes) {
+            r.asigSem += 1;
+            r.cumpSem += fr;
+          }
+          if (f >= desde14) r.asig14 += 1;
+        });
+      });
+    });
+  hist.forEach((it) => {
+    if (!it.done) return;
+    const r = met.get(it.jugadorId);
+    if (r && (!r.ultima || it.date > r.ultima)) r.ultima = it.date;
+  });
+  const variacionPorJugador = new Map((datos.variaciones || []).map((v) => [v.jugador.id, v]));
+
+  // ---- Alertas ----
+  const alertas = [];
+  const porJugador = new Map();
+  const nuevaAlerta = (a) => {
+    alertas.push(a);
+    if (a.jugadorId) {
+      if (!porJugador.has(a.jugadorId)) porJugador.set(a.jugadorId, []);
+      porJugador.get(a.jugadorId).push(a);
+    }
+  };
+  const fmtF = (f) => new Date(f + "T00:00:00").toLocaleDateString("es-ES", { day: "numeric", month: "short" });
+  (datos.rendimiento?.sistemicos || []).forEach((sx) => {
+    nuevaAlerta({
+      id: `datos-${sx.clave}`,
+      sev: 1,
+      tipo: "datos",
+      titulo: `${sx.nombre}: ${sx.pct > 0 ? "+" : ""}${sx.pct} % en ${sx.jugadores} jugadores a la vez`,
+      detalle: "Cambio demasiado grande y simultáneo para ser rendimiento: ¿cambió el material, la unidad de carga o el ejercicio? Se ha excluido de las alertas de rendimiento.",
+      acciones: [],
+    });
+  });
+  activos.forEach((p) => {
+    const r = met.get(p.id);
+    const cmj = estadoCmj && estadoCmj.get ? estadoCmj.get(p.id) : null;
+    if (cmj && (cmj.status === "red" || cmj.status === "amber")) {
+      nuevaAlerta({
+        id: `cmj-${p.id}`,
+        sev: cmj.status === "red" ? 3 : 2,
+        tipo: "cmj",
+        jugadorId: p.id,
+        chip: `${p.name}${cmj.fechaTest ? ` · test ${fmtF(cmj.fechaTest)}` : ""}`,
+        titulo: `${p.name} · CMJ ${cmj.status === "red" ? "en rojo" : "a vigilar"}`,
+        detalle: `Último test ${cmj.fechaTest ? fmtF(cmj.fechaTest) : "—"}. Revisa la carga de su próxima sesión.`,
+        acciones: [{ label: "Ver CMJ", tipo: "ficha", pestana: "cmj" }, { label: "Planificar", tipo: "cal" }],
+      });
+    }
+    const ultimaMol = molestias
+      .filter((m) => m.jugador_id === p.id && m.fecha >= sumarDiasFecha(hoy, -3) && Number(m.valor) >= 5)
+      .sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)))[0];
+    if (ultimaMol) {
+      const val = Number(ultimaMol.valor);
+      const cuando = ultimaMol.fecha === hoy ? "hoy" : ultimaMol.fecha === sumarDiasFecha(hoy, -1) ? "ayer" : `el ${fmtF(ultimaMol.fecha)}`;
+      nuevaAlerta({
+        id: `mol-${p.id}`,
+        sev: val >= 7 ? 3 : 2,
+        tipo: "molestia",
+        chip: `${p.name} · ${val}/10${ultimaMol.zona ? ` ${String(ultimaMol.zona).toLowerCase()}` : ""}`,
+        jugadorId: p.id,
+        titulo: `${p.name} · molestia ${val}/10${ultimaMol.zona ? ` en ${String(ultimaMol.zona).toLowerCase()}` : ""}`,
+        detalle: `Indicada ${cuando} al enviar su sesión. Valora ajustar su próxima sesión.`,
+        acciones: [{ label: "Planificar", tipo: "cal" }, { label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    }
+    const rend = datos.rendimiento?.resultados?.get(p.id);
+    if (rend && rend.alerta) {
+      const n = rend.bajan.length;
+      nuevaAlerta({
+        id: `e1rm-${p.id}`,
+        // Regla calibrada (ver RENDIMIENTO_CFG): siempre "aviso", nunca urgencia:
+        // el e1RM depende del RIR que apunta el jugador.
+        sev: 1,
+        chip: `${p.name} · ${Math.round(rend.pct)} %`,
+        tipo: "rendimiento",
+        jugadorId: p.id,
+        titulo: `${p.name} · ${n} ejercicios con la carga estimada a la baja`,
+        detalle: `Lo que más baja: ${rend.peor.nombre} (${Math.round(rend.peor.pct)} %) frente a su nivel habitual.`,
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "progreso" }],
+      });
+    }
+    const diasSin = r.ultima ? diasEntreFechas(r.ultima, hoy) : null;
+    if (r.asig14 >= 2 && (diasSin === null || diasSin >= 5)) {
+      nuevaAlerta({
+        id: `inactivo-${p.id}`,
+        sev: 2,
+        chip: `${p.name} · ${diasSin === null ? "nunca" : `${diasSin} d`}`,
+        tipo: "inactivo",
+        jugadorId: p.id,
+        titulo: `${p.name} · sin registrar ${diasSin === null ? "ninguna sesión" : `desde hace ${diasSin} días`}`,
+        detalle: `Tenía ${r.asig14} sesiones asignadas en las últimas dos semanas.`,
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    } else if (r.asig28 >= 4 && r.cump28 / r.asig28 < 0.6) {
+      nuevaAlerta({
+        id: `adh-${p.id}`,
+        sev: r.cump28 / r.asig28 < 0.4 ? 2 : 1,
+        chip: `${p.name} · ${Math.round((r.cump28 / r.asig28) * 100)} %`,
+        tipo: "adherencia",
+        jugadorId: p.id,
+        titulo: `${p.name} · adherencia ${Math.round((r.cump28 / r.asig28) * 100)} %`,
+        detalle: "En las últimas 4 semanas cumple menos de lo planificado.",
+        acciones: [{ label: "Ver ficha", tipo: "ficha", pestana: "resumen" }],
+      });
+    }
+  });
+  // Del entrenador (no de un jugador)
+  sesiones
+    .filter((s) => !s.enviada && (s.tareas === undefined || true))
+    .forEach((s) => {
+      (s.fechas || []).forEach((f) => {
+        if (f !== hoy && f !== manana) return;
+        nuevaAlerta({
+          id: `borrador-${s.id}-${f}`,
+          sev: f === hoy ? 3 : 2,
+          tipo: "borrador",
+          titulo: `Borrador sin publicar para ${f === hoy ? "hoy" : "mañana"}`,
+          detalle: `${s.nombre || "Sesión sin nombre"} · nadie la verá hasta que la publiques.`,
+          acciones: [{ label: "Abrir calendario", tipo: "cal" }],
+        });
+      });
+    });
+  if (solLoaded) {
+    solicitudes.forEach((sol) => {
+      const p = datos.playersById.get(sol.jugador_id);
+      nuevaAlerta({
+        id: `sol-${sol.id}`,
+        sev: 2,
+        tipo: "solicitud",
+        jugadorId: sol.jugador_id,
+        titulo: `${p ? p.name : "Un jugador"} pide sesión${sol.fecha ? ` para el ${fmtF(sol.fecha)}` : ""}`,
+        detalle: sol.nota ? `“${sol.nota}”` : "Pendiente de respuesta en el calendario.",
+        acciones: [{ label: "Responder", tipo: "cal", scopeJugador: true }],
+      });
+    });
+  }
+  const hayAlgoProximo = sesiones.some((s) => (s.fechas || []).some((f) => f >= hoy && f <= sumarDiasFecha(hoy, 2)));
+  if (!hayAlgoProximo) {
+    nuevaAlerta({ id: "vacio-2d", sev: 1, tipo: "vacio", titulo: "No hay nada planificado en los próximos 2 días", detalle: "Planifica la semana desde el calendario.", acciones: [{ label: "Planificar semana", tipo: "cal" }] });
+  }
+  alertas.sort((a, b) => b.sev - a.sev);
+
+  // ---- Estado por jugador ----
+  const filas = new Map();
+  activos.forEach((p) => {
+    const r = met.get(p.id);
+    const al = porJugador.get(p.id) || [];
+    const cmj = estadoCmj && estadoCmj.get ? estadoCmj.get(p.id) : null;
+    const estado = al.some((a) => a.sev >= 2) ? "atencion" : r.asig28 === 0 && r.asig14 === 0 ? "sinplan" : "aldia";
+    filas.set(p.id, {
+      estado,
+      adh28: r.asig28 ? Math.round((r.cump28 / r.asig28) * 100) : null,
+      adhSem: r.asigSem ? Math.round((r.cumpSem / r.asigSem) * 100) : null,
+      ultima: r.ultima,
+      diasSin: r.ultima ? diasEntreFechas(r.ultima, hoy) : null,
+      cmj: cmj ? cmj.status : null,
+      molestia: (() => {
+        const ms = molestias.filter((m) => m.jugador_id === p.id && m.fecha >= sumarDiasFecha(hoy, -3)).sort((a, b) => String(b.fecha).localeCompare(String(a.fecha)));
+        return ms.length ? Number(ms[0].valor) : null;
+      })(),
+      hoy: null, // "hecho" | "parcial" | "pendiente" | null (sin sesión hoy); se rellena abajo
+      variacion: variacionPorJugador.has(p.id) ? variacionPorJugador.get(p.id).pct : null,
+      alertas: al,
+    });
+  });
+
+  // ---- Hoy ----
+  const sesionesHoy = sesiones
+    .filter((s) => s.enviada && (s.fechas || []).includes(hoy))
+    .map((s) => {
+      const ids = destinatariosEfectivosSesion(s, activos);
+      const completos = [];
+      const parciales = [];
+      const ninguno = [];
+      ids.forEach((id) => {
+        const p = datos.playersById.get(id);
+        if (!p || p.estado !== "activo") return;
+        const fr = fraccion(s.id, hoy, hechas.get(`${id}::${hoy}`), id);
+        if (fr >= 0.999) completos.push(p);
+        else if (fr > 0) parciales.push(p);
+        else ninguno.push(p);
+      });
+      return { sesion: s, completos, parciales, ninguno, total: completos.length + parciales.length + ninguno.length };
+    });
+
+  const rangoHoy = { hecho: 3, parcial: 2, pendiente: 1 };
+  const marcarHoy = (lista, valor) =>
+    lista.forEach((pl) => {
+      const f = filas.get(pl.id);
+      if (f && (f.hoy == null || rangoHoy[valor] > rangoHoy[f.hoy])) f.hoy = valor;
+    });
+  sesionesHoy.forEach(({ completos, parciales, ninguno }) => {
+    marcarHoy(completos, "hecho");
+    marcarHoy(parciales, "parcial");
+    marcarHoy(ninguno, "pendiente");
+  });
+
+  // ---- Semana ----
+  const semana = Array.from({ length: 7 }, (_, i) => {
+    const f = sumarDiasFecha(lunes, i);
+    const env = sesiones.filter((s) => s.enviada && (s.fechas || []).includes(f));
+    const bor = sesiones.filter((s) => !s.enviada && (s.fechas || []).includes(f));
+    return { fecha: f, dow: ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"][i], num: Number(f.slice(8)), env: env.length, bor: bor.length, esHoy: f === hoy, pasado: f < hoy };
+  });
+
+  const cumplSem = (() => {
+    let a = 0;
+    let c = 0;
+    met.forEach((r) => {
+      a += r.asigSem;
+      c += r.cumpSem;
+    });
+    return a ? Math.round((c / a) * 100) : null;
+  })();
+
+  return { loaded: true, activos, playersById: datos.playersById, grupos: datos.grupos, gruposById: datos.gruposById, filas, alertas, sesionesHoy, semana, cumplSem, hoy };
 }
