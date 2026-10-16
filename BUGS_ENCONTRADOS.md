@@ -280,3 +280,35 @@ AVATAR_STACK_COLORES is not defined`) desde el Paso 5.5.
 corresponde (ahora en `src/screens/Roster.jsx`, junto al resto de piezas
 de `TarjetaEquipoReal`). Verificado con build limpio, 86 tests en verde
 y auditoría de declaraciones sin pérdidas.
+
+## 20. Dos piezas de código muerto, ya desde el original (no introducidas por esta reorganización) — anotadas, no tocadas
+
+Al extraer el Dashboard se encontraron dos constantes/funciones que no
+las usa nada en todo el archivo: `LISTA_MOVIL_MAX_ALTO` (línea ~578 del
+`App.jsx` de antes de este paso) y `SEM_COLOR_DASHBOARD` +
+`sparklinePuntos` (justo después del Dashboard, antes de
+`MiProgresoJugadorReal`). Se comprobó contra el primer commit (antes de
+tocar nada) y ya estaban igual de huérfanas entonces — no es un bug de
+esta reorganización, parece ser un resto de una versión anterior de
+la pantalla (probablemente un sparkline de "quién necesita atención"
+que se sustituyó por otra cosa, sin borrar el código viejo).
+
+**No se toca** (la instrucción es no borrar código, solo mover/relocar).
+Se deja tal cual está en `App.jsx`, fuera de los bloques que se van
+extrayendo — ya no estorba para seguir avanzando, pero queda anotado
+aquí para que algún día, si se quiere, se pueda limpiar a propósito.
+
+## 21. BUG (detectado antes de comprometerlo): `FilaAlertaReal` también la usa la Ficha de jugador, no solo el Dashboard
+
+Al mover `FilaAlertaReal` (parte de la "bandeja de atención") a
+`src/screens/Dashboard.jsx`, los scripts de verificación encontraron que
+`FichaAtencionReal` (dentro de la Ficha de jugador, todavía en `App.jsx`)
+también la usa — el propio comentario de `FichaAtencionReal` ya decía
+"mismas reglas que la bandeja de Inicio", así que tiene sentido que
+compartan la fila.
+
+**Corregido antes de comprometer el paso:** se exporta `FilaAlertaReal`
+desde `Dashboard.jsx` y se importa en `App.jsx`. A diferencia de los
+puntos 16-19, este no llegó a estar roto en ningún commit — lo cogió la
+rutina de verificación (ambos scripts relanzados contra `App.jsx` tras
+cada extracción) antes de guardar el paso.
