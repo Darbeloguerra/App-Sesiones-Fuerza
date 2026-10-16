@@ -180,6 +180,14 @@ import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "./src/cor
 import { PortalAccesoRaiz } from "./src/screens/Portal.jsx";
 import { ControlFatigaModuloReal, CmjProximamente } from "./src/screens/ControlFatiga.jsx";
 import { DisenoSesionReal } from "./src/screens/DisenoSesion.jsx";
+import {
+  IconoModulo,
+  MODULOS_DASHBOARD,
+  IconoGridSidebar,
+  useSolicitudesPendientesCount,
+  SidebarEntrenadorReal,
+  PantallaEntrenadorAncha,
+} from "./src/core/layoutEntrenador.jsx";
 
 // El sistema de diseño "Fuerza" (ds/dsSp/dsR/dsSh/dsF, GlobalStyles,
 // Ds* componentes reutilizables) ahora vive en src/core/designSystem.jsx
@@ -1724,73 +1732,8 @@ function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugad
   );
 }
 
-function IconoModulo({ tipo }) {
-  const common = { width: 20, height: 20, stroke: "currentColor", fill: "none", strokeWidth: 1.6 };
-  switch (tipo) {
-    case "calendario":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <rect x="3" y="5" width="18" height="16" rx="2" />
-          <path d="M3 10h18M8 3v4M16 3v4" />
-        </svg>
-      );
-    case "lapiz":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
-        </svg>
-      );
-    case "personas":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <circle cx="9" cy="8" r="3.2" />
-          <path d="M2.5 20c0-3.5 2.9-6 6.5-6s6.5 2.5 6.5 6" />
-          <circle cx="17.5" cy="9" r="2.4" />
-          <path d="M15.8 14.2c2.7.3 4.7 2.4 4.7 5.3" />
-        </svg>
-      );
-    case "libro":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v17H6.5A2.5 2.5 0 0 0 4 21.5v-17Z" />
-          <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-        </svg>
-      );
-    case "reloj":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <circle cx="12" cy="12" r="9" />
-          <path d="M12 7v5l3.5 2" />
-        </svg>
-      );
-    case "rayo":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <path d="M13 2 4 14h6l-1 8 9-12h-6l1-8Z" />
-        </svg>
-      );
-    // Icono para "Control de fatiga" — un pulso/zigzag, dibujado a mano en
-    // el mismo estilo que el resto de este set (no es un icono de librería,
-    // para no mezclar dos sistemas de iconos distintos en este único menú).
-    case "pulso":
-      return (
-        <svg viewBox="0 0 24 24" {...common}>
-          <path d="M2 13h4l2.5-7L13 19l2.5-9.5L17 13h5" />
-        </svg>
-      );
-    default:
-      return null;
-  }
-}
-
-const MODULOS_DASHBOARD = [
-  { id: "calendario", nombre: "Calendario", descripcion: "Planifica sesiones futuras por equipo, grupo o jugador", icono: "calendario" },
-  { id: "diseno", nombre: "Diseñar sesión", descripcion: "Crear una sesión nueva", icono: "lapiz" },
-  { id: "roster", nombre: "Usuarios", descripcion: "Usuarios, grupos, PINs y categorías preventivas", icono: "personas" },
-  { id: "biblioteca", nombre: "Biblioteca", descripcion: "Ejercicios, categorías y rotación", icono: "libro" },
-  { id: "fatiga", nombre: "Control de fatiga", descripcion: "Salto CMJ, microciclos y estado del equipo", icono: "pulso" },
-];
+// IconoModulo y MODULOS_DASHBOARD ahora en src/core/layoutEntrenador.jsx —
+// importadas arriba.
 
 // (La antigua TarjetaModuloCompactaReal, tarjeta grande de módulo, se
 // retiró: el acceso directo a módulos del Dashboard móvil ahora es una
@@ -2386,94 +2329,8 @@ function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHistory }) 
   );
 }
 
-function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
-  const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Inicio", icono: "grid" }, ...MODULOS_DASHBOARD];
-  // Aviso de peticiones de sesión sin mirar (Calendario → jugador pide un
-  // día) — solo dentro de la app, un badge aquí es lo más parecido a una
-  // notificación que hay sin infraestructura de push/email.
-  const pendientesCount = useSolicitudesPendientesCount();
-  return (
-    <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}><Zap size={15} fill={ds.accentInk} /></div>
-        <div>
-          <div style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 14, letterSpacing: "-0.01em" }}>FUERZA</div>
-          <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, letterSpacing: "0.06em" }}>PANEL DE ENTRENADOR</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-        {SIDEBAR_ITEMS.map((m) => (
-          <DsNavItem key={m.id} active={m.id === activo} onClick={() => onAbrirModulo(m.id)} icon={m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}>
-            <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
-              {m.nombre}
-              {m.id === "calendario" && pendientesCount > 0 && (
-                <span style={{ marginLeft: "auto", background: ds.warning, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 800, borderRadius: dsR.full, padding: "1px 6px", minWidth: 16, textAlign: "center" }}>
-                  {pendientesCount}
-                </span>
-              )}
-            </span>
-          </DsNavItem>
-        ))}
-      </div>
-      <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <DsAvatar size={30}>D</DsAvatar>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>David</div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Entrenador</div>
-          </div>
-        </div>
-        <DsButton variant="secondary" size="sm" onClick={onCerrarSesion}>Cerrar sesión</DsButton>
-      </div>
-    </div>
-  );
-}
-
-// Envoltorio para las pantallas "sueltas" del entrenador (Programación,
-// Biblioteca, Historial, Usuarios): en escritorio/iPad (≥1000px) llevan la
-// misma barra lateral fija que el Dashboard, para que se sienta como un
-// panel de verdad al moverte entre secciones — no una pantalla aparte con
-// un enlace de "volver" cada vez. Por debajo de eso, se queda con la
-// pantalla estrecha de móvil de siempre (con su propio botón de volver).
-function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWidthCompacto = 560, children }) {
-  const ancho = useAnchoVentana();
-  if (ancho < 1000) {
-    return (
-      <PantallaBase rol="entrenador" maxWidth={maxWidthCompacto}>
-        <div>
-          <button onClick={() => onAbrirModulo("dashboard")} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
-            ← Volver a Inicio
-          </button>
-          {children}
-        </div>
-      </PantallaBase>
-    );
-  }
-  return (
-    <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
-      <GlobalStyles />
-      <SidebarEntrenadorReal activo={activo} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
-      <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px 48px" }}>
-        <div style={{ maxWidth: 860, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 16 }}>
-            <div style={{ flex: 1, maxWidth: 280, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "6px 12px", color: ds.inkMuted, fontSize: 12 }}>
-              🔍 Buscar jugador, ejercicio...
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
-              </span>
-              <div style={{ width: 27, height: 27, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
-                <Bell size={13} />
-              </div>
-            </div>
-          </div>
-          {children}
-        </div>
-      </div>
-    </div>
-  );
-}
+// SidebarEntrenadorReal y PantallaEntrenadorAncha ahora en
+// src/core/layoutEntrenador.jsx — importadas arriba.
 
 // Datos del Dashboard del entrenador — extraído a un hook propio para que
 // la versión de escritorio/iPad (barra lateral) y la de móvil compartan
@@ -2781,16 +2638,7 @@ function ListaCambiosEjerciciosReal({ cambios, compact }) {
 
 
 
-function IconoGridSidebar() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-      <rect x="3" y="3" width="8" height="8" rx="1.5" />
-      <rect x="13" y="3" width="8" height="8" rx="1.5" />
-      <rect x="3" y="13" width="8" height="8" rx="1.5" />
-      <rect x="13" y="13" width="8" height="8" rx="1.5" />
-    </svg>
-  );
-}
+// IconoGridSidebar ahora en src/core/layoutEntrenador.jsx — importada arriba.
 
 
 
@@ -3888,17 +3736,8 @@ function estadoDiaCalendario(sesionesDia, fecha, hoy) {
   return "empty";
 }
 
-// Contador ligero para los badges de "Calendario" (menú lateral y accesos
-// directos del Dashboard) — cuenta peticiones con estado='pendiente' tal
-// cual están en la tabla, SIN cruzarlas contra `sesiones` (ese cruce, más
-// caro, es el que hace el propio Calendario para decidir cuáles mostrar
-// como accionables de verdad). Aquí basta con una señal barata de "tienes
-// peticiones sin mirar" — sharedDataCache hace que llamarlo desde varios
-// sitios a la vez no dispare peticiones de red repetidas.
-function useSolicitudesPendientesCount() {
-  const [rows, , loaded] = useEntityList("solicitudesSesion", { estado: "pendiente" });
-  return loaded ? rows.length : 0;
-}
+// useSolicitudesPendientesCount ahora en src/core/layoutEntrenador.jsx —
+// importada arriba.
 
 function itemScopeCalendarioStyle(activo) {
   return {
@@ -7972,25 +7811,8 @@ function calcularCargaSugerida(registroRef, repsHoy, rirHoy, redondeo = 2.5) {
   return Math.round((e1RM * pctHoy) / redondeo) * redondeo;
 }
 
-// Clave para el vídeo de demostración de una variante concreta. Más simple
-// que claveDisenoTarea a propósito: el gesto no cambia con el RIR ni con las
-// reps objetivo, solo con el material usado y si es uni o bilateral.
-function claveVideoVariante(material, unilateral) {
-  return `${material || "std"}::${unilateral ? "uni" : "bi"}`;
-}
-
-// Resuelve qué vídeo debe verse para una tarea ya construida (ver
-// construirTareaVisual) según el registro en curso del jugador. Si la tarea
-// deja elegir material y el jugador todavía no ha elegido, no hay vídeo que
-// mostrar todavía — se revela justo al elegir.
-function videoEfectivoTarea(tarea, registro) {
-  if (tarea.eligeEquipo) {
-    const elegido = registro?.subtipo;
-    if (!elegido || !tarea.equiposElegibles?.includes(elegido)) return null;
-    return tarea.videosPorEquipo?.[elegido] || tarea.gif || null;
-  }
-  return tarea.gif || null;
-}
+// claveVideoVariante y videoEfectivoTarea ahora en src/core/hooks.js —
+// importadas arriba (usadas por la Pantalla del jugador y por Biblioteca).
 
 // UNIDAD_POR_MODO ahora en src/core/hooks.js — importada arriba.
 
@@ -8606,37 +8428,8 @@ function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
   );
 }
 
-// Tarjeta de plantilla para la rejilla de "Sesiones" del mockup v2 (mismo
-// patrón visual que TarjetaFamiliaEjercicioReal: gradiente por bloque +
-// icono). El color/ícono se toma de la primera tarea de la plantilla, igual
-// que MiniaturaEjercicioReal hace con el bloque del ejercicio.
-// Una "plantilla" es una sesión con nombre. Al publicar una plantilla en el
-// calendario se crea una copia con el mismo nombre, así que la biblioteca
-// agrupa por nombre: una sola ficha por plantilla (la versión más reciente) y
-// todos sus usos (fecha + a quién) juntos, sin duplicados.
-function agruparPlantillas(sesionesConTareas) {
-  const clave = (n) => (n || "").trim().toLowerCase();
-  const grupos = new Map();
-  sesionesConTareas
-    .filter((s) => clave(s.nombre))
-    .forEach((s, idx) => {
-      const k = clave(s.nombre);
-      if (!grupos.has(k)) grupos.set(k, []);
-      grupos.get(k).push({ s, idx });
-    });
-  const hoy = todayStr();
-  return [...grupos.values()].map((items) => {
-    const maxFecha = (x) => (x.s.fechas || []).slice().sort().reverse()[0] || "";
-    // versión de referencia: la que tiene tareas y fecha más reciente (o la última creada)
-    const ordenadas = items.slice().sort((a, b) => ((a.s.tareas || []).length ? 1 : 0) - ((b.s.tareas || []).length ? 1 : 0) || maxFecha(a).localeCompare(maxFecha(b)) || a.idx - b.idx);
-    const rep = ordenadas[ordenadas.length - 1].s;
-    const usos = [];
-    items.forEach(({ s }) => (s.fechas || []).forEach((f) => usos.push({ fecha: f, sesion: s })));
-    usos.sort((a, b) => b.fecha.localeCompare(a.fecha));
-    const pasadosEnviados = usos.filter((u) => u.fecha <= hoy && u.sesion.enviada);
-    return { id: rep.id, rep, nombre: rep.nombre, usos, nUsos: pasadosEnviados.length, ultima: pasadosEnviados[0]?.fecha || null, proxima: [...usos].reverse().find((u) => u.fecha > hoy)?.fecha || null };
-  });
-}
+// agruparPlantillas ahora en src/core/hooks.js — importada arriba (usada
+// por Biblioteca y por Calendario).
 
 function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir, grupo }) {
   const primeraTarea = plantilla.tareas[0];

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ds } from "./designSystem.jsx";
 import { api, supabase, genId } from "./backend.js";
-import { normalizarFecha } from "../calc/fechas.js";
+import { normalizarFecha, todayStr } from "../calc/fechas.js";
 import { parseResistenciaData } from "../calc/adherencia.js";
 import { CMJ_UMBRAL_DEFECTO, cmjBuildPlayers } from "../calc/cmj.js";
 
@@ -1320,4 +1320,53 @@ export function usePartidos() {
     }
   };
   return { todos: actual, loaded: lista !== null, error, guardar, borrar };
+}
+
+// Clave para el vídeo de demostración de una variante concreta. Más simple
+// que claveDisenoTarea a propósito: el gesto no cambia con el RIR ni con las
+// reps objetivo, solo con el material usado y si es uni o bilateral.
+export function claveVideoVariante(material, unilateral) {
+  return `${material || "std"}::${unilateral ? "uni" : "bi"}`;
+}
+
+// Una "plantilla" es una sesión con nombre. Al publicar una plantilla en el
+// calendario se crea una copia con el mismo nombre, así que la biblioteca
+// agrupa por nombre: una sola ficha por plantilla (la versión más reciente) y
+// todos sus usos (fecha + a quién) juntos, sin duplicados. Usada por
+// Biblioteca y por Calendario.
+export function agruparPlantillas(sesionesConTareas) {
+  const clave = (n) => (n || "").trim().toLowerCase();
+  const grupos = new Map();
+  sesionesConTareas
+    .filter((s) => clave(s.nombre))
+    .forEach((s, idx) => {
+      const k = clave(s.nombre);
+      if (!grupos.has(k)) grupos.set(k, []);
+      grupos.get(k).push({ s, idx });
+    });
+  const hoy = todayStr();
+  return [...grupos.values()].map((items) => {
+    const maxFecha = (x) => (x.s.fechas || []).slice().sort().reverse()[0] || "";
+    // versión de referencia: la que tiene tareas y fecha más reciente (o la última creada)
+    const ordenadas = items.slice().sort((a, b) => ((a.s.tareas || []).length ? 1 : 0) - ((b.s.tareas || []).length ? 1 : 0) || maxFecha(a).localeCompare(maxFecha(b)) || a.idx - b.idx);
+    const rep = ordenadas[ordenadas.length - 1].s;
+    const usos = [];
+    items.forEach(({ s }) => (s.fechas || []).forEach((f) => usos.push({ fecha: f, sesion: s })));
+    usos.sort((a, b) => b.fecha.localeCompare(a.fecha));
+    const pasadosEnviados = usos.filter((u) => u.fecha <= hoy && u.sesion.enviada);
+    return { id: rep.id, rep, nombre: rep.nombre, usos, nUsos: pasadosEnviados.length, ultima: pasadosEnviados[0]?.fecha || null, proxima: [...usos].reverse().find((u) => u.fecha > hoy)?.fecha || null };
+  });
+}
+
+// Resuelve qué vídeo debe verse para una tarea ya construida (ver
+// construirTareaVisual) según el registro en curso del jugador. Si la tarea
+// deja elegir material y el jugador todavía no ha elegido, no hay vídeo que
+// mostrar todavía — se revela justo al elegir.
+export function videoEfectivoTarea(tarea, registro) {
+  if (tarea.eligeEquipo) {
+    const elegido = registro?.subtipo;
+    if (!elegido || !tarea.equiposElegibles?.includes(elegido)) return null;
+    return tarea.videosPorEquipo?.[elegido] || tarea.gif || null;
+  }
+  return tarea.gif || null;
 }

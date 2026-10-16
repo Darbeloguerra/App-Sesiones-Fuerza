@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { ds, dsF, dsR, DsButton, DsCard, DsBadge, DsInput, DsSelect, DsTabSwitcher, DsToggle } from "../core/designSystem.jsx";
 import { LoadingBlock } from "../core/components.jsx";
+import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
 import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "../core/cmjDisplay.jsx";
 import { api, supabase, genId } from "../core/backend.js";
 import { sharedDataCache, usePlayers, useMicrociclosTipo, usePartidos } from "../core/hooks.js";
