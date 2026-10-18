@@ -1,7 +1,66 @@
-import { Zap, Bell } from "lucide-react";
-import { ds, dsF, dsR, GlobalStyles, DsNavItem, DsAvatar, DsButton } from "./designSystem.jsx";
+import { useState } from "react";
+import { Zap } from "lucide-react";
+import { ds, dsF, dsR, GlobalStyles, DsNavItem, DsAvatar, DsButton, DsInput } from "./designSystem.jsx";
 import { useAnchoVentana, PantallaBase } from "./layout.jsx";
+import { accesoSesion, supabase } from "./backend.js";
 import { useEntityList } from "./hooks.js";
+
+// Cambio del código de entrenador (se guarda cifrado en Supabase; nadie, tampoco la
+// app, puede volver a leerlo). Un código largo protege mucho más que uno de 4 cifras.
+// Se abre como overlay (mismo patrón que PanelAltaReal/PanelGestionGruposReal en
+// Roster.jsx) porque se dispara desde el pie de la barra lateral, disponible en
+// cualquier pantalla — no cabría bien encajado en una columna de 232px.
+export function PanelCodigoEntrenadorReal({ onCerrar }) {
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [estado, setEstado] = useState({ guardando: false, error: "", ok: false });
+  const guardar = async () => {
+    const v = a.trim();
+    if (v.length < 4) return setEstado({ guardando: false, error: "Mínimo 4 caracteres (recomendado: 8 o más).", ok: false });
+    if (v !== b.trim()) return setEstado({ guardando: false, error: "Los dos códigos no coinciden.", ok: false });
+    setEstado({ guardando: true, error: "", ok: false });
+    try {
+      const { data, error } = await supabase.rpc("cambiar_codigo_entrenador", { p_nuevo: v });
+      if (error) throw error;
+      if (!data || !data.ok) {
+        const msg = data?.error === "igual_que_un_jugador" ? "Ese código ya es el PIN de un jugador. Elige otro." : data?.error === "corto" ? "Demasiado corto." : "No tienes permiso para cambiarlo.";
+        return setEstado({ guardando: false, error: msg, ok: false });
+      }
+      setA("");
+      setB("");
+      setEstado({ guardando: false, error: "", ok: true });
+    } catch {
+      setEstado({ guardando: false, error: "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.", ok: false });
+    }
+  };
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{ width: "100%", maxWidth: 420, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 10 }}
+      >
+        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>Código de entrenador</div>
+        <div style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.5 }}>
+          Se guarda cifrado: ni tú ni la app podréis volver a verlo, solo cambiarlo. Recomendado: 8 cifras o más; con 4 es fácil de adivinar.
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 4 }}>
+          <DsInput type="password" value={a} onChange={(e) => setA(e.target.value)} placeholder="Código nuevo" />
+          <DsInput type="password" value={b} onChange={(e) => setB(e.target.value)} placeholder="Repite el código" />
+        </div>
+        {estado.error && <div style={{ color: ds.danger, fontSize: 12 }}>{estado.error}</div>}
+        {estado.ok && <div style={{ color: ds.success, fontSize: 12 }}>Código cambiado. Úsalo la próxima vez que entres.</div>}
+        <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+          <DsButton onClick={guardar} disabled={estado.guardando}>
+            {estado.guardando ? "Guardando..." : "Guardar código"}
+          </DsButton>
+          <DsButton variant="secondary" onClick={onCerrar}>
+            Cerrar
+          </DsButton>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export function IconoModulo({ tipo }) {
   const common = { width: 20, height: 20, stroke: "currentColor", fill: "none", strokeWidth: 1.6 };
@@ -100,6 +159,12 @@ export function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion })
   // día) — solo dentro de la app, un badge aquí es lo más parecido a una
   // notificación que hay sin infraestructura de push/email.
   const pendientesCount = useSolicitudesPendientesCount();
+  // Código de entrenador: antes vivía como un botón suelto en la pantalla de
+  // Usuarios, sin relación visual con el resto de esa pantalla. Es un ajuste
+  // de cuenta, no de gestión de jugadores — vive aquí, junto al nombre y
+  // "Cerrar sesión", disponible desde cualquier pantalla.
+  const [codigoAbierto, setCodigoAbierto] = useState(false);
+  const puedeCambiarCodigo = accesoSesion.token && accesoSesion.rol === "entrenador";
   return (
     <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
@@ -131,8 +196,18 @@ export function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion })
             <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Entrenador</div>
           </div>
         </div>
+        {puedeCambiarCodigo && (
+          <button
+            type="button"
+            onClick={() => setCodigoAbierto(true)}
+            style={{ fontSize: 11.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}
+          >
+            Código de entrenador
+          </button>
+        )}
         <DsButton variant="secondary" size="sm" onClick={onCerrarSesion}>Cerrar sesión</DsButton>
       </div>
+      {codigoAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoAbierto(false)} />}
     </div>
   );
 }
@@ -163,18 +238,10 @@ export function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion,
       <SidebarEntrenadorReal activo={activo} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
       <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px 48px" }}>
         <div style={{ maxWidth: 860, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18, gap: 16 }}>
-            <div style={{ flex: 1, maxWidth: 280, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "6px 12px", color: ds.inkMuted, fontSize: 12 }}>
-              🔍 Buscar jugador, ejercicio...
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
-              <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-                {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
-              </span>
-              <div style={{ width: 27, height: 27, borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, flexShrink: 0 }}>
-                <Bell size={13} />
-              </div>
-            </div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 18 }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
+            </span>
           </div>
           {children}
         </div>
