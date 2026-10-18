@@ -6,6 +6,7 @@ import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectRea
 import { genId, ID_PREFIX, api, supabase } from "../core/backend.js";
 import {
   sharedDataCache,
+  MD_TAGS,
   useCategoriasPreventivas,
   useEntityList,
   useEstadoCmjEquipo,

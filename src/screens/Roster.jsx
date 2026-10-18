@@ -1,7 +1,6 @@
 import { useState } from "react";
-import { Eye, EyeOff, User, TrendingUp, Zap, Pencil } from "lucide-react";
+import { Eye, EyeOff, User, TrendingUp, Zap, Pencil, ChevronRight } from "lucide-react";
 import { ds, dsR, dsSh, dsF, DsButton, DsInput, DsTabSwitcher, DsProgressRing, DsAvatar } from "../core/designSystem.jsx";
-import { accesoSesion, supabase } from "../core/backend.js";
 import { useAnchoVentana } from "../core/layout.jsx";
 import { CerrablePorFuera, ChipReal, inicialesNombre, colorAvatarJugador, MiniStat, AVATAR_STACK_COLORES, LoadingBlock } from "../core/components.jsx";
 import { IconoModulo, PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
@@ -19,6 +18,7 @@ import {
 import { CMJ_STATUS_META } from "../core/cmjDisplay.jsx";
 import { todayStr, inicioSemanaCalendario, sumarDiasFecha } from "../calc/fechas.js";
 import { tareasHechasPorJugadorFecha, crearFraccionCumplida } from "../calc/adherencia.js";
+import { CMJ_POSICIONES, cmjPosicionLabel } from "../calc/cmj.js";
 
 function SelectorCategoriasReal({ categorias, seleccionadas, onCambiar, onCerrar }) {
   const tipos = ["Muscular", "Tendinosa", "Articular"];
@@ -159,7 +159,70 @@ function SelectorGruposReal({ grupos, seleccionados, onCambiar, onCerrar }) {
   );
 }
 
+// Mismo patrón que SelectorGruposReal, pero de selección única (no hay
+// "varias posiciones a la vez" — un jugador juega en una posición). Elegir
+// una opción aplica y cierra de inmediato, sin botón "Guardar" aparte.
+function SelectorPosicionReal({ seleccionada, onCambiar, onCerrar }) {
+  return (
+    <CerrablePorFuera onCerrar={onCerrar}>
+      <div
+        style={{
+          position: "absolute",
+          left: 0,
+          top: "120%",
+          zIndex: 20,
+          width: 180,
+          background: ds.bgElevated,
+          border: `1px solid ${ds.border}`,
+          borderRadius: 10,
+          boxShadow: "0 12px 28px rgba(0,0,0,0.45)",
+          padding: 8,
+          maxHeight: 320,
+          overflowY: "auto",
+        }}
+      >
+        <div style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, padding: "2px 4px 6px" }}>POSICIÓN</div>
+        {CMJ_POSICIONES.map((p) => {
+          const activa = seleccionada === p.key;
+          return (
+            <div
+              key={p.key}
+              onClick={() => {
+                onCambiar(activa ? null : p.key);
+                onCerrar();
+              }}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 6px", borderRadius: 6, cursor: "pointer", fontSize: 12.5, color: activa ? ds.accent : ds.ink }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              <span
+                style={{
+                  width: 14,
+                  height: 14,
+                  borderRadius: "50%",
+                  border: `1.5px solid ${activa ? ds.accent : ds.border}`,
+                  background: activa ? ds.accent : "transparent",
+                  color: ds.accentInk,
+                  fontSize: 9,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                {activa ? "✓" : ""}
+              </span>
+              <span style={{ flex: 1 }}>{p.singular}</span>
+            </div>
+          );
+        })}
+      </div>
+    </CerrablePorFuera>
+  );
+}
+
 function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false);
   const acciones = [
     { id: "reset", label: "Resetear PIN" },
     { id: "historial", label: "Ver ficha" },
@@ -184,32 +247,57 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
         padding: 6,
       }}
     >
-      {acciones.map((a) => {
-        const color = a.tono === "peligro" ? ds.danger : a.tono === "ambar" ? ds.warning : a.tono === "verde" ? ds.success : ds.ink;
-        return (
-          <div
-            key={a.id}
-            onClick={() => {
-              onAccion(a.id);
-              onCerrar();
-            }}
-            style={{ padding: "8px 10px", borderRadius: dsR.sm, fontSize: 12.5, color, cursor: "pointer", transition: "background-color 120ms ease-out" }}
-            onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
-            onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
-          >
-            {a.label}
+      {confirmarEliminar ? (
+        <div style={{ padding: "8px 10px" }}>
+          <div style={{ fontSize: 12.5, color: ds.ink, marginBottom: 8 }}>¿Eliminar el perfil de {jugador.name}? Se pierde todo su historial.</div>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => { onAccion("eliminar"); onCerrar(); }}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${ds.dangerBorderSubtle}`, color: ds.danger, borderRadius: dsR.sm, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}
+            >
+              Sí, eliminar
+            </button>
+            <button
+              onClick={() => setConfirmarEliminar(false)}
+              style={{ flex: 1, background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.sm, padding: "6px 8px", fontSize: 12, cursor: "pointer" }}
+            >
+              Cancelar
+            </button>
           </div>
-        );
-      })}
+        </div>
+      ) : (
+        acciones.map((a) => {
+          const color = a.tono === "peligro" ? ds.danger : a.tono === "ambar" ? ds.warning : a.tono === "verde" ? ds.success : ds.ink;
+          return (
+            <div
+              key={a.id}
+              onClick={() => {
+                if (a.id === "eliminar") {
+                  setConfirmarEliminar(true);
+                  return;
+                }
+                onAccion(a.id);
+                onCerrar();
+              }}
+              style={{ padding: "8px 10px", borderRadius: dsR.sm, fontSize: 12.5, color, cursor: "pointer", transition: "background-color 120ms ease-out" }}
+              onMouseEnter={(e) => (e.currentTarget.style.background = ds.border)}
+              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+            >
+              {a.label}
+            </div>
+          );
+        })
+      )}
     </div>
     </CerrablePorFuera>
   );
 }
 
-function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAccion, onCambiarCategorias, onCambiarGrupos }) {
+function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [selectorGruposAbierto, setSelectorGruposAbierto] = useState(false);
+  const [selectorPosicionAbierto, setSelectorPosicionAbierto] = useState(false);
   const [pinVisible, setPinVisible] = useState(false);
   const [hover, setHover] = useState(false);
   const suspendido = jugador.estado === "suspendido";
@@ -220,7 +308,7 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
     .map((id) => grupos.find((g) => g.id === id)?.nombre)
     .filter(Boolean);
   const colorAvatar = colorAvatarJugador(jugador.id);
-  const revelado = hover || menuAbierto || pinVisible || selectorAbierto || selectorGruposAbierto;
+  const revelado = hover || menuAbierto || pinVisible || selectorAbierto || selectorGruposAbierto || selectorPosicionAbierto;
 
   return (
     <div
@@ -276,7 +364,8 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           {nombresCategorias.map((c) => (
             <ChipReal key={`c-${c}`} tono="verde">{c}</ChipReal>
           ))}
-          {nombresGrupos.length === 0 && nombresCategorias.length === 0 && (
+          {jugador.posicion && <ChipReal tono="neutro">{cmjPosicionLabel(jugador.posicion)}</ChipReal>}
+          {nombresGrupos.length === 0 && nombresCategorias.length === 0 && !jugador.posicion && (
             <span style={{ fontSize: 11, color: ds.inkMuted }}>Independiente · sin categoría preventiva</span>
           )}
           <span
@@ -293,6 +382,15 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           >
             + categoría
           </span>
+          {onCambiarPosicion && (
+            <span
+              onClick={() => setSelectorPosicionAbierto((v) => !v)}
+              style={{ fontSize: 10, color: ds.inkMuted, cursor: "pointer", border: `1px dashed ${ds.border}`, borderRadius: 4, padding: "0px 5px", opacity: revelado ? 1 : 0.45, transition: "opacity 120ms" }}
+              title="Editar posición"
+            >
+              + posición
+            </span>
+          )}
           {selectorGruposAbierto && (
             <SelectorGruposReal
               grupos={grupos}
@@ -307,6 +405,13 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
               seleccionadas={jugador.groupIds}
               onCambiar={(nuevas) => onCambiarCategorias(jugador.id, nuevas)}
               onCerrar={() => setSelectorAbierto(false)}
+            />
+          )}
+          {selectorPosicionAbierto && (
+            <SelectorPosicionReal
+              seleccionada={jugador.posicion || null}
+              onCambiar={(nueva) => onCambiarPosicion(jugador.id, nueva)}
+              onCerrar={() => setSelectorPosicionAbierto(false)}
             />
           )}
         </div>
@@ -369,6 +474,7 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           {menuAbierto && <MenuAccionesReal jugador={jugador} onAccion={(id) => onAccion(jugador.id, id)} onCerrar={() => setMenuAbierto(false)} />}
         </div>
       </div>
+      <ChevronRight size={16} color={ds.inkMuted} style={{ flexShrink: 0 }} />
     </div>
   );
 }
@@ -526,9 +632,8 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
 
 // Lista de usuarios como cartera: estado, adherencia, última actividad y CMJ de
 // cada jugador de un vistazo; ordenada con quien necesita atención arriba.
-function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAlta, onGrupo }) {
+function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAlta, onGrupo, filtro, onFiltroChange }) {
   const [busqueda, setBusqueda] = useState("");
-  const [filtro, setFiltro] = useState("todos");
   const [menuId, setMenuId] = useState(null);
   const ancho = useAnchoVentana();
   const estaListo = cartera && cartera.loaded;
@@ -576,7 +681,7 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
       <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar usuario..." style={{ width: "100%", marginBottom: 10 }} />
       <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
         {pills.map((f) => (
-          <button key={f.id} type="button" onClick={() => setFiltro(f.id)} style={{ fontSize: 12.5, padding: "6px 12px", borderRadius: 999, border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`, background: filtro === f.id ? ds.accentSubtle : "transparent", color: filtro === f.id ? ds.accent : ds.inkSecondary, cursor: "pointer", whiteSpace: "nowrap" }}>
+          <button key={f.id} type="button" onClick={() => onFiltroChange(f.id)} style={{ fontSize: 12.5, padding: "6px 12px", borderRadius: 999, border: `1px solid ${filtro === f.id ? ds.accent : ds.border}`, background: filtro === f.id ? ds.accentSubtle : "transparent", color: filtro === f.id ? ds.accent : ds.inkSecondary, cursor: "pointer", whiteSpace: "nowrap" }}>
             {f.label}
           </button>
         ))}
@@ -636,9 +741,12 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
                     <span style={{ fontSize: 11.5, color: ds.inkMuted }}>—</span>
                   )}
                 </span>
-                <span style={{ position: "relative" }}>
-                  <button type="button" aria-label="Más acciones" onClick={(e) => { e.stopPropagation(); setMenuId(menuId === p.id ? null : p.id); }} style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "transparent", color: ds.inkSecondary, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>⋯</button>
-                  {menuId === p.id && <MenuAccionesReal jugador={p} onAccion={(id) => onAccion(p.id, id)} onCerrar={() => setMenuId(null)} />}
+                <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
+                  <span style={{ position: "relative" }}>
+                    <button type="button" aria-label="Más acciones" onClick={(e) => { e.stopPropagation(); setMenuId(menuId === p.id ? null : p.id); }} style={{ width: 28, height: 28, borderRadius: 8, border: "none", background: "transparent", color: ds.inkSecondary, cursor: "pointer", fontSize: 16, lineHeight: 1 }}>⋯</button>
+                    {menuId === p.id && <MenuAccionesReal jugador={p} onAccion={(id) => onAccion(p.id, id)} onCerrar={() => setMenuId(null)} />}
+                  </span>
+                  <ChevronRight size={15} color={ds.inkMuted} style={{ flexShrink: 0 }} />
                 </span>
               </div>
             </div>
@@ -650,54 +758,9 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
   );
 }
 
-// Cambio del código de entrenador (se guarda cifrado en Supabase; nadie, tampoco la
-// app, puede volver a leerlo). Un código largo protege mucho más que uno de 4 cifras.
-function PanelCodigoEntrenadorReal({ onCerrar }) {
-  const [a, setA] = useState("");
-  const [b, setB] = useState("");
-  const [estado, setEstado] = useState({ guardando: false, error: "", ok: false });
-  const guardar = async () => {
-    const v = a.trim();
-    if (v.length < 4) return setEstado({ guardando: false, error: "Mínimo 4 caracteres (recomendado: 8 o más).", ok: false });
-    if (v !== b.trim()) return setEstado({ guardando: false, error: "Los dos códigos no coinciden.", ok: false });
-    setEstado({ guardando: true, error: "", ok: false });
-    try {
-      const { data, error } = await supabase.rpc("cambiar_codigo_entrenador", { p_nuevo: v });
-      if (error) throw error;
-      if (!data || !data.ok) {
-        const msg = data?.error === "igual_que_un_jugador" ? "Ese código ya es el PIN de un jugador. Elige otro." : data?.error === "corto" ? "Demasiado corto." : "No tienes permiso para cambiarlo.";
-        return setEstado({ guardando: false, error: msg, ok: false });
-      }
-      setA("");
-      setB("");
-      setEstado({ guardando: false, error: "", ok: true });
-    } catch {
-      setEstado({ guardando: false, error: "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.", ok: false });
-    }
-  };
-  return (
-    <div style={{ background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 14, marginBottom: 14, maxWidth: 420 }}>
-      <div style={{ fontSize: 13.5, fontWeight: 700, marginBottom: 4 }}>Código de entrenador</div>
-      <div style={{ fontSize: 12, color: ds.inkSecondary, marginBottom: 10, lineHeight: 1.5 }}>
-        Se guarda cifrado: ni tú ni la app podréis volver a verlo, solo cambiarlo. Recomendado: 8 cifras o más; con 4 es fácil de adivinar.
-      </div>
-      <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-        <DsInput type="password" value={a} onChange={(e) => setA(e.target.value)} placeholder="Código nuevo" />
-        <DsInput type="password" value={b} onChange={(e) => setB(e.target.value)} placeholder="Repite el código" />
-      </div>
-      {estado.error && <div style={{ color: ds.danger, fontSize: 12, marginBottom: 8 }}>{estado.error}</div>}
-      {estado.ok && <div style={{ color: ds.success, fontSize: 12, marginBottom: 8 }}>Código cambiado. Úsalo la próxima vez que entres.</div>}
-      <div style={{ display: "flex", gap: 8 }}>
-        <DsButton onClick={guardar} disabled={estado.guardando}>
-          {estado.guardando ? "Guardando..." : "Guardar código"}
-        </DsButton>
-        <DsButton variant="secondary" onClick={onCerrar}>
-          Cerrar
-        </DsButton>
-      </div>
-    </div>
-  );
-}
+// PanelCodigoEntrenadorReal ahora en src/core/layoutEntrenador.jsx —
+// se abre desde el pie de la barra lateral (disponible en cualquier
+// pantalla, no solo desde Usuarios).
 
 export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerrarSesion }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
@@ -718,7 +781,6 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
   // grupo real ("grupos", entidad ya existente) hace aquí de "equipo" del
   // mockup — no se crea ninguna tabla/entidad nueva para esto.
   const [vista, setVista] = useState("cartera");
-  const [codigoEntrenadorAbierto, setCodigoEntrenadorAbierto] = useState(false);
   const [equipoAbiertoId, setEquipoAbiertoId] = useState(null);
   // Preseleccionado al pulsar "+ Añadir jugador" desde dentro del detalle de
   // un equipo — así el alta queda ya asignada a ese grupo sin un segundo paso.
@@ -831,6 +893,12 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
     if (!ok) setErrorAccion("No se pudo guardar el cambio de grupo. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
+  const cambiarPosicion = async (id, nueva) => {
+    setErrorAccion("");
+    const ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, posicion: nueva } : p)));
+    if (!ok) setErrorAccion("No se pudo guardar la posición. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+
   const crearGrupo = async (nombre) => {
     setErrorAccion("");
     const ok = await saveGrupos([...grupos, { nombre }]);
@@ -869,25 +937,17 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
   return (
     <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        {/* view-switch del mockup de Fase 6 (Equipos y usuarios): tres
-            vistas, no un valor binario — sigue siendo un grupo de botones
-            (como DsTabSwitcher en el resto de la app), no un <select>. */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
-          {accesoSesion.token && accesoSesion.rol === "entrenador" ? (
-            <button
-              onClick={() => setCodigoEntrenadorAbierto((v) => !v)}
-              style={{ fontSize: 12, padding: "7px 11px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, cursor: "pointer" }}
-            >
-              Código de entrenador
-            </button>
-          ) : (
-            <span />
-          )}
+        {/* view-switch: dos vistas (Cartera/Equipos) — "Independientes" vivía
+            como una tercera pestaña que solo repetía el filtro "independientes"
+            que ya existe dentro de Cartera; se quitó para no duplicar
+            navegación. El acceso al código de entrenador vive ahora en el pie
+            del menú lateral (src/core/layoutEntrenador.jsx), disponible desde
+            cualquier pantalla, no solo desde aquí. */}
+        <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
           <DsTabSwitcher
             tabs={[
               { id: "cartera", label: "Cartera" },
               { id: "equipos", label: "Equipos" },
-              { id: "independientes", label: "Independientes" },
             ]}
             active={vista}
             onChange={(v) => {
@@ -896,8 +956,6 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             }}
           />
         </div>
-
-        {codigoEntrenadorAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoEntrenadorAbierto(false)} />}
 
         {errorAccion && (
           <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
@@ -946,6 +1004,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             onAccion={manejarAccion}
             onCambiarCategorias={cambiarCategorias}
             onCambiarGrupos={cambiarGrupos}
+            onCambiarPosicion={cambiarPosicion}
             onBack={() => setEquipoAbiertoId(null)}
             onAddPlayer={() => {
               setGrupoAltaPreset(grupoAbierto.id);
@@ -964,6 +1023,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             onAccion={manejarAccion}
             onCambiarCategorias={cambiarCategorias}
             onCambiarGrupos={cambiarGrupos}
+            onCambiarPosicion={cambiarPosicion}
             onAddIndependiente={() => {
               setGrupoAltaPreset(null);
               setPanelAltaAbierto(true);
@@ -976,6 +1036,8 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             players={players}
             grupos={grupos}
             cartera={cartera}
+            filtro={filtro}
+            onFiltroChange={setFiltro}
             onAbrir={(p) => onOpenHistory?.(p)}
             onAccion={manejarAccion}
             onAlta={() => {
@@ -1141,7 +1203,7 @@ function TeamStatsRowReal({ stats }) {
 // agregadas. Reutiliza FilaJugadorReal tal cual (misma edición de
 // categorías/grupos/PIN/menú de acciones que en Usuarios), no una fila
 // nueva — así asignar/quitar del grupo desde aquí sigue funcionando igual.
-function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onBack, onAddPlayer, onEditGroup }) {
+function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onBack, onAddPlayer, onEditGroup }) {
   return (
     <div>
       <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -1176,6 +1238,7 @@ function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJuga
             onAccion={onAccion}
             onCambiarCategorias={onCambiarCategorias}
             onCambiarGrupos={onCambiarGrupos}
+            onCambiarPosicion={onCambiarPosicion}
           />
         ))}
         {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Todavía no hay jugadores en este equipo.</div>}
@@ -1188,7 +1251,7 @@ function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJuga
 // stats agregadas + roster, reutilizando FilaJugadorReal — su "+" junto a
 // los chips de grupo ya asigna a un equipo (equivalente al botón "Asignar a
 // equipo" del mockup), sin duplicar esa lógica en una fila nueva.
-function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onAddIndependiente }) {
+function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onAddIndependiente }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
@@ -1216,6 +1279,7 @@ function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugad
             onAccion={onAccion}
             onCambiarCategorias={onCambiarCategorias}
             onCambiarGrupos={onCambiarGrupos}
+            onCambiarPosicion={onCambiarPosicion}
           />
         ))}
         {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No hay jugadores independientes — todos están asignados a un equipo.</div>}
