@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { ChevronLeft, Heart, Play, Plus, Trash2, Dumbbell, Target, Zap, RefreshCw, Activity, TrendingUp, ClipboardList } from "lucide-react";
-import { ds, dsF, dsR, DsButton, DsInput } from "../core/designSystem.jsx";
+import { ds, dsF, dsR, dsSh, DsButton, DsInput } from "../core/designSystem.jsx";
 import { useAnchoVentana } from "../core/layout.jsx";
 import { LoadingBlock, VideoEmbed, TagChipReal, campoSelectReal, TAGS_DESCRIPTIVOS_BIBLIOTECA } from "../core/components.jsx";
 import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";

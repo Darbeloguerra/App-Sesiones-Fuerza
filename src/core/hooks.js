@@ -507,6 +507,7 @@ export function usePlayers() {
         const gruposIds = p.gruposIds || [];
         const estado = p.estado || "activo";
         const objetivoActual = p.objetivoActual || "";
+        const posicion = p.posicion || null;
         if (
           original &&
           original.nombre === p.name &&
@@ -514,11 +515,12 @@ export function usePlayers() {
           original.estado === estado &&
           JSON.stringify(original.categorias_preventivas || []) === JSON.stringify(groupIds) &&
           JSON.stringify(original.grupos_ids || []) === JSON.stringify(gruposIds) &&
-          (original.objetivo_actual || "") === objetivoActual
+          (original.objetivo_actual || "") === objetivoActual &&
+          (original.posicion || null) === posicion
         ) {
           return original; // sin cambios reales: misma referencia -> no se reguarda
         }
-        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds, objetivo_actual: objetivoActual };
+        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds, objetivo_actual: objetivoActual, posicion };
       });
       return saveRows(nextRows);
     },

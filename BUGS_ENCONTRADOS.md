@@ -373,3 +373,64 @@ de huérfana entonces. Se suma a la lista de los puntos 20 y 22.
 
 **No se toca.** Se mueve con el resto de su bloque a
 `src/screens/PantallaJugador.jsx`, sin usarla.
+
+## 25. BUGS REALES EN PRODUCCIÓN: Biblioteca de ejercicios y "Detalles" de Diseñar sesión rotos — CORREGIDOS
+
+Una auditoría completa de la app (`AUDITORIA.md`, 16/10/2026) encontró
+dos pantallas activamente rotas en producción, ambas por el mismo tipo
+de fallo que los puntos 16-19: una pieza usada como `objeto.propiedad`
+en vez de como etiqueta JSX o llamada directa, que los scripts de
+verificación de aquel momento no detectaban.
+
+- `src/screens/BibliotecaEjercicios.jsx`: el botón "+ Nuevo ejercicio"
+  (visible siempre, nada más entrar a Biblioteca) usa `dsSh.accentGlow`
+  en su estilo, pero `dsSh` no estaba en el import de `designSystem.jsx`
+  de ese archivo. Resultado: la pantalla de Biblioteca se quedaba
+  completamente en blanco al abrirla. Confirmado en vivo navegando con
+  PIN real antes de corregirlo.
+- `src/screens/DisenoSesion.jsx`: el selector de "MD" del panel
+  "Configuración de la sesión" (único sitio para elegir jugadores
+  concretos, varias fechas o la etiqueta MD) usa `MD_TAGS`, que no
+  estaba importado de `hooks.js` en ese archivo. Resultado: abrir ese
+  panel rompía la pantalla de Diseñar sesión.
+
+Ambos bugs los introduje yo mismo al reorganizar `App.jsx` (Pasos 5.4 y
+5.5) — no los de ahora, sino en su momento; la auditoría los encontró
+semanas después, ya en producción.
+
+**Corregido:** se añade `dsSh` al import de `designSystem.jsx` en
+`BibliotecaEjercicios.jsx`, y `MD_TAGS` al import de `hooks.js` en
+`DisenoSesion.jsx`. Verificado con `npm run build`, los 86 tests en
+verde, y en vivo con el servidor local: Biblioteca carga (84 ejercicios
+reales) y el panel "Configuración de la sesión" abre correctamente,
+incluido el selector de "Jugadores concretos" con la lista real de
+jugadores y el desplegable de MD con sus 9 opciones.
+
+## 26. BUG REAL YA EXISTENTE: el campo `posicion` nunca se guardaba al editarlo desde Usuarios — CORREGIDO
+
+Al añadir (dentro del rediseño de Usuarios) la posibilidad de asignar la
+posición de un jugador desde la propia pantalla —campo que Control de
+fatiga ya usaba para agrupar jugadores, pero que hasta ahora no se podía
+editar desde ningún sitio—, el guardado parecía no hacer nada: se elegía
+una posición, no saltaba ningún error, pero al recargar la pantalla el
+jugador seguía "sin posición".
+
+**Causa:** `usePlayers()` (`src/core/hooks.js`), el hook que traduce entre
+las filas de Supabase y la forma que usa la pantalla, tiene dentro de su
+función `savePlayers` una comprobación campo a campo para decidir si un
+jugador realmente cambió antes de mandarlo a guardar (compara `nombre`,
+`pin`, `estado`, `categorias_preventivas`, `grupos_ids`,
+`objetivo_actual` contra los valores previos). Esa comprobación —y el
+objeto que finalmente se envía a guardar— nunca incluyó `posicion`, así
+que aunque la posición sí cambiaba en la pantalla, `savePlayers` siempre
+reconstruía el jugador como "idéntico al anterior" y lo descartaba antes
+de llegar a Supabase. Es un bug que ya existía en el código heredado de
+`App.jsx` —no lo introdujo este paso—, simplemente nunca se había
+disparado porque nada había intentado guardar `posicion` hasta ahora.
+
+**Corregido:** se añade `posicion` tanto a la comprobación de cambios
+como al objeto que `savePlayers` envía a guardar, en
+`src/core/hooks.js`. Verificado en vivo con el servidor local: al elegir
+una posición en Usuarios, se guarda, se muestra como etiqueta junto al
+jugador, y aparece correctamente agrupado por esa posición en Control de
+fatiga.

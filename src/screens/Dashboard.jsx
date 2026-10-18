@@ -2,7 +2,8 @@ import { useState } from "react";
 import { ds, dsF } from "../core/designSystem.jsx";
 import { LoadingBlock } from "../core/components.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
-import { IconoModulo, MODULOS_DASHBOARD, useSolicitudesPendientesCount, PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
+import { IconoModulo, MODULOS_DASHBOARD, useSolicitudesPendientesCount, PantallaEntrenadorAncha, PanelCodigoEntrenadorReal } from "../core/layoutEntrenador.jsx";
+import { accesoSesion } from "../core/backend.js";
 import { SEV_ALERTA, ESTADO_JUGADOR_META, useCarteraEntrenador, usePartidos } from "../core/hooks.js";
 import { diasEntreFechas } from "../calc/fechas.js";
 
@@ -90,6 +91,13 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const pendientesCount = useSolicitudesPendientesCount();
   const [verTodas, setVerTodas] = useState(false);
   const [abiertas, setAbiertas] = useState({});
+  const [plantelAbierto, setPlantelAbierto] = useState(false);
+  // En pantalla ancha, "Código de entrenador" vive en el pie del menú
+  // lateral (SidebarEntrenadorReal); en móvil ese menú no existe, así que
+  // se ofrece aquí, junto a "Cerrar sesión" — el único sitio de la vista
+  // compacta con acciones de cuenta.
+  const [codigoAbierto, setCodigoAbierto] = useState(false);
+  const puedeCambiarCodigo = accesoSesion.token && accesoSesion.rol === "entrenador";
   const hoyLabel = new Date().toLocaleDateString("es-ES", { weekday: "long", day: "numeric", month: "long" });
   const bandeja = c.loaded ? agruparAlertas(c.alertas) : [];
 
@@ -121,10 +129,28 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
         })()}
       </div>
 
+      {/* REQUIERE TU ATENCIÓN */}
+      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Requiere tu atención</b>
+          {bandeja.length > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 800, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "1px 8px" }}>{bandeja.length}</span>}
+        </div>
+        {bandeja.length === 0 && <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 0 2px" }}>Nada pendiente. Todo el equipo al día.</div>}
+        {(verTodas ? bandeja : bandeja.slice(0, 6)).map((a) => (
+          <FilaAlertaReal key={a.id} alerta={a} onAccion={accion} />
+        ))}
+        {bandeja.length > 6 && (
+          <button type="button" onClick={() => setVerTodas((v) => !v)} style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+            {verTodas ? "Ver menos" : `Ver las ${bandeja.length - 6} restantes`}
+          </button>
+        )}
+      </div>
+
       {/* HOY */}
       <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
           <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Hoy</b>
+          {c.cumplSem !== null && <span style={{ fontSize: 12, color: ds.inkSecondary }}>{c.cumplSem} % de cumplimiento esta semana</span>}
           <span style={{ flex: 1 }} />
           <button type="button" onClick={() => onAbrirModulo("calendario")} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer" }}>Calendario →</button>
         </div>
@@ -167,7 +193,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
         })}
       </div>
 
-      {/* PLANTEL HOY */}
+      {/* PLANTEL — colapsado por defecto; lo urgente ya está arriba en "Requiere tu atención" */}
       {c.activos.length > 0 && (() => {
         const orden = { atencion: 0, aldia: 1, sinplan: 2 };
         const lista = [...c.activos].sort((a, b) => (orden[c.filas.get(a.id)?.estado] ?? 3) - (orden[c.filas.get(b.id)?.estado] ?? 3) || a.name.localeCompare(b.name));
@@ -178,77 +204,48 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
         });
         return (
           <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
               <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Plantel</b>
               <span style={{ fontSize: 12, color: ds.inkSecondary }}>{c.activos.length} activos</span>
-              <span style={{ flex: 1 }} />
               {(resumen.hecho + resumen.parcial + resumen.pendiente) > 0 && (
                 <span style={{ fontSize: 12, color: ds.inkSecondary }}>
-                  Hoy: <b style={{ color: ds.success }}>{resumen.hecho}</b> hecho · <b>{resumen.parcial}</b> a medias · <b style={{ color: ds.warning }}>{resumen.pendiente}</b> pendiente
+                  · Hoy: <b style={{ color: ds.success }}>{resumen.hecho}</b> hecho · <b>{resumen.parcial}</b> a medias · <b style={{ color: ds.warning }}>{resumen.pendiente}</b> pendiente
                 </span>
               )}
+              <span style={{ flex: 1 }} />
+              <button type="button" onClick={() => setPlantelAbierto((v) => !v)} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+                {plantelAbierto ? "Ocultar" : "Ver plantel completo →"}
+              </button>
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-              {lista.map((pl) => {
-                const f = c.filas.get(pl.id) || {};
-                const meta = ESTADO_JUGADOR_META[f.estado];
-                const etiquetas = [];
-                if (f.molestia != null && f.molestia >= 3) etiquetas.push({ t: `M${f.molestia}`, color: f.molestia >= 7 ? ds.danger : ds.warning, titulo: `Molestia ${f.molestia}/10` });
-                if (f.cmj === "red" || f.cmj === "amber") etiquetas.push({ t: "CMJ", color: f.cmj === "red" ? ds.danger : ds.warning, titulo: f.cmj === "red" ? "CMJ en rojo" : "CMJ a vigilar" });
-                const hoyIcono = f.hoy === "hecho" ? "✓" : f.hoy === "parcial" ? "½" : f.hoy === "pendiente" ? "○" : "";
-                const titulo = [meta ? meta.label : "", f.adh28 != null ? `adherencia 4 sem: ${f.adh28} %` : "", f.hoy ? `hoy: ${f.hoy}` : "sin sesión hoy"].filter(Boolean).join(" · ");
-                return (
-                  <button key={pl.id} type="button" title={titulo} onClick={() => onOpenHistory?.(pl)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 12, cursor: "pointer" }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta ? meta.color : ds.inkMuted, flexShrink: 0 }} />
-                    {pl.name}
-                    {etiquetas.map((e) => (
-                      <span key={e.t} title={e.titulo} style={{ fontFamily: dsF.mono, fontSize: 10, fontWeight: 800, color: e.color }}>{e.t}</span>
-                    ))}
-                    {hoyIcono && <span style={{ fontFamily: dsF.mono, fontSize: 11, color: f.hoy === "hecho" ? ds.success : ds.inkMuted }}>{hoyIcono}</span>}
-                  </button>
-                );
-              })}
-            </div>
-            <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 10 }}>Punto = estado (naranja atención · verde al día · gris sin plan) · M = molestia ≥3 en 3 días · CMJ = a vigilar/rojo · ✓ hecho hoy · ½ a medias · ○ pendiente</div>
+            {plantelAbierto && (
+              <>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+                  {lista.map((pl) => {
+                    const f = c.filas.get(pl.id) || {};
+                    const meta = ESTADO_JUGADOR_META[f.estado];
+                    const etiquetas = [];
+                    if (f.molestia != null && f.molestia >= 3) etiquetas.push({ t: `M${f.molestia}`, color: f.molestia >= 7 ? ds.danger : ds.warning, titulo: `Molestia ${f.molestia}/10` });
+                    if (f.cmj === "red" || f.cmj === "amber") etiquetas.push({ t: "CMJ", color: f.cmj === "red" ? ds.danger : ds.warning, titulo: f.cmj === "red" ? "CMJ en rojo" : "CMJ a vigilar" });
+                    const hoyIcono = f.hoy === "hecho" ? "✓" : f.hoy === "parcial" ? "½" : f.hoy === "pendiente" ? "○" : "";
+                    const titulo = [meta ? meta.label : "", f.adh28 != null ? `adherencia 4 sem: ${f.adh28} %` : "", f.hoy ? `hoy: ${f.hoy}` : "sin sesión hoy"].filter(Boolean).join(" · ");
+                    return (
+                      <button key={pl.id} type="button" title={titulo} onClick={() => onOpenHistory?.(pl)} style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 12, cursor: "pointer" }}>
+                        <span style={{ width: 8, height: 8, borderRadius: "50%", background: meta ? meta.color : ds.inkMuted, flexShrink: 0 }} />
+                        {pl.name}
+                        {etiquetas.map((e) => (
+                          <span key={e.t} title={e.titulo} style={{ fontFamily: dsF.mono, fontSize: 10, fontWeight: 800, color: e.color }}>{e.t}</span>
+                        ))}
+                        {hoyIcono && <span style={{ fontFamily: dsF.mono, fontSize: 11, color: f.hoy === "hecho" ? ds.success : ds.inkMuted }}>{hoyIcono}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div style={{ fontSize: 11, color: ds.inkMuted, marginTop: 10 }}>Punto = estado (naranja atención · verde al día · gris sin plan) · M = molestia ≥3 en 3 días · CMJ = a vigilar/rojo · ✓ hecho hoy · ½ a medias · ○ pendiente</div>
+              </>
+            )}
           </div>
         );
       })()}
-
-      {/* REQUIERE TU ATENCIÓN */}
-      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Requiere tu atención</b>
-          {bandeja.length > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 800, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "1px 8px" }}>{bandeja.length}</span>}
-        </div>
-        {bandeja.length === 0 && <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 0 2px" }}>Nada pendiente. Todo el equipo al día.</div>}
-        {(verTodas ? bandeja : bandeja.slice(0, 6)).map((a) => (
-          <FilaAlertaReal key={a.id} alerta={a} onAccion={accion} />
-        ))}
-        {bandeja.length > 6 && (
-          <button type="button" onClick={() => setVerTodas((v) => !v)} style={{ marginTop: 8, fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
-            {verTodas ? "Ver menos" : `Ver las ${bandeja.length - 6} restantes`}
-          </button>
-        )}
-      </div>
-
-      {/* ESTA SEMANA */}
-      <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, marginBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-          <b style={{ fontFamily: dsF.display, fontSize: 16 }}>Esta semana</b>
-          {c.cumplSem !== null && <span style={{ fontSize: 12.5, color: ds.inkSecondary }}>{c.cumplSem} % de cumplimiento hasta hoy</span>}
-          <span style={{ flex: 1 }} />
-          <button type="button" onClick={() => onAbrirModulo("calendario")} style={{ fontSize: 12.5, fontWeight: 600, color: ds.accent, background: "transparent", border: "none", cursor: "pointer" }}>Abrir →</button>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, minmax(0, 1fr))", gap: 6 }}>
-          {c.semana.map((d) => (
-            <button key={d.fecha} type="button" onClick={() => onAbrirModulo("calendario")} style={{ background: d.esHoy ? ds.accentSubtle : ds.surfaceRaised, border: `1px solid ${d.esHoy ? ds.accentBorderSubtle : ds.border}`, borderRadius: 12, padding: "8px 4px", cursor: "pointer", color: ds.ink, display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
-              <span style={{ fontSize: 10.5, fontWeight: 700, color: ds.inkMuted, textTransform: "uppercase" }}>{d.dow} {d.num}</span>
-              <span style={{ fontSize: 12, fontWeight: 700, color: d.env ? ds.ink : ds.inkMuted }}>{d.env ? `${d.env} ses.` : "—"}</span>
-              <span style={{ fontSize: 10.5, color: d.bor ? ds.warning : "transparent" }}>{d.bor ? `${d.bor} borrador` : "·"}</span>
-            </button>
-          ))}
-        </div>
-      </div>
     </div>
   );
 
@@ -272,7 +269,13 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
           ))}
         </div>
         {cuerpo}
-        <button type="button" onClick={onCerrarSesion} style={{ marginTop: 6, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Cerrar sesión</button>
+        <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
+          {puedeCambiarCodigo && (
+            <button type="button" onClick={() => setCodigoAbierto(true)} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Código de entrenador</button>
+          )}
+          <button type="button" onClick={onCerrarSesion} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "8px 14px", cursor: "pointer" }}>Cerrar sesión</button>
+        </div>
+        {codigoAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoAbierto(false)} />}
       </div>
     </PantallaBase>
   );
