@@ -2392,7 +2392,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     // equipos. Si hay varios equipos, se pide confirmar antes de publicar.
     if (!comoBorrador && !autoEnviar && targetPlayerIds === null && gruposDestino.length > 1) {
       const n = players.filter((p) => p.estado === "activo").length;
-      if (!window.confirm(`Esta sesión se enviará a los ${n} jugadores activos de todos los equipos. ¿Continuar?\n\nSi solo es para un equipo, cancela y elígelo en Detalles → Jugadores concretos → "Elegir por equipo".`)) return;
+      if (!window.confirm(`Esta sesión se enviará a los ${n} jugadores activos de todos los equipos. ¿Continuar?\n\nSi solo es para un equipo, cancela y elígelo arriba en "¿Para quién es?" → Elegir jugadores → "Elegir por equipo".`)) return;
     }
     setGuardando(true);
     try {
@@ -2970,6 +2970,36 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
               <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 14, padding: "9px 11px" }} />
             </label>
           </div>
+          {/* Destinatarios — visible y directo, sin abrir el modal de configuración */}
+          <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>¿Para quién es?</span>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {[
+                { v: "equipo", t: "Todos los jugadores" },
+                { v: "concretos", t: "Elegir jugadores" },
+              ].map(({ v, t }) => {
+                const activo = (targetPlayerIds === null) === (v === "equipo");
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => setTargetPlayerIds(v === "equipo" ? null : targetPlayerIds || [])}
+                    style={{ fontSize: 12.5, padding: "6px 12px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: activo ? ds.accent : ds.inkSecondary, fontWeight: activo ? 700 : 500 }}
+                  >
+                    {activo ? "✓ " : ""}{t}
+                  </button>
+                );
+              })}
+            </div>
+            {targetPlayerIds !== null && (
+              <>
+                <ListaJugadoresCheckReal players={players} seleccionados={targetPlayerIds} onCambiar={setTargetPlayerIds} grupos={gruposDestino} />
+                <span style={{ fontSize: 12, color: targetPlayerIds.length ? ds.inkMuted : ds.danger }}>
+                  {targetPlayerIds.length ? `${targetPlayerIds.length} jugador(es) seleccionados` : "Elige al menos un jugador para poder enviar la sesión."}
+                </span>
+              </>
+            )}
+          </div>
           {detallesAbiertos && (
             <div onClick={() => setDetallesAbiertos(false)} style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "56px 16px 16px" }}>
             <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: 900, maxHeight: "calc(100dvh - 72px)", overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
@@ -3506,7 +3536,11 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     {revisandoEnvio && (
       <PasoRevisarEnviarReal
         resumen={resumenDiseno}
-        destinatarios={targetPlayerIds === null ? "Todos los jugadores" : `${(targetPlayerIds || []).length} jugador(es) concretos`}
+        destinatarios={targetPlayerIds === null ? "Todos los jugadores" : (() => {
+          const nombres = players.filter((p) => (targetPlayerIds || []).includes(p.id)).map((p) => p.name);
+          if (!nombres.length) return "Ningún jugador seleccionado";
+          return nombres.length > 3 ? `${nombres.slice(0, 3).join(", ")} y ${nombres.length - 3} más` : nombres.join(", ");
+        })()}
         fechas={fechas}
         md={md}
         nombre={nombre}
