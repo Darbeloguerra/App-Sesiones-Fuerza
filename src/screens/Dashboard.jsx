@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from "react";
 import { ds, dsF, GlobalStyles } from "../core/designSystem.jsx";
 import { LoadingBlock } from "../core/components.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
-import { IconoModulo, MODULOS_DASHBOARD, useSolicitudesPendientesCount, SidebarEntrenadorReal, PanelCodigoEntrenadorReal } from "../core/layoutEntrenador.jsx";
+import { IconoModulo, IconoGridSidebar, MODULOS_DASHBOARD, useSolicitudesPendientesCount, PanelCodigoEntrenadorReal } from "../core/layoutEntrenador.jsx";
 import { CMJ_STATUS_META, CMJ_TAG_META } from "../core/cmjDisplay.jsx";
 import { accesoSesion, api, supabase } from "../core/backend.js";
 import { SEV_ALERTA, useCarteraEntrenador, usePartidos, useMicrociclosTipo, useBootstrapProgramacion, useEntityList, usePlayers, destinatariosEfectivosSesion } from "../core/hooks.js";
@@ -219,12 +219,42 @@ function Seccion({ titulo, contador, contadorColor, derecha, children, style }) 
     <section style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 16, boxShadow: "0 6px 16px rgba(0,0,0,0.35)", padding: "12px 14px 10px", display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, boxSizing: "border-box", ...style }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 44, flexWrap: "nowrap" }}>
         <h2 style={{ fontFamily: dsF.display, fontSize: 16, lineHeight: "22px", fontWeight: 600, margin: 0, whiteSpace: "nowrap", color: ds.ink }}>{titulo}</h2>
-        {contador != null && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 500, background: contadorColor || ds.warning, color: "#1A0F00", borderRadius: 999, padding: "0 9px", lineHeight: "18px" }}>{contador}</span>}
+        {contador != null && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 500, background: contadorColor || ds.warning, color: contadorColor ? ds.ink : "#1A0F00", border: contadorColor ? `1px solid ${ds.borderMuted}` : "none", borderRadius: 999, padding: "0 9px", lineHeight: "18px" }}>{contador}</span>}
         <span style={{ flex: 1 }} />
         {derecha}
       </div>
       {children}
     </section>
+  );
+}
+
+
+// Barra lateral compacta (solo iconos) del Inicio: deja todo el ancho a los paneles.
+function RailInicio({ onAbrirModulo, onCerrarSesion, pendientesCount, onCodigo }) {
+  const items = [{ id: "dashboard", nombre: "Inicio", icono: null }, ...MODULOS_DASHBOARD];
+  const btn = (activo) => ({ position: "relative", width: 48, height: 48, borderRadius: 12, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer", border: `1px solid ${activo ? `${ds.accent}55` : "transparent"}`, background: activo ? `${ds.accent}22` : "transparent", color: activo ? ds.accent : ds.inkSecondary });
+  return (
+    <nav aria-label="Módulos" style={{ width: 72, flexShrink: 0, boxSizing: "border-box", background: ds.bgElevated, borderRight: `1px solid ${ds.borderSoft}`, padding: "14px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      {items.map((m) => {
+        const activo = m.id === "dashboard";
+        const n = m.id === "calendario" ? pendientesCount : 0;
+        return (
+          <button key={m.id} type="button" className="dsh-btn" title={m.nombre} aria-label={n > 0 ? `${m.nombre}, ${n} peticiones pendientes` : m.nombre} aria-current={activo ? "page" : undefined} onClick={() => onAbrirModulo(m.id)} style={btn(activo)}>
+            {m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}
+            {n > 0 && <span style={{ position: "absolute", top: 3, right: 3, fontFamily: dsF.mono, fontSize: 9, fontWeight: 500, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "0 5px", lineHeight: "15px" }}>{n}</span>}
+          </button>
+        );
+      })}
+      <span style={{ flex: 1 }} />
+      {onCodigo && (
+        <button type="button" className="dsh-btn" title="Código de entrenador" aria-label="Código de entrenador" onClick={onCodigo} style={btn(false)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M16 7l3 3" /></svg>
+        </button>
+      )}
+      <button type="button" className="dsh-btn" title="Cerrar sesión" aria-label="Cerrar sesión" onClick={onCerrarSesion} style={btn(false)}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4H5v16h4" /><path d="m16 8 4 4-4 4M20 12H9" /></svg>
+      </button>
+    </nav>
   );
 }
 
@@ -288,7 +318,8 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     return ancho >= 1000 ? (
       <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
         <GlobalStyles />
-        <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+        <style>{ESTILOS}</style>
+        <RailInicio onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} pendientesCount={pendientesCount} onCodigo={puedeCambiarCodigo ? () => setCodigoAbierto(true) : null} />
         <div style={{ flex: 1, padding: 28 }}>{cargando}</div>
       </div>
     ) : (
@@ -764,8 +795,9 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
       <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
         <GlobalStyles />
         <style>{ESTILOS}</style>
-        <SidebarEntrenadorReal activo="dashboard" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
+        <RailInicio onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} pendientesCount={pendientesCount} onCodigo={puedeCambiarCodigo ? () => setCodigoAbierto(true) : null} />
         {cuerpoAncho}
+        {codigoAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoAbierto(false)} />}
       </div>
     );
   }
