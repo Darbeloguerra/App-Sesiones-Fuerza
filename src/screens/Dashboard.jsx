@@ -314,7 +314,13 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     };
     // Destinatarios efectivos de cada sesión, calculados una sola vez.
     const destinos = new Map(sesiones.map((s) => [s.id, new Set(destinatariosEfectivosSesion(s, activos))]));
-    return { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos: equiposRows.length > 0, hayIndiv: individuales.length > 0, equipoDe, destinos };
+    // Índice fecha -> sesiones, para no recorrer todas las sesiones en cada celda.
+    const porFecha = new Map();
+    sesiones.forEach((s) => (s.fechas || []).forEach((f) => {
+      if (!porFecha.has(f)) porFecha.set(f, []);
+      porFecha.get(f).push(s);
+    }));
+    return { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos: equiposRows.length > 0, hayIndiv: individuales.length > 0, equipoDe, destinos, porFecha };
   }, [listo, players, gruposRows, sesiones, playersById]);
 
   if (!datos) {
@@ -333,7 +339,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     );
   }
 
-  const { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos, hayIndiv, equipoDe, destinos } = datos;
+  const { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos, hayIndiv, equipoDe, destinos, porFecha } = datos;
   // Las alertas salen del historial completo (lo más pesado): llegan después y no bloquean el resto.
   const alertasDe = (ids) => (c.loaded ? agruparAlertas(c.alertas.filter((a) => TIPOS_ALERTA_DASHBOARD.has(a.tipo) && a.jugadorId && ids.has(a.jugadorId))) : []);
   const alEq = alertasDe(idsEquipos);
@@ -350,7 +356,12 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   // ---------- Calendario ----------
   const lunes = inicioSemanaCalendario(sumarDiasFecha(hoy, offsetSemana * 7));
   const dias = Array.from({ length: 7 }, (_, i) => sumarDiasFecha(lunes, i));
-  const destinoDe = (s) => [...(destinos.get(s.id) || [])];
+  const interseca = (s, ids) => {
+    const d = destinos.get(s.id);
+    if (!d) return false;
+    for (const id of ids) if (d.has(id)) return true;
+    return false;
+  };
   const ENTREGADAS_HOY = new Map((c.loaded ? c.sesionesHoy || [] : []).map((x) => [x.sesion.id, x]));
   const solPend = solicitudes || [];
 
@@ -367,17 +378,17 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     const celdas = dias.map((fecha) => {
       const items = [];
       const tag = hayMicro ? mdDeFecha(micro, fecha, fechasPartido) : "";
-      sesiones
-        .filter((s) => (s.fechas || []).includes(fecha))
+      (porFecha.get(fecha) || [])
         .forEach((s) => {
-          const destino = destinoDe(s);
-          const propios = destino.filter((id) => f.ids.has(id));
-          if (!propios.length) return;
+          const d = destinos.get(s.id);
+          let nProp = 0;
+          if (d) for (const id of f.ids) if (d.has(id)) nProp += 1;
+          if (!nProp) return;
           let sub = s.enviada ? "Publicada" : "Borrador";
           const hoyInfo = s.enviada && fecha === hoy ? ENTREGADAS_HOY.get(s.id) : null;
           if (hoyInfo) {
             const hechos = hoyInfo.completos.filter((p) => f.ids.has(p.id)).length;
-            sub = `Hoy · ${hechos}/${propios.length}`;
+            sub = `Hoy · ${hechos}/${nProp}`;
           }
           if (tag) sub += ` · ${tag}`;
           items.push({ t: s.nombre || s.objetivo || "Sesión", s: sub, tipo: s.enviada ? "pub" : "bor" });
@@ -402,7 +413,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
 
   // ---------- Pendiente ----------
   const futuros = sesiones.filter((s) => !s.enviada).flatMap((s) => (s.fechas || []).filter((f) => f >= hoy).map((f) => ({ s, f })));
-  const borradoresAmbito = futuros.filter(({ s }) => destinoDe(s).some((id) => idsAmbito.has(id)));
+  const borradoresAmbito = futuros.filter(({ s }) => interseca(s, idsAmbito));
   const nombresDe = (lista) => {
     const u = [];
     lista.forEach((x) => {
@@ -421,7 +432,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
       if (fecha < hoy) continue;
       const tag = mdDeFecha(micro, fecha, fechasPartido);
       if (!tag || !micro.sesiones || !micro.sesiones[tag]) continue;
-      const hay = sesiones.some((s) => (s.fechas || []).includes(fecha) && destinoDe(s).some((id) => f.ids.has(id)));
+      const hay = (porFecha.get(fecha) || []).some((s) => interseca(s, f.ids));
       if (!hay) diasPorProgramar.push({ fecha, fila: f });
     }
   });
@@ -429,9 +440,11 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const domingoSig = sumarDiasFecha(lunesSig, 6);
   const hace14 = sumarDiasFecha(hoy, -14);
   const semanaSinProgramar = filasBase.filter((f) => {
-    const algoReciente = sesiones.some((s) => (s.fechas || []).some((x) => x >= hace14 && x <= hoy) && destinoDe(s).some((id) => f.ids.has(id)));
-    const algoSig = sesiones.some((s) => (s.fechas || []).some((x) => x >= lunesSig && x <= domingoSig) && destinoDe(s).some((id) => f.ids.has(id)));
-    return algoReciente && !algoSig;
+    const hayEn = (desde, dias) => {
+      for (let i = 0; i < dias; i++) if ((porFecha.get(sumarDiasFecha(desde, i)) || []).some((s) => interseca(s, f.ids))) return true;
+      return false;
+    };
+    return hayEn(hace14, 15) && !hayEn(lunesSig, 7);
   });
   const peticionesAmbito = solPend.filter((sol) => idsAmbito.has(sol.jugador_id));
   const pendientes = [];
