@@ -5,9 +5,9 @@ import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
 import { IconoModulo, IconoGridSidebar, MODULOS_DASHBOARD, useSolicitudesPendientesCount, PanelCodigoEntrenadorReal } from "../core/layoutEntrenador.jsx";
 import { CMJ_STATUS_META, CMJ_TAG_META } from "../core/cmjDisplay.jsx";
 import { accesoSesion, api, supabase } from "../core/backend.js";
-import { SEV_ALERTA, useCarteraEntrenador, usePartidos, useMicrociclosTipo, useBootstrapProgramacion, useEntityList, usePlayers, destinatariosEfectivosSesion } from "../core/hooks.js";
+import { SEV_ALERTA, sharedDataCache, useCarteraEntrenador, usePartidos, useMicrociclosTipo, useBootstrapProgramacion, useEntityList, usePlayers, destinatariosEfectivosSesion } from "../core/hooks.js";
 import { cmjBuildPlayers, cmjFindCurrentMicroId, cmjHoyDe, cmjSigned, cmjDateKeyFromDate, CMJ_FIELDS, CMJ_UMBRAL_DEFECTO } from "../calc/cmj.js";
-import { diasEntreFechas, inicioSemanaCalendario, sumarDiasFecha } from "../calc/fechas.js";
+import { diasEntreFechas, inicioSemanaCalendario, sumarDiasFecha, todayStr } from "../calc/fechas.js";
 
 // ───────────────────────────────────────────────────────────────────────────
 // Inicio del entrenador. Todo lo que se muestra sale de datos reales:
@@ -138,10 +138,15 @@ function useFatigaDashboard(players, playersLoaded) {
   const [datos, setDatos] = useState({ loaded: false, tarjetas: [], marcas: new Map() });
   useEffect(() => {
     if (!playersLoaded) return undefined;
+    const claveCache = `dash_fatiga:${players.length}`;
+    if (sharedDataCache.has(claveCache)) {
+      setDatos(sharedDataCache.get(claveCache));
+      return undefined;
+    }
     let cancelado = false;
     (async () => {
       try {
-        const [saltosRes, microRes, umbralGuardado] = await Promise.all([supabase.from("cmj_saltos").select("*").not("jugador_id", "is", null), supabase.from("cmj_microciclos").select("*"), api.config("cmj_umbral")]);
+        const [saltosRes, microRes, umbralGuardado] = await Promise.all([supabase.from("cmj_saltos").select("jugador_id,excluido,fecha,fecha_hora,peso,hp0,altura,fuerza,potencia,velocidad,kinetics_valid,peso_valid,hp0_valid").not("jugador_id", "is", null), supabase.from("cmj_microciclos").select("*"), api.config("cmj_umbral")]);
         if (saltosRes.error || microRes.error) throw new Error("cmj");
         const umbral = umbralGuardado || CMJ_UMBRAL_DEFECTO;
         const porId = new Map(players.map((p) => [p.id, p]));
@@ -188,7 +193,9 @@ function useFatigaDashboard(players, playersLoaded) {
               rows: hoy.rows || [],
             }));
         }
-        if (!cancelado) setDatos({ loaded: true, tarjetas, marcas });
+        const resultado = { loaded: true, tarjetas, marcas };
+        sharedDataCache.set(claveCache, resultado);
+        if (!cancelado) setDatos(resultado);
       } catch (e) {
         if (!cancelado) setDatos({ loaded: true, tarjetas: [], marcas: new Map() });
       }
@@ -263,7 +270,8 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const [players, , playersLoaded] = usePlayers();
   const { todos: partidos } = usePartidos();
   const { todos: microTodos } = useMicrociclosTipo();
-  const { sesiones } = useBootstrapProgramacion();
+  const { sesiones, loaded: progLoaded } = useBootstrapProgramacion();
+  const [gruposRows, , gruposLoaded] = useEntityList("grupos");
   const [solicitudes] = useEntityList("solicitudesSesion", { estado: "pendiente" });
   const fatiga = useFatigaDashboard(players, playersLoaded);
   const ancho = useAnchoVentana();
@@ -276,44 +284,40 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const puedeCambiarCodigo = accesoSesion.token && accesoSesion.rol === "entrenador";
 
   const accion = (alerta, a) => {
-    const jugador = a.jugadorId || alerta.jugadorId ? c.playersById.get(a.jugadorId || alerta.jugadorId) : null;
+    const jugador = a.jugadorId || alerta.jugadorId ? playersById.get(a.jugadorId || alerta.jugadorId) : null;
     if (a.tipo === "ficha" && jugador) onOpenHistory?.(jugador, a.pestana);
     else if (a.tipo === "cal") onAbrirModulo(a.scopeJugador && alerta.jugadorId ? `calendario:j:${alerta.jugadorId}` : jugador ? `calendario:j:${jugador.id}` : "calendario");
     else if (a.tipo === "fatiga") onAbrirModulo("fatiga");
   };
 
+  const listo = playersLoaded && gruposLoaded && progLoaded;
+  const playersById = useMemo(() => new Map(players.map((p) => [p.id, p])), [players]);
+  // Todo lo que NO depende del historial pesado se calcula ya (jugadores, grupos,
+  // sesiones): el calendario, Pendiente y Fatiga se pintan sin esperar a las alertas.
   const datos = useMemo(() => {
-    if (!c.loaded) return null;
-    const hoy = c.hoy;
-    const activos = c.activos;
-    const gruposNombre = c.gruposById; // id -> nombre
+    if (!listo) return null;
+    const hoy = todayStr();
+    const activos = players.filter((p) => p.estado === "activo");
+    const gruposNombre = new Map(gruposRows.map((g) => [g.id, g.nombre || g.name || "Grupo"]));
     const esIndiv = (p) => !(p.gruposIds || []).some((g) => gruposNombre.has(g));
-    const equiposRows = (c.grupos || [])
-      .map((g) => ({ id: g.id, nombre: g.nombre || "Grupo", ids: new Set(activos.filter((p) => (p.gruposIds || []).includes(g.id)).map((p) => p.id)), scopeKey: `g:${g.id}` }))
+    const equiposRows = gruposRows
+      .map((g) => ({ id: g.id, nombre: g.nombre || g.name || "Grupo", ids: new Set(activos.filter((p) => (p.gruposIds || []).includes(g.id)).map((p) => p.id)), scopeKey: `g:${g.id}` }))
       .filter((g) => g.ids.size > 0)
       .sort((a, b) => a.nombre.localeCompare(b.nombre));
     const individuales = activos.filter(esIndiv).sort((a, b) => a.name.localeCompare(b.name));
     const idsEquipos = new Set(equiposRows.flatMap((g) => [...g.ids]));
     const idsIndiv = new Set(individuales.map((p) => p.id));
-    const hayEquipos = equiposRows.length > 0;
-    const hayIndiv = individuales.length > 0;
     const equipoDe = (id) => {
-      const p = c.playersById.get(id);
+      const p = playersById.get(id);
       const g = p && (p.gruposIds || []).find((x) => gruposNombre.has(x));
       return g ? gruposNombre.get(g) : "";
     };
+    // Destinatarios efectivos de cada sesión, calculados una sola vez.
+    const destinos = new Map(sesiones.map((s) => [s.id, new Set(destinatariosEfectivosSesion(s, activos))]));
+    return { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos: equiposRows.length > 0, hayIndiv: individuales.length > 0, equipoDe, destinos };
+  }, [listo, players, gruposRows, sesiones, playersById]);
 
-    // Alertas por ámbito (solo tipos con dato real; CMJ va en Control de fatiga,
-    // borradores y peticiones en Pendiente).
-    const alertasDe = (idsAmbito) => agruparAlertas(c.alertas.filter((a) => TIPOS_ALERTA_DASHBOARD.has(a.tipo) && a.jugadorId && idsAmbito.has(a.jugadorId)));
-    const alEq = alertasDe(idsEquipos);
-    const alIn = alertasDe(idsIndiv);
-    const resumen = (l) => ({ n: l.length, u: l.filter((a) => a.sev === 3).length });
-
-    return { hoy, activos, esIndiv, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos, hayIndiv, equipoDe, alEq, alIn, rEq: resumen(alEq), rIn: resumen(alIn) };
-  }, [c]);
-
-  if (!c.loaded || !datos) {
+  if (!datos) {
     const cargando = <LoadingBlock />;
     return ancho >= 1000 ? (
       <div className="ds-reset" style={{ position: "fixed", inset: 0, background: ds.canvas, color: ds.ink, fontFamily: dsF.sans, display: "flex" }}>
@@ -329,9 +333,16 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     );
   }
 
-  const { hoy, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos, hayIndiv, equipoDe, alEq, alIn, rEq, rIn } = datos;
+  const { hoy, activos, equiposRows, individuales, idsEquipos, idsIndiv, hayEquipos, hayIndiv, equipoDe, destinos } = datos;
+  // Las alertas salen del historial completo (lo más pesado): llegan después y no bloquean el resto.
+  const alertasDe = (ids) => (c.loaded ? agruparAlertas(c.alertas.filter((a) => TIPOS_ALERTA_DASHBOARD.has(a.tipo) && a.jugadorId && ids.has(a.jugadorId))) : []);
+  const alEq = alertasDe(idsEquipos);
+  const alIn = alertasDe(idsIndiv);
+  const resumenAl = (l) => ({ n: l.length, u: l.filter((a) => a.sev === 3).length });
+  const rEq = resumenAl(alEq);
+  const rIn = resumenAl(alIn);
   const hayAmbos = hayEquipos && hayIndiv;
-  const ambito = !hayAmbos ? (hayEquipos ? "equipos" : "individuales") : ambitoElegido || (rEq.u > 0 || rEq.n >= rIn.n ? "equipos" : "individuales");
+  const ambito = !hayAmbos ? (hayEquipos ? "equipos" : "individuales") : ambitoElegido || "equipos";
   const esEq = ambito === "equipos";
   const idsAmbito = esEq ? idsEquipos : idsIndiv;
   const bandeja = esEq ? alEq : alIn;
@@ -339,8 +350,8 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   // ---------- Calendario ----------
   const lunes = inicioSemanaCalendario(sumarDiasFecha(hoy, offsetSemana * 7));
   const dias = Array.from({ length: 7 }, (_, i) => sumarDiasFecha(lunes, i));
-  const destinoDe = (s) => destinatariosEfectivosSesion(s, c.activos);
-  const ENTREGADAS_HOY = new Map((c.sesionesHoy || []).map((x) => [x.sesion.id, x]));
+  const destinoDe = (s) => [...(destinos.get(s.id) || [])];
+  const ENTREGADAS_HOY = new Map((c.loaded ? c.sesionesHoy || [] : []).map((x) => [x.sesion.id, x]));
   const solPend = solicitudes || [];
 
   const filasBase = esEq
@@ -376,7 +387,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
       solPend
         .filter((sol) => sol.fecha === fecha && f.ids.has(sol.jugador_id))
         .forEach((sol) => {
-          const p = c.playersById.get(sol.jugador_id);
+          const p = playersById.get(sol.jugador_id);
           items.push({ t: "Petición", s: p ? p.name : "", tipo: "pet" });
         });
       if (!items.some((x) => x.tipo === "pub" || x.tipo === "bor") && fecha >= hoy && tag && micro.sesiones && micro.sesiones[tag] && !par) {
@@ -429,7 +440,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   if (semanaSinProgramar.length) pendientes.push({ n: semanaSinProgramar.length, t: "Próxima semana sin programar", d: nombresDe(semanaSinProgramar.map(nombreFila)), v: "Programar", modulo: "calendario" });
   if (peticionesAmbito.length) {
     const sol = peticionesAmbito[0];
-    const p = c.playersById.get(sol.jugador_id);
+    const p = playersById.get(sol.jugador_id);
     pendientes.push({ n: peticionesAmbito.length, t: peticionesAmbito.length === 1 ? "Petición de jugador" : "Peticiones de jugadores", d: `${p ? p.name : "Jugador"}${sol.nota ? ` · “${sol.nota}”` : ""}`, v: "Responder", modulo: peticionesAmbito.length === 1 ? `calendario:j:${sol.jugador_id}` : "calendario" });
   }
   const pendTotal = pendientes.reduce((s, p) => s + p.n, 0);
@@ -453,10 +464,10 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const listaProx = [...proximos, ...proximosInd];
   const conteoHoy = { hecho: 0, parcial: 0, pendiente: 0 };
   let nActivosAmbito = 0;
-  c.activos.forEach((p) => {
+  activos.forEach((p) => {
     if (!idsAmbito.has(p.id)) return;
     nActivosAmbito += 1;
-    const h = c.filas.get(p.id)?.hoy;
+    const h = c.loaded ? c.filas.get(p.id)?.hoy : null;
     if (h) conteoHoy[h] += 1;
   });
   const hayHoy = conteoHoy.hecho + conteoHoy.parcial + conteoHoy.pendiente > 0;
@@ -479,9 +490,9 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
       ].map((o) => {
         const act = ambito === o.id;
         return (
-          <button key={o.id} type="button" className="dsh-btn" aria-pressed={act} aria-label={`${o.nombre}, ${o.r.n} alertas${o.r.u ? `, ${o.r.u} urgentes` : ""}`} onClick={() => setAmbitoElegido(o.id)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 9, padding: "0 12px 0 14px", minHeight: 44, display: "inline-flex", alignItems: "center", gap: 9, border: `1px solid ${act ? `${ds.accent}4D` : "transparent"}`, background: act ? ds.accentSubtle : "transparent", color: act ? ds.accent : ds.inkSecondary }}>
+          <button key={o.id} type="button" className="dsh-btn" aria-pressed={act} aria-label={c.loaded ? `${o.nombre}, ${o.r.n} alertas${o.r.u ? `, ${o.r.u} urgentes` : ""}` : o.nombre} onClick={() => setAmbitoElegido(o.id)} style={{ fontSize: 13, fontWeight: 700, borderRadius: 9, padding: "0 12px 0 14px", minHeight: 44, display: "inline-flex", alignItems: "center", gap: 9, border: `1px solid ${act ? `${ds.accent}4D` : "transparent"}`, background: act ? ds.accentSubtle : "transparent", color: act ? ds.accent : ds.inkSecondary }}>
             {o.nombre}
-            <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 500, borderRadius: 999, padding: "0 8px", lineHeight: "18px", background: o.r.u > 0 ? ds.danger : ds.warning, color: "#1A0A0A" }}>{o.r.n}</span>
+            {c.loaded && <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 500, borderRadius: 999, padding: "0 8px", lineHeight: "18px", background: o.r.u > 0 ? ds.danger : ds.warning, color: "#1A0A0A" }}>{o.r.n}</span>}
           </button>
         );
       })}
@@ -676,7 +687,9 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
         )
       }
     >
-      {bandeja.length === 0 ? (
+      {!c.loaded ? (
+        <div role="status" style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 2px" }}>Calculando alertas…</div>
+      ) : bandeja.length === 0 ? (
         <div style={{ fontSize: 13, color: ds.inkSecondary, padding: "10px 2px" }}>Nada que requiera atención en {esEq ? "los equipos" : "los jugadores individuales"}.</div>
       ) : (
         <div className="dsh-scroll" style={{ flex: "1 1 0", minHeight: 0, overflowY: "auto", margin: "0 -4px", padding: "0 4px" }}>
