@@ -154,61 +154,53 @@ export function useSolicitudesPendientesCount() {
 }
 
 export function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion }) {
+  // Barra lateral compacta (solo iconos, 72px): la misma en Inicio y en todos los
+  // módulos, para que no cambie al navegar y deje todo el ancho al contenido.
   const SIDEBAR_ITEMS = [{ id: "dashboard", nombre: "Inicio", icono: "grid" }, ...MODULOS_DASHBOARD];
   // Aviso de peticiones de sesión sin mirar (Calendario → jugador pide un
   // día) — solo dentro de la app, un badge aquí es lo más parecido a una
   // notificación que hay sin infraestructura de push/email.
   const pendientesCount = useSolicitudesPendientesCount();
-  // Código de entrenador: antes vivía como un botón suelto en la pantalla de
-  // Usuarios, sin relación visual con el resto de esa pantalla. Es un ajuste
-  // de cuenta, no de gestión de jugadores — vive aquí, junto al nombre y
-  // "Cerrar sesión", disponible desde cualquier pantalla.
+  // Código de entrenador: ajuste de cuenta, disponible desde cualquier pantalla.
   const [codigoAbierto, setCodigoAbierto] = useState(false);
   const puedeCambiarCodigo = accesoSesion.token && accesoSesion.rol === "entrenador";
+  const estiloBoton = (act) => ({
+    position: "relative",
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+    cursor: "pointer",
+    border: `1px solid ${act ? `${ds.accent}55` : "transparent"}`,
+    background: act ? `${ds.accent}22` : "transparent",
+    color: act ? ds.accent : ds.inkSecondary,
+  });
   return (
-    <div style={{ width: 232, flexShrink: 0, borderRight: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", padding: "18px 14px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 9, padding: "0 8px", marginBottom: 22 }}>
-        <div style={{ width: 30, height: 30, borderRadius: 8, background: ds.accent, color: ds.accentInk, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 13, flexShrink: 0 }}><Zap size={15} fill={ds.accentInk} /></div>
-        <div>
-          <div style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 14, letterSpacing: "-0.01em" }}>FUERZA</div>
-          <div style={{ fontFamily: dsF.mono, fontSize: 8.5, color: ds.inkMuted, letterSpacing: "0.06em" }}>PANEL DE ENTRENADOR</div>
-        </div>
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-        {SIDEBAR_ITEMS.map((m) => (
-          <DsNavItem key={m.id} active={m.id === activo} onClick={() => onAbrirModulo(m.id)} icon={m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}>
-            <span style={{ display: "flex", alignItems: "center", gap: 6, flex: 1 }}>
-              {m.nombre}
-              {m.id === "calendario" && pendientesCount > 0 && (
-                <span style={{ marginLeft: "auto", background: ds.warning, color: "#1A0F00", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 800, borderRadius: dsR.full, padding: "1px 6px", minWidth: 16, textAlign: "center" }}>
-                  {pendientesCount}
-                </span>
-              )}
-            </span>
-          </DsNavItem>
-        ))}
-      </div>
-      <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <DsAvatar size={30}>D</DsAvatar>
-          <div>
-            <div style={{ fontSize: 12.5, fontWeight: 600 }}>David</div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted }}>Entrenador</div>
-          </div>
-        </div>
-        {puedeCambiarCodigo && (
-          <button
-            type="button"
-            onClick={() => setCodigoAbierto(true)}
-            style={{ fontSize: 11.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0, textAlign: "left" }}
-          >
-            Código de entrenador
+    <nav aria-label="Módulos" style={{ width: 72, flexShrink: 0, boxSizing: "border-box", background: ds.bgElevated, borderRight: `1px solid ${ds.borderSoft}`, padding: "14px 0", display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+      {SIDEBAR_ITEMS.map((m) => {
+        const act = m.id === activo;
+        const n = m.id === "calendario" ? pendientesCount : 0;
+        return (
+          <button key={m.id} type="button" title={m.nombre} aria-label={n > 0 ? `${m.nombre}, ${n} peticiones pendientes` : m.nombre} aria-current={act ? "page" : undefined} onClick={() => onAbrirModulo(m.id)} style={estiloBoton(act)}>
+            {m.id === "dashboard" ? <IconoGridSidebar /> : <IconoModulo tipo={m.icono} />}
+            {n > 0 && <span style={{ position: "absolute", top: 3, right: 3, fontFamily: dsF.mono, fontSize: 9, fontWeight: 500, background: ds.warning, color: "#1A0F00", borderRadius: 999, padding: "0 5px", lineHeight: "15px" }}>{n}</span>}
           </button>
-        )}
-        <DsButton variant="secondary" size="sm" onClick={onCerrarSesion}>Cerrar sesión</DsButton>
-      </div>
+        );
+      })}
+      <span style={{ flex: 1 }} />
+      {puedeCambiarCodigo && (
+        <button type="button" title="Código de entrenador" aria-label="Código de entrenador" onClick={() => setCodigoAbierto(true)} style={estiloBoton(false)}>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="8" cy="15" r="4" /><path d="m11 12 9-9M16 7l3 3" /></svg>
+        </button>
+      )}
+      <button type="button" title="Cerrar sesión" aria-label="Cerrar sesión" onClick={onCerrarSesion} style={estiloBoton(false)}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 4H5v16h4" /><path d="m16 8 4 4-4 4M20 12H9" /></svg>
+      </button>
       {codigoAbierto && <PanelCodigoEntrenadorReal onCerrar={() => setCodigoAbierto(false)} />}
-    </div>
+    </nav>
   );
 }
 
