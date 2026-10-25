@@ -293,7 +293,7 @@ function MenuAccionesReal({ jugador, onAccion, onCerrar }) {
   );
 }
 
-function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion }) {
+function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onCambiarDeportista }) {
   const [menuAbierto, setMenuAbierto] = useState(false);
   const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [selectorGruposAbierto, setSelectorGruposAbierto] = useState(false);
@@ -382,6 +382,16 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           >
             + categoría
           </span>
+          {onCambiarDeportista && (
+            <span
+              role="button"
+              onClick={() => onCambiarDeportista(jugador.id, !jugador.esDeportista)}
+              style={{ fontSize: 10, cursor: "pointer", borderRadius: 4, padding: "0px 5px", transition: "opacity 120ms", color: jugador.esDeportista ? ds.accent : ds.inkMuted, border: jugador.esDeportista ? `1px solid ${ds.accent}` : `1px dashed ${ds.border}`, opacity: jugador.esDeportista || revelado ? 1 : 0.45 }}
+              title={jugador.esDeportista ? "Deportista: tiene microciclo (MD) en el Calendario. Pulsa para quitarlo." : "Marcar como deportista: activa el microciclo (MD) en el Calendario."}
+            >
+              {jugador.esDeportista ? "deportista" : "+ deportista"}
+            </span>
+          )}
           {onCambiarPosicion && (
             <span
               onClick={() => setSelectorPosicionAbierto((v) => !v)}
@@ -899,6 +909,12 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
     if (!ok) setErrorAccion("No se pudo guardar la posición. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
+  const cambiarDeportista = async (id, valor) => {
+    setErrorAccion("");
+    const ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, esDeportista: valor } : p)));
+    if (!ok) setErrorAccion("No se pudo guardar el cambio. Comprueba tu conexión e inténtalo de nuevo.");
+  };
+
   const crearGrupo = async (nombre) => {
     setErrorAccion("");
     const ok = await saveGrupos([...grupos, { nombre }]);
@@ -1005,6 +1021,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             onCambiarCategorias={cambiarCategorias}
             onCambiarGrupos={cambiarGrupos}
             onCambiarPosicion={cambiarPosicion}
+            onCambiarDeportista={cambiarDeportista}
             onBack={() => setEquipoAbiertoId(null)}
             onAddPlayer={() => {
               setGrupoAltaPreset(grupoAbierto.id);
@@ -1024,6 +1041,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             onCambiarCategorias={cambiarCategorias}
             onCambiarGrupos={cambiarGrupos}
             onCambiarPosicion={cambiarPosicion}
+            onCambiarDeportista={cambiarDeportista}
             onAddIndependiente={() => {
               setGrupoAltaPreset(null);
               setPanelAltaAbierto(true);
@@ -1203,7 +1221,7 @@ function TeamStatsRowReal({ stats }) {
 // agregadas. Reutiliza FilaJugadorReal tal cual (misma edición de
 // categorías/grupos/PIN/menú de acciones que en Usuarios), no una fila
 // nueva — así asignar/quitar del grupo desde aquí sigue funcionando igual.
-function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onBack, onAddPlayer, onEditGroup }) {
+function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onCambiarDeportista, onBack, onAddPlayer, onEditGroup }) {
   return (
     <div>
       <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -1239,6 +1257,7 @@ function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJuga
             onCambiarCategorias={onCambiarCategorias}
             onCambiarGrupos={onCambiarGrupos}
             onCambiarPosicion={onCambiarPosicion}
+            onCambiarDeportista={onCambiarDeportista}
           />
         ))}
         {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Todavía no hay jugadores en este equipo.</div>}
@@ -1251,7 +1270,7 @@ function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJuga
 // stats agregadas + roster, reutilizando FilaJugadorReal — su "+" junto a
 // los chips de grupo ya asigna a un equipo (equivalente al botón "Asignar a
 // equipo" del mockup), sin duplicar esa lógica en una fila nueva.
-function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onAddIndependiente }) {
+function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onCambiarDeportista, onAddIndependiente }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 18 }}>
@@ -1280,6 +1299,7 @@ function VistaIndependientesReal({ stats, categorias, grupos, adherenciaPorJugad
             onCambiarCategorias={onCambiarCategorias}
             onCambiarGrupos={onCambiarGrupos}
             onCambiarPosicion={onCambiarPosicion}
+            onCambiarDeportista={onCambiarDeportista}
           />
         ))}
         {stats.jugadores.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>No hay jugadores independientes — todos están asignados a un equipo.</div>}
