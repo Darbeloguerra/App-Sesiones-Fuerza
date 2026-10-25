@@ -2627,7 +2627,7 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
 
   if (!actual) {
     return (
-      <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+      <PantallaEntrenadorAncha activo="roster" anchoMaximo={1280} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
         <button
           onClick={onBack}
           style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}
@@ -2640,7 +2640,7 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
   }
 
   return (
-    <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+    <PantallaEntrenadorAncha activo="roster" anchoMaximo={1280} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         <button
           onClick={onBack}
@@ -2658,23 +2658,42 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
             Fase 6 (Equipos y usuarios): un carril vertical de pestañas, con
             las 7 secciones del mockup (Calendario se deja como placeholder
             honesto, sin calendario_asignaciones todavía). */}
-        <div style={{ display: "flex", gap: 16, margin: "16px 0 0", alignItems: "flex-start" }}>
-          <nav style={{ width: 168, flexShrink: 0, display: "flex", flexDirection: "column", gap: 2 }}>
+        <div style={{ margin: "16px 0 0" }}>
+          {/* Pestañas arriba (antes: carril vertical de 168px que, junto a la barra
+              global, hacía una doble barra lateral y estrechaba el contenido). */}
+          <div role="tablist" aria-label="Secciones de la ficha" style={{ display: "flex", gap: 4, borderBottom: `1px solid ${ds.border}`, marginBottom: 18, overflowX: "auto" }}>
             {[
-              { id: "resumen", label: "Resumen", icon: <Home size={14} /> },
-              { id: "calendario", label: "Calendario", icon: <Calendar size={14} /> },
-              { id: "progreso", label: "Progreso", icon: <TrendingUp size={14} /> },
-              { id: "cmj", label: "Control de fatiga", icon: <Activity size={14} /> },
+              { id: "resumen", label: "Resumen", activa: pestana === "resumen" },
+              { id: "calendario", label: "Calendario", activa: pestana === "calendario" },
+              { id: "progreso", label: "Progreso", activa: pestana === "progreso" || pestana === "historial" },
+              { id: "cmj", label: "Control de fatiga", activa: pestana === "cmj" },
+              { id: "notas", label: "Notas y accesos", activa: pestana === "notas" || pestana === "datos" },
             ].map((v) => (
-              <DsNavItem key={v.id} active={pestana === v.id || (v.id === "progreso" && pestana === "historial")} icon={v.icon} onClick={() => setPestana(v.id)}>
+              <button
+                key={v.id}
+                type="button"
+                role="tab"
+                aria-selected={v.activa}
+                onClick={() => setPestana(v.id)}
+                style={{
+                  minHeight: 44,
+                  padding: "0 16px",
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: `2px solid ${v.activa ? ds.accent : "transparent"}`,
+                  marginBottom: -1,
+                  color: v.activa ? ds.accent : ds.inkSecondary,
+                  fontSize: 13.5,
+                  fontWeight: v.activa ? 700 : 600,
+                  fontFamily: "inherit",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+              >
                 {v.label}
-              </DsNavItem>
+              </button>
             ))}
-            <div style={{ height: 1, background: ds.border, margin: "6px 4px" }} />
-            <DsNavItem active={pestana === "notas" || pestana === "datos"} icon={<BookOpen size={14} />} onClick={() => setPestana("notas")}>
-              Notas y accesos
-            </DsNavItem>
-          </nav>
+          </div>
           <div style={{ flex: 1, minWidth: 0 }}>
             {pestana === "resumen" ? (
               <>
