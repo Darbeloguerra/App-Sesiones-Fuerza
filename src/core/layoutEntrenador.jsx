@@ -210,7 +210,7 @@ export function SidebarEntrenadorReal({ activo, onAbrirModulo, onCerrarSesion })
 // panel de verdad al moverte entre secciones — no una pantalla aparte con
 // un enlace de "volver" cada vez. Por debajo de eso, se queda con la
 // pantalla estrecha de móvil de siempre (con su propio botón de volver).
-export function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWidthCompacto = 560, children }) {
+export function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion, maxWidthCompacto = 560, anchoMaximo = 860, children }) {
   const ancho = useAnchoVentana();
   if (ancho < 1000) {
     return (
@@ -229,7 +229,7 @@ export function PantallaEntrenadorAncha({ activo, onAbrirModulo, onCerrarSesion,
       <GlobalStyles />
       <SidebarEntrenadorReal activo={activo} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} />
       <div style={{ flex: 1, overflowY: "auto", padding: "28px 40px 48px" }}>
-        <div style={{ maxWidth: 860, margin: "0 auto" }}>
+        <div style={{ maxWidth: anchoMaximo, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: 18 }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, letterSpacing: "0.04em", textTransform: "uppercase" }}>
               {new Date().toLocaleDateString("es-ES", { weekday: "short", day: "numeric", month: "short" })}
