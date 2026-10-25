@@ -476,6 +476,8 @@ export function usePlayers() {
         // Control de fatiga (Parte 5), pero es un dato del jugador en
         // general, no exclusivo del CMJ.
         posicion: r.posicion || null,
+        // Deportista: único perfil con microciclo tipo (MD) en el Calendario. Si no, planificación manual.
+        esDeportista: !!r.es_deportista,
         // VAM (velocidad aeróbica máxima) y FCmáx (frecuencia cardíaca
         // máxima) de un test de campo real del jugador (VAM-Eval, 30-15
         // IFT, Course Navette/Léger...) — añadidos para traducir la
@@ -516,11 +518,12 @@ export function usePlayers() {
           JSON.stringify(original.categorias_preventivas || []) === JSON.stringify(groupIds) &&
           JSON.stringify(original.grupos_ids || []) === JSON.stringify(gruposIds) &&
           (original.objetivo_actual || "") === objetivoActual &&
-          (original.posicion || null) === posicion
+          (original.posicion || null) === posicion &&
+          !!original.es_deportista === !!p.esDeportista
         ) {
           return original; // sin cambios reales: misma referencia -> no se reguarda
         }
-        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds, objetivo_actual: objetivoActual, posicion };
+        return { id: p.id, nombre: p.name, pin: p.pin, estado, categorias_preventivas: groupIds, grupos_ids: gruposIds, objetivo_actual: objetivoActual, posicion, ...(original && "es_deportista" in original ? { es_deportista: !!p.esDeportista } : {}) };
       });
       return saveRows(nextRows);
     },
