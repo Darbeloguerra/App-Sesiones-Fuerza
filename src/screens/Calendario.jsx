@@ -343,12 +343,14 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const microKey = grupoMicroId ? `g:${grupoMicroId}` : scope.tipo === "jugador" ? `j:${scope.jugadorId}` : grupos.length === 1 ? `g:${grupos[0].id}` : "equipo";
   const microNombre = grupoMicroId ? grupos.find((g) => g.id === grupoMicroId)?.nombre || "equipo" : scope.tipo === "jugador" ? `${scope.label} (independiente)` : grupos.length === 1 ? grupos[0].nombre : "Todos los equipos";
   const microHeredado = scope.tipo === "jugador" && !!grupoMicroId;
-  const micro = { ...MICRO_VACIO, ...(microTodos[microKey] || {}) };
+  // Microciclo tipo (MD) solo para deportistas. Un usuario no marcado como deportista se planifica a mano: sin MD, sin microciclo.
+  const sinMicro = scope.tipo === "jugador" && !(jugadorScope && jugadorScope.esDeportista);
+  const micro = sinMicro ? MICRO_VACIO : { ...MICRO_VACIO, ...(microTodos[microKey] || {}) };
   const cambiarMicro = (parche) => {
     if (!microLoaded) return;
     guardarMicro(microKey, { ...micro, ...parche });
   };
-  const partidosScope = partidosTodos.filter((x) => x.ambito === microKey);
+  const partidosScope = sinMicro ? [] : partidosTodos.filter((x) => x.ambito === microKey);
   const fechasPartido = partidosScope.map((x) => x.fecha);
   const partidoPorFecha = new Map(partidosScope.map((x) => [x.fecha, x]));
   const anadirPartido = async () => {
@@ -702,10 +704,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
             {modoPlan && (
               <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 12, padding: "10px 14px", marginBottom: 12, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 12.5, color: ds.ink, flex: 1, minWidth: 220 }}>
-                  Planificando para <b>{microNombre === scope.label ? scope.label : scope.label}</b>. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga.
+                  Planificando para <b>{microNombre === scope.label ? scope.label : scope.label}</b>. Al publicar, cada jugador la verá activa el día que le toca. No se modifica la carga.{sinMicro ? " Planificación manual (usuario no deportista)." : ""}
                 </span>
                 <span style={{ display: "inline-flex", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, overflow: "hidden" }}>
-                  {[[false, "Día a día"], [true, "Con microciclo tipo"]].map(([v, l]) => (
+                  {[[false, "Día a día"], ...(sinMicro ? [] : [[true, "Con microciclo tipo"]])].map(([v, l]) => (
                     <button key={l} type="button" onClick={() => setMicroAbierto(v)} style={{ fontSize: 12.5, fontWeight: 700, padding: "6px 12px", border: "none", cursor: "pointer", background: microAbierto === v ? ds.accent : "transparent", color: microAbierto === v ? ds.accentInk : ds.accent }}>{l}</button>
                   ))}
                 </span>
@@ -713,7 +715,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
                 {Object.keys(asignadas).length > 0 && <button type="button" onClick={() => setAsignadas({})} style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer" }}>Vaciar</button>}
               </div>
             )}
-            {modoPlan && microAbierto && (
+            {modoPlan && microAbierto && !sinMicro && (
               <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginBottom: 4 }}>
                   <b style={{ fontFamily: dsF.display, fontSize: 15 }}>Microciclo tipo · {microNombre}</b>
