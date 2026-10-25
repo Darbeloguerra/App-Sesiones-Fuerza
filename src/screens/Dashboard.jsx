@@ -337,12 +337,13 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const solPend = solicitudes || [];
 
   const filasBase = esEq
-    ? equiposRows.map((g) => ({ clave: g.id, nombre: g.nombre, sub: `${g.ids.size} ${g.ids.size === 1 ? "jugador" : "jugadores"}`, ids: g.ids, scopeKey: g.scopeKey, equipo: true }))
-    : individuales.map((p) => ({ clave: p.id, nombre: p.name, sub: "Individual", ids: new Set([p.id]), scopeKey: `j:${p.id}`, equipo: false }));
+    ? equiposRows.map((g) => ({ clave: g.id, nombre: g.nombre, sub: `${g.ids.size} ${g.ids.size === 1 ? "jugador" : "jugadores"}`, ids: g.ids, scopeKey: g.scopeKey, equipo: true, usaMicro: true }))
+    : individuales.map((p) => ({ clave: p.id, nombre: p.name, sub: "Individual", ids: new Set([p.id]), scopeKey: `j:${p.id}`, equipo: false, usaMicro: !!p.esDeportista }));
 
   const construirFila = (f) => {
-    const micro = { ...MICRO_VACIO, ...(microTodos[f.scopeKey] || {}) };
-    const partidosScope = partidos.filter((x) => x.ambito === f.scopeKey);
+    // MD y partidos solo para equipos y deportistas; el resto se planifica a mano.
+    const micro = f.usaMicro ? { ...MICRO_VACIO, ...(microTodos[f.scopeKey] || {}) } : MICRO_VACIO;
+    const partidosScope = f.usaMicro ? partidos.filter((x) => x.ambito === f.scopeKey) : [];
     const fechasPartido = partidosScope.map((x) => x.fecha);
     const partidoPorFecha = new Map(partidosScope.map((x) => [x.fecha, x]));
     const hayMicro = micro.diaPartido != null || Object.keys(micro.manual || {}).length > 0 || fechasPartido.length > 0;
@@ -395,6 +396,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
   const nombreFila = (f) => f.nombre;
   const diasPorProgramar = [];
   filasBase.forEach((f) => {
+    if (!f.usaMicro) return;
     const micro = { ...MICRO_VACIO, ...(microTodos[f.scopeKey] || {}) };
     const fechasPartido = partidos.filter((x) => x.ambito === f.scopeKey).map((x) => x.fecha);
     if (micro.diaPartido == null && !Object.keys(micro.manual || {}).length && !fechasPartido.length) return;
@@ -441,7 +443,7 @@ export function InicioEntrenadorReal({ onAbrirModulo, onCerrarSesion, onOpenHist
     const p = partidos.filter((x) => x.ambito === g.scopeKey && x.fecha >= hoy).sort((a, b) => (a.fecha < b.fecha ? -1 : 1))[0];
     return p ? [`${g.nombre} ${fmtDia(p.fecha)}`] : [];
   });
-  const proximosInd = !esEq ? individuales.flatMap((pl) => {
+  const proximosInd = !esEq ? individuales.filter((pl) => pl.esDeportista).flatMap((pl) => {
     const p = partidos.filter((x) => x.ambito === `j:${pl.id}` && x.fecha >= hoy).sort((a, b) => (a.fecha < b.fecha ? -1 : 1))[0];
     return p ? [`${pl.name} ${fmtDia(p.fecha)}`] : [];
   }) : [];
