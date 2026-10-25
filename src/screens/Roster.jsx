@@ -951,7 +951,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
   const jugadoresEnEquipo = players.filter((p) => (p.gruposIds || []).length > 0).length;
 
   return (
-    <PantallaEntrenadorAncha activo="roster" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+    <PantallaEntrenadorAncha activo="roster" anchoMaximo={1280} onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
         {/* view-switch: dos vistas (Cartera/Equipos) — "Independientes" vivía
             como una tercera pestaña que solo repetía el filtro "independientes"
