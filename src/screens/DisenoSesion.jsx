@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, BookOpen, Lock, Play } from "lucide-react";
 import { ds, dsF, dsR, DsBadge } from "../core/designSystem.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
@@ -488,213 +489,300 @@ function NotaTareaReal({ nota, onCambiar }) {
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo }) {
+// ---------------------------------------------------------------------------
+// Fila de ejercicio en modo "resumen" + hoja de edición.
+//
+// Antes cada ejercicio mostraba ~10 campos pequeños a la vez (muy tedioso en
+// móvil). Ahora la fila muestra una línea-resumen ("4 × 5 · 80 % 1RM · 2 min")
+// y al tocarla se abre una hoja con botones grandes −/+. En pantalla estrecha
+// sube desde abajo; desde 700 px es un panel lateral. Los campos de texto
+// miden 16 px en pantallas táctiles (regla global de GlobalStyles) para que
+// Safari no haga zoom al enfocarlos.
+// ---------------------------------------------------------------------------
+let hojaTareaAbiertaGlobal = false;
+
+function resumenTareaDiseno(tarea, mostrarCarga) {
+  const vacio = (v) => v === "" || v == null;
+  const unidad = { reps: "", tiempo: " s", minutos: " min", metros: " m" }[tarea.modo] ?? "";
+  if (vacio(tarea.series) && vacio(tarea.cantidad)) return { texto: "Sin completar · toca para editar", incompleto: true };
+  const partes = [`${vacio(tarea.series) ? "—" : tarea.series} × ${vacio(tarea.cantidad) ? "—" : tarea.cantidad}${unidad}${tarea.lateralidad === "unilateral" ? " /lado" : ""}`];
+  let incompleto = vacio(tarea.series) || vacio(tarea.cantidad);
+  if (mostrarCarga) {
+    if (tarea.modoCarga === "pct1rm") {
+      if (vacio(tarea.pct1rm)) {
+        incompleto = true;
+        partes.push("falta % 1RM");
+      } else partes.push(`${tarea.pct1rm} % 1RM`);
+    } else if (vacio(tarea.rir)) {
+      incompleto = true;
+      partes.push("falta RIR");
+    } else partes.push(`RIR ${tarea.rir}`);
+  }
+  if (Number(tarea.series) > 1) {
+    const seg = Number(tarea.descanso) || Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core"));
+    if (seg > 0) partes.push(seg % 60 === 0 ? `${seg / 60} min` : `${seg} s`);
+  }
+  if (tarea.alternaCon) partes.push("↔ alterna");
+  if (tarea.nota) partes.push("nota");
+  return { texto: partes.join(" · "), incompleto };
+}
+
+function StepperDiseno({ etiqueta, valor, onCambiar, min = 0, max = 999, paso = 1, inicio, decimal = false, alerta = false, ayuda }) {
+  const n = Number(valor);
+  const num = valor === "" || valor == null || Number.isNaN(n) ? null : n;
+  const ajustar = (delta) => {
+    const base = num == null ? null : num;
+    const sig = base == null ? (inicio ?? min) : Math.min(max, Math.max(min, base + delta));
+    onCambiar(String(sig));
+  };
+  const botonStyle = { width: 48, height: 48, borderRadius: 12, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink, fontSize: 22, lineHeight: 1, cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" };
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 84, flexShrink: 0 }}>
+        <div style={{ fontSize: 13, color: ds.inkSecondary }}>{etiqueta}</div>
+        {ayuda && <div style={{ fontSize: 10.5, color: ds.inkMuted }}>{ayuda}</div>}
+      </div>
+      <button type="button" aria-label={`Menos ${etiqueta}`} onClick={() => ajustar(-paso)} style={botonStyle}>−</button>
+      <input
+        value={valor ?? ""}
+        inputMode={decimal ? "decimal" : "numeric"}
+        onChange={(e) => onCambiar(e.target.value.replace(decimal ? /[^0-9.,]/g : /[^0-9]/g, ""))}
+        placeholder="—"
+        style={{ flex: 1, minWidth: 0, height: 48, textAlign: "center", fontWeight: 800, fontFamily: dsF.sans, background: ds.bgElevated, color: alerta ? ds.danger : ds.ink, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 12, boxSizing: "border-box" }}
+      />
+      <button type="button" aria-label={`Más ${etiqueta}`} onClick={() => ajustar(paso)} style={botonStyle}>+</button>
+    </div>
+  );
+}
+
+function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 84, flexShrink: 0, fontSize: 13, color: ds.inkSecondary }}>{etiqueta}</div>
+      <div style={{ flex: 1, display: "flex", gap: 4, padding: 4, borderRadius: 12, background: ds.bgElevated, border: `1px solid ${ds.border}` }}>
+        {opciones.map((o) => {
+          const activo = o.v === valor;
+          return (
+            <button
+              key={o.v}
+              type="button"
+              onClick={() => onCambiar(o.v)}
+              style={{ flex: 1, minHeight: 40, borderRadius: 8, border: "none", cursor: "pointer", fontFamily: dsF.sans, fontSize: 13, fontWeight: activo ? 700 : 600, background: activo ? ds.accentSubtle : "transparent", color: activo ? ds.accent : ds.inkSecondary, touchAction: "manipulation" }}
+            >
+              {o.t}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio }) {
+  const ancho = useAnchoVentana();
+  const lateral = ancho >= 700;
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
-  const etiquetaModo = { reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" };
-  const tipoResistencia = tarea.tipoResistencia || "Peso libre";
+  const etiquetaModo = { reps: "Repeticiones", tiempo: "Segundos", minutos: "Minutos", metros: "Metros" };
+  const etiquetaCorta = { reps: "Reps", tiempo: "Seg", minutos: "Min", metros: "Metros" };
+  const pasoModo = { reps: 1, tiempo: 5, minutos: 1, metros: 10 }[tarea.modo] ?? 1;
+  const recomendado = Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || 0;
+  const descansoActual = tarea.descanso === "" || tarea.descanso == null ? null : Number(tarea.descanso);
+  const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
+  const ref = (referenciasPorEjercicio?.[tarea.ejercicioId] || tarea.referencia) ?? null;
+
+  useEffect(() => {
+    const alTecla = (e) => {
+      if (e.key === "Escape") onCerrar();
+    };
+    window.addEventListener("keydown", alTecla);
+    return () => window.removeEventListener("keydown", alTecla);
+  }, [onCerrar]);
+
+  const chipDescanso = (seg, texto) => {
+    const activo = descansoActual === seg;
+    return (
+      <button key={texto} type="button" onClick={() => onCambiar({ ...tarea, descanso: String(seg) })} style={{ flex: 1, minHeight: 44, borderRadius: 10, border: `1px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : ds.surfaceRaised, color: activo ? ds.accent : ds.ink, fontWeight: activo ? 700 : 600, fontFamily: dsF.sans, fontSize: 13, cursor: "pointer", touchAction: "manipulation" }}>
+        {texto}
+      </button>
+    );
+  };
+
+  const panelStyle = lateral
+    ? { position: "absolute", top: 0, right: 0, bottom: 0, width: 400, maxWidth: "100%", borderLeft: `1px solid ${ds.border}` }
+    : { position: "absolute", left: 0, right: 0, bottom: 0, maxHeight: "90dvh", borderTop: `1px solid ${ds.border}`, borderRadius: "20px 20px 0 0" };
+
+  return createPortal(
+    <div className="ds-reset" style={{ position: "fixed", inset: 0, zIndex: 1200 }}>
+      <div onClick={onCerrar} style={{ position: "absolute", inset: 0, background: "rgba(3,6,12,0.62)" }} />
+      <div role="dialog" aria-label={`Editar ${tarea.nombre}`} style={{ ...panelStyle, background: ds.surface, display: "flex", flexDirection: "column", boxShadow: "0 -10px 40px rgba(0,0,0,0.5)" }}>
+        {!lateral && <div style={{ alignSelf: "center", width: 40, height: 4, borderRadius: 2, background: ds.border, margin: "8px 0 0" }} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "12px 16px 8px" }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 700, fontSize: 16, color: ds.ink }}>{tarea.nombre}</div>
+            {mostrarCarga && <div style={{ fontSize: 12, color: ds.inkSecondary }}>Ref. anterior: {ref ?? "sin registro previo"}</div>}
+          </div>
+          <button type="button" aria-label="Cerrar" onClick={onCerrar} style={{ width: 44, height: 44, borderRadius: 12, border: "none", background: "transparent", color: ds.inkSecondary, fontSize: 24, cursor: "pointer" }}>×</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", padding: "6px 16px 12px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {mostrarCarga && (
+            <SegmentadoDiseno etiqueta="Resistencia" valor={tarea.tipoResistencia || "Peso libre"} onCambiar={(v) => onCambiar({ ...tarea, tipoResistencia: v })} opciones={[{ v: "Peso libre", t: "Libre" }, { v: "Elástica", t: "Elástica" }, { v: "Peso corporal", t: "P. corp." }]} />
+          )}
+          <StepperDiseno etiqueta="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} min={1} max={30} inicio={3} />
+          <StepperDiseno etiqueta={etiquetaModo[tarea.modo] || "Cantidad"} valor={tarea.cantidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} min={1} max={999} paso={pasoModo} inicio={tarea.modo === "reps" ? 8 : 30} />
+          <SegmentadoDiseno etiqueta="Medido en" valor={tarea.modo} onCambiar={(v) => onCambiar({ ...tarea, modo: v })} opciones={modosDisponibles.map((m) => ({ v: m, t: etiquetaCorta[m] }))} />
+          <SegmentadoDiseno etiqueta="Lado" valor={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"} onCambiar={(v) => onCambiar({ ...tarea, lateralidad: v })} opciones={[{ v: "bilateral", t: "Bilateral" }, { v: "unilateral", t: "Unilateral" }]} />
+
+          {mostrarCarga && (
+            <>
+              {/* RIR o % del 1RM estimado: el RIR deja de ser fiable con cargas ligeras (series largas), ahí conviene pautar por %1RM. */}
+              <SegmentadoDiseno etiqueta="Carga por" valor={tarea.modoCarga === "pct1rm" ? "pct1rm" : "rir"} onCambiar={(v) => onCambiar({ ...tarea, modoCarga: v })} opciones={[{ v: "rir", t: "RIR" }, { v: "pct1rm", t: "% 1RM" }]} />
+              {tarea.modoCarga === "pct1rm" ? (
+                <>
+                  <StepperDiseno etiqueta="% 1RM" valor={tarea.pct1rm ?? ""} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} min={1} max={100} paso={5} inicio={70} />
+                  {tarea.pct1rmOrigen != null && !tarea.mantenerCarga && String(tarea.pct1rm) !== String(tarea.pct1rmOrigen) && (
+                    <button type="button" onClick={() => onCambiar({ ...tarea, pct1rm: tarea.pct1rmOrigen, mantenerCarga: true })} style={{ alignSelf: "flex-start", minHeight: 40, fontFamily: dsF.mono, fontSize: 12, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "0 12px", cursor: "pointer" }}>
+                      ↑ desde {tarea.pct1rmOrigen} % · mantener
+                    </button>
+                  )}
+                </>
+              ) : (
+                // Un RIR de dos cifras casi seguro es un %1RM tecleado sin cambiar de modo: se avisa en rojo.
+                <StepperDiseno etiqueta="RIR" valor={tarea.rir} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} min={0} max={99} inicio={2} alerta={rirAlto} ayuda={rirAlto ? "¿%1RM?" : undefined} />
+              )}
+            </>
+          )}
+
+          {Number(tarea.series) > 1 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontSize: 13, color: ds.inkSecondary }}>Descanso entre series</div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button type="button" onClick={() => onCambiar({ ...tarea, descanso: "" })} style={{ flex: 1.9, whiteSpace: "nowrap", minHeight: 44, borderRadius: 10, border: `1px solid ${descansoActual == null ? ds.accent : ds.border}`, background: descansoActual == null ? ds.accentSubtle : ds.surfaceRaised, color: descansoActual == null ? ds.accent : ds.ink, fontWeight: descansoActual == null ? 700 : 600, fontFamily: dsF.sans, fontSize: 13, cursor: "pointer", touchAction: "manipulation" }}>
+                  Auto{recomendado ? ` · ${recomendado} s` : ""}
+                </button>
+                {chipDescanso(60, "60 s")}
+                {chipDescanso(90, "90 s")}
+                {chipDescanso(120, "2 min")}
+                {chipDescanso(180, "3 min")}
+              </div>
+            </div>
+          )}
+
+          <SelectorMaterialReal seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
+
+          {tarea.alternaCon && (
+            <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12.5, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "8px 10px" }}>
+              <span style={{ flex: 1 }}>↔ En el descanso, alterna con <strong>{tarea.alternaConNombre || "otro ejercicio"}</strong></span>
+              <button type="button" onClick={() => onCambiar({ ...tarea, alternaCon: "", alternaConNombre: "" })} style={{ background: "none", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 12.5, textDecoration: "underline", padding: 0, minHeight: 32 }}>
+                quitar
+              </button>
+            </div>
+          )}
+          <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
+        </div>
+
+        <div style={{ padding: "10px 16px calc(14px + env(safe-area-inset-bottom))", borderTop: `1px solid ${ds.border}` }}>
+          <button type="button" onClick={onCerrar} style={{ width: "100%", minHeight: 50, borderRadius: 12, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 15, fontFamily: dsF.sans, cursor: "pointer" }}>
+            Hecho
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo }) {
+  const [abierta, setAbierta] = useState(false);
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
+  const resumen = resumenTareaDiseno(tarea, mostrarCarga);
+
+  // Una tarea recién añadida abre su hoja sola (solo una a la vez, aunque se
+  // añadan varias seguidas). La marca se borra enseguida para que no se guarde.
+  useEffect(() => {
+    if (!tarea.abrirEditor) return;
+    onCambiar({ ...tarea, abrirEditor: undefined });
+    if (!hojaTareaAbiertaGlobal) {
+      hojaTareaAbiertaGlobal = true;
+      setAbierta(true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarea.abrirEditor]);
+
+  const abrir = () => {
+    if (abierta) return;
+    hojaTareaAbiertaGlobal = true;
+    setAbierta(true);
+  };
+  const cerrar = () => {
+    hojaTareaAbiertaGlobal = false;
+    setAbierta(false);
+  };
+  useEffect(() => () => {
+    if (abierta) hojaTareaAbiertaGlobal = false;
+  }, [abierta]);
 
   return (
-    <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+    <div style={{ padding: "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, display: "flex", alignItems: "center", gap: 6 }}>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={abrir}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            abrir();
+          }
+        }}
+        style={{ flex: 1, minWidth: 0, minHeight: 48, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", touchAction: "manipulation" }}
+      >
         {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
           <button
             type="button"
-            onClick={() => tieneVideoJugable && onAmpliarVideo?.(tarea.gif)}
+            onClick={(ev) => {
+              ev.stopPropagation();
+              if (tieneVideoJugable) onAmpliarVideo?.(tarea.gif);
+            }}
             title={tieneVideoJugable ? "Ver vídeo" : undefined}
-            style={{ position: "relative", width: 32, height: 32, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", border: "none", padding: 0, cursor: tieneVideoJugable ? "pointer" : "default" }}
+            style={{ position: "relative", width: 36, height: 36, borderRadius: dsR.md, flexShrink: 0, background: ds.surface, display: "flex", alignItems: "center", justifyContent: "center", border: "none", padding: 0, cursor: tieneVideoJugable ? "pointer" : "default" }}
           >
             {miniaturaTarea(tarea.gif) && (
-              <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 32, height: 32, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
+              <img src={miniaturaTarea(tarea.gif)} alt="" style={{ width: 36, height: 36, borderRadius: dsR.md, objectFit: "cover", display: "block", position: "absolute", inset: 0 }} />
             )}
             {tieneVideoJugable && (
               <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: miniaturaTarea(tarea.gif) ? "rgba(0,0,0,0.25)" : "transparent", borderRadius: dsR.md }}>
-                <Play size={11} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
+                <Play size={12} color={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} fill={miniaturaTarea(tarea.gif) ? "#fff" : ds.accent} />
               </div>
             )}
           </button>
         )}
         {orden != null && (
-          <span style={{ width: 20, height: 20, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ width: 22, height: 22, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
-        <div style={{ color: ds.ink, fontSize: 13.5, fontWeight: 500, flex: 1, minWidth: 0 }}>{tarea.nombre}</div>
-        {onSubir && (
-          <button onClick={onSubir} style={botonMiniStyleDiseno} title="Mover antes">
-            ↑
-          </button>
-        )}
-        {onBajar && (
-          <button onClick={onBajar} style={botonMiniStyleDiseno} title="Mover después">
-            ↓
-          </button>
-        )}
-        <button onClick={onEliminar} style={botonMiniStyleDiseno} title="Quitar tarea">
-          ×
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: ds.ink, fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tarea.nombre}</div>
+          <div style={{ fontSize: 12.5, fontWeight: 600, color: resumen.incompleto ? ds.accent : ds.inkSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen.texto}</div>
+        </div>
+        <ChevronDown size={16} color={ds.inkMuted} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+      </div>
+      {onSubir && (
+        <button onClick={onSubir} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover antes">
+          ↑
         </button>
-      </div>
-      {mostrarCarga && (
-        <div>
-          <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 4 }}>TIPO DE RESISTENCIA</div>
-          <select
-            value={tipoResistencia}
-            onChange={(e) => onCambiar({ ...tarea, tipoResistencia: e.target.value })}
-            style={{ width: 180, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
-          >
-            {["Peso libre", "Elástica", "Peso corporal"].map((t) => (
-              <option key={t} value={t}>
-                {t}
-              </option>
-            ))}
-          </select>
-        </div>
       )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <CampoEtiquetadoDiseno etiqueta="MODO" w={62}>
-          <select
-            value={tarea.modo}
-            onChange={(e) => onCambiar({ ...tarea, modo: e.target.value })}
-            style={{ fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.border, border: `1px solid ${ds.border}`, borderRadius: 5, padding: "5px 4px", width: "100%", textAlign: "center", cursor: "pointer" }}
-            title="Elegir reps / seg / min / metros"
-          >
-            {modosDisponibles.map((m) => (
-              <option key={m} value={m}>
-                {etiquetaModo[m]}
-              </option>
-            ))}
-          </select>
-        </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="LADO" w={108}>
-          <select
-            value={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"}
-            onChange={(e) => onCambiar({ ...tarea, lateralidad: e.target.value })}
-            style={{
-              fontFamily: dsF.mono,
-              fontSize: 10.5,
-              color: tarea.lateralidad === "unilateral" ? ds.accent : ds.inkSecondary,
-              background: tarea.lateralidad === "unilateral" ? ds.accentSubtle : ds.border,
-              border: `1px solid ${tarea.lateralidad === "unilateral" ? ds.accent : ds.border}`,
-              borderRadius: 5,
-              padding: "5px 4px",
-              width: "100%",
-              textAlign: "center",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-            title="Bilateral: a la vez con las dos piernas/brazos. Unilateral: se repite cada lado por separado."
-          >
-            <option value="bilateral">Bilateral</option>
-            <option value="unilateral">Unilateral</option>
-          </select>
-        </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta="SERIES" w={44}>
-          <input value={tarea.series} onChange={(e) => onCambiar({ ...tarea, series: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
-        </CampoEtiquetadoDiseno>
-        <CampoEtiquetadoDiseno etiqueta={etiquetaModo[tarea.modo]} w={44}>
-          <input value={tarea.cantidad} onChange={(e) => onCambiar({ ...tarea, cantidad: e.target.value })} placeholder="—" style={campoStyleDiseno("100%")} />
-        </CampoEtiquetadoDiseno>
-        {Number(tarea.series) > 1 && (
-          <CampoEtiquetadoDiseno etiqueta="DESC. (s)" w={52}>
-            <input
-              value={tarea.descanso ?? ""}
-              onChange={(e) => onCambiar({ ...tarea, descanso: e.target.value.replace(/[^0-9]/g, "") })}
-              placeholder={String(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core"))}
-              title="Descanso entre series en segundos. En blanco = el recomendado según la intensidad (el número gris)."
-              style={campoStyleDiseno("100%")}
-            />
-          </CampoEtiquetadoDiseno>
-        )}
-        {mostrarCarga && (
-          <>
-            {/* Alternativa al RIR: pautar por % directo del 1RM estimado del
-                jugador. El RIR deja de ser una herramienta fiable a cargas
-                ligeras (por debajo de ~10 reps hasta el fallo la relación
-                reps-%1RM ya no es lineal, y la autopercepción del RIR se
-                degrada mucho en series largas) — para esos casos, %1RM. */}
-            <CampoEtiquetadoDiseno etiqueta="CARGA POR" w={72}>
-              <select
-                value={tarea.modoCarga === "pct1rm" ? "pct1rm" : "rir"}
-                onChange={(e) => onCambiar({ ...tarea, modoCarga: e.target.value })}
-                style={{
-                  fontFamily: dsF.mono,
-                  fontSize: 10,
-                  color: tarea.modoCarga === "pct1rm" ? ds.accent : ds.inkSecondary,
-                  background: tarea.modoCarga === "pct1rm" ? ds.accentSubtle : ds.border,
-                  border: `1px solid ${tarea.modoCarga === "pct1rm" ? ds.accent : ds.border}`,
-                  borderRadius: 5,
-                  padding: "5px 4px",
-                  width: "100%",
-                  textAlign: "center",
-                  cursor: "pointer",
-                }}
-                title="Elegir entre pautar por RIR o por % directo del 1RM estimado (recomendado para cargas ligeras)"
-              >
-                <option value="rir">RIR</option>
-                <option value="pct1rm">%1RM</option>
-              </select>
-            </CampoEtiquetadoDiseno>
-            {tarea.modoCarga === "pct1rm" ? (
-              <>
-              <CampoEtiquetadoDiseno etiqueta="% 1RM" w={48}>
-                <input
-                  value={tarea.pct1rm ?? ""}
-                  onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value, pct1rmOrigen: undefined })}
-                  onBlur={(e) => {
-                    const n = Number(e.target.value);
-                    if (e.target.value !== "" && !Number.isNaN(n)) onCambiar({ ...tarea, pct1rm: String(Math.min(100, Math.max(1, Math.round(n)))) });
-                  }}
-                  placeholder="—"
-                  style={campoStyleDiseno("100%")}
-                />
-              </CampoEtiquetadoDiseno>
-              {tarea.pct1rmOrigen != null && !tarea.mantenerCarga && String(tarea.pct1rm) !== String(tarea.pct1rmOrigen) && (
-                <button
-                  type="button"
-                  onClick={() => onCambiar({ ...tarea, pct1rm: tarea.pct1rmOrigen, mantenerCarga: true })}
-                  title="Esta carga se ha subido respecto a la sesión original. Pulsa para dejarla como estaba."
-                  style={{ alignSelf: "flex-end", fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 5, padding: "5px 6px", cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  ↑ desde {tarea.pct1rmOrigen} % · mantener
-                </button>
-              )}
-              </>
-            ) : (
-              // El RIR se pauta en una escala corta (0 = al fallo, rara vez
-              // más de 5-6 en trabajo de fuerza) — si aquí aparece un número
-              // de dos cifras casi seguro es un %1RM tecleado por error sin
-              // cambiar antes a modo "%1RM" (ver el botón de al lado). Se
-              // avisa en vez de dejarlo pasar en silencio, porque luego el
-              // jugador ve "RIR 90" sin que tenga sentido.
-              <CampoEtiquetadoDiseno etiqueta="RIR" w={40}>
-                <input
-                  value={tarea.rir}
-                  onChange={(e) => onCambiar({ ...tarea, rir: e.target.value })}
-                  placeholder="—"
-                  style={{ ...campoStyleDiseno("100%"), ...(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10 ? { color: ds.danger, borderColor: ds.danger } : {}) }}
-                  title={tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10 ? "Un RIR tan alto no es habitual — ¿querías pautar por %1RM? Usa el botón de al lado para cambiar de modo." : undefined}
-                />
-              </CampoEtiquetadoDiseno>
-            )}
-            <div style={{ flex: "1 1 100px", minWidth: 100 }}>
-              <div style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, marginBottom: 3 }}>REF. ANTERIOR (informativo)</div>
-              <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.3 }}>
-                {(referenciasPorEjercicio?.[tarea.ejercicioId] || tarea.referencia) ?? "Sin registro previo"}
-              </div>
-            </div>
-          </>
-        )}
-        <SelectorMaterialReal seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
-      </div>
-      {tarea.alternaCon && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 11.5, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "5px 9px" }}>
-          <span style={{ flex: 1 }}>↔ En el descanso, alterna con <strong>{tarea.alternaConNombre || "otro ejercicio"}</strong></span>
-          <button type="button" onClick={() => onCambiar({ ...tarea, alternaCon: "", alternaConNombre: "" })} style={{ background: "none", border: "none", color: ds.inkMuted, cursor: "pointer", fontSize: 11.5, textDecoration: "underline", padding: 0 }}>
-            quitar
-          </button>
-        </div>
+      {onBajar && (
+        <button onClick={onBajar} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover después">
+          ↓
+        </button>
       )}
-      <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
+      <button onClick={onEliminar} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Quitar tarea">
+        ×
+      </button>
+      {abierta && (
+        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} />
+      )}
     </div>
   );
 }
@@ -1469,6 +1557,7 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
     // su cuenta buscando el ejercicio — de ahí la diferencia que se veía).
     gif: ejercicio.gif_url || "",
     modo: "reps",
+    abrirEditor: true,
     series: "",
     cantidad: "",
     rir: "",
