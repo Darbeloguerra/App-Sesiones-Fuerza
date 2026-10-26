@@ -892,6 +892,20 @@ function BarraInferiorJugadorReal({ tabs, active, onChange }) {
 // el Dashboard/"Ver sesión"), y aquí, en su calendario, ni los días pasados
 // ni los futuros revelan qué había o qué hay — solo si hubo/hay sesión y,
 // para los pasados, si quedó completada.
+// Botón de mes anterior/siguiente del calendario (mismo estilo que en Calendario.jsx).
+const navMesBtnCalendarioStyle = {
+  width: 30,
+  height: 30,
+  borderRadius: dsR.md,
+  border: `1px solid ${ds.border}`,
+  background: ds.surface,
+  color: ds.inkSecondary,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+};
+
 function CalendarioJugadorReal({ player, hoy, fechasAsignadasJugador, fechasConRegistro, rachaSemanas, onVerSesionHoy, onExit, tabs, onChangeTab }) {
   const [mesRef, setMesRef] = useState(inicioMes(hoy));
   const [diaSel, setDiaSel] = useState(hoy);
