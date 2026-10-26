@@ -2450,6 +2450,20 @@ function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion })
 // SÍ se ve el contenido completo de cada sesión: es la vista del
 // entrenador, que necesita visibilidad total para planificar, no la del
 // jugador (esa es la única que tiene la regla de "solo marcador").
+// Botón de mes anterior/siguiente del calendario (mismo estilo que en Calendario.jsx).
+const navMesBtnCalendarioStyle = {
+  width: 30,
+  height: 30,
+  borderRadius: dsR.md,
+  border: `1px solid ${ds.border}`,
+  background: ds.surface,
+  color: ds.inkSecondary,
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  cursor: "pointer",
+};
+
 function CalendarioFichaJugadorReal({ jugador, onAbrirModulo }) {
   const { loaded: bootLoaded, sesiones, tareas, ejercicios } = useBootstrapProgramacion();
   const hoy = todayStr();
