@@ -692,6 +692,28 @@ function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materi
   );
 }
 
+// Superseries: dos tareas consecutivas están enlazadas cuando la primera "alterna
+// con" el ejercicio de la siguiente (mismo dato que ya usaba la app). Devuelve,
+// para cada tarea, su etiqueta (A, B… o A1/A2 dentro de una superserie) y si está
+// enlazada con la anterior / la siguiente.
+function datosSuperserie(tareas) {
+  let grupo = 0;
+  let dentro = 0;
+  return tareas.map((t, i) => {
+    const ant = tareas[i - 1];
+    const sig = tareas[i + 1];
+    const conAnt = !!ant && !!ant.alternaCon && ant.alternaCon === t.ejercicioId;
+    const conSig = !!sig && !!t.alternaCon && t.alternaCon === sig.ejercicioId;
+    if (conAnt) dentro += 1;
+    else {
+      grupo += 1;
+      dentro = 1;
+    }
+    const letra = String.fromCharCode(65 + ((grupo - 1) % 26));
+    return { etiqueta: conAnt || conSig ? `${letra}${dentro}` : letra, conAnt, conSig, puedeEnlazar: !!sig && !!t.ejercicioId && !!sig.ejercicioId };
+  });
+}
+
 function estiloCeldaTabla(alerta) {
   return { width: "100%", height: 44, textAlign: "center", fontWeight: 700, fontFamily: dsF.sans, background: ds.surface, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 10, color: alerta ? ds.danger : ds.ink, boxSizing: "border-box" };
 }
@@ -704,7 +726,7 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho) {
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo }) {
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null }) {
   const [abierta, setAbierta] = useState(false);
   // En iPad horizontal / ordenador los números se editan directamente en la fila
   // (tabla); el resto de opciones siguen en la hoja de edición (botón ⋯).
@@ -738,8 +760,10 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
     if (abierta) hojaTareaAbiertaGlobal = false;
   }, [abierta]);
 
+  const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
   return (
-    <div style={{ padding: "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, display: "flex", alignItems: "center", gap: 6 }}>
+    <>
+    <div style={{ padding: "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 6 }}>
       <div
         role="button"
         tabIndex={0}
@@ -773,7 +797,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
           </button>
         )}
         {orden != null && (
-          <span style={{ width: 22, height: 22, borderRadius: "50%", background: ds.border, color: ds.accent, fontFamily: dsF.mono, fontSize: 11, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <span style={{ minWidth: 26, height: 26, padding: "0 5px", boxSizing: "border-box", borderRadius: 8, background: superserie && (superserie.conAnt || superserie.conSig) ? ds.accent : ds.border, color: superserie && (superserie.conAnt || superserie.conSig) ? ds.accentInk : ds.accent, fontFamily: dsF.mono, fontSize: 11.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             {orden}
           </span>
         )}
@@ -821,6 +845,17 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} />
       )}
     </div>
+    {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
+      <button
+        type="button"
+        onClick={onAlternarEnlace}
+        title={superserie.conSig ? "Separar estos dos ejercicios" : "Unir este ejercicio con el siguiente en una superserie (alternan en el descanso)"}
+        style={{ alignSelf: "center", minHeight: 36, padding: "0 14px", borderRadius: 999, border: `1px ${superserie.conSig ? "solid" : "dashed"} ${superserie.conSig ? ds.accent : ds.border}`, background: superserie.conSig ? ds.accentSubtle : "transparent", color: superserie.conSig ? ds.accent : ds.inkMuted, fontFamily: dsF.sans, fontSize: 12.5, fontWeight: 600, cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+      >
+        {superserie.conSig ? "⛓ Superserie · separar" : "⛓ Unir con el siguiente"}
+      </button>
+    )}
+    </>
   );
 }
 
@@ -3081,6 +3116,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
 
   // ---- Resumen de la sesión (panel derecho): todo derivado del borrador.
   const zonaDe = (t) => ((ejercicios.find((e) => e.id === t.ejercicioId)?.tags_descriptivos || [])[0] || "");
+  const alternarEnlace = (setLista, i, lista) => () =>
+    setLista((prev) => prev.map((x, k) => {
+      if (k !== i) return x;
+      const sig = prev[i + 1];
+      if (!sig) return x;
+      return x.alternaCon && x.alternaCon === sig.ejercicioId ? { ...x, alternaCon: "", alternaConNombre: "" } : { ...x, alternaCon: sig.ejercicioId, alternaConNombre: sig.nombre };
+    }));
   const aplicarAlternancia = (a, b, bloque) => {
     const marcar = (arr) => arr.map((t) => (t.key === a.key ? { ...t, alternaCon: b.ejercicioId, alternaConNombre: b.nombre } : t));
     if (bloque === "Fuerza") setTareasFuerza(marcar);
@@ -3566,10 +3608,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 <TarjetaBloqueDiseno navegador id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
                 {bloqueActivo === "core" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {tareasCore.map((t) => (
+                    {tareasCore.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
                         tarea={t}
+                        orden={datosSuperserie(tareasCore)[i].etiqueta}
+                        superserie={datosSuperserie(tareasCore)[i]}
+                        onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasCore, i, tareasCore)}
                         mostrarCarga={false}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
@@ -3694,7 +3739,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                       <FilaTareaReal
                         key={t.key}
                         tarea={t}
-                        orden={i + 1}
+                        orden={datosSuperserie(tareasFuerza)[i].etiqueta}
+                        superserie={datosSuperserie(tareasFuerza)[i]}
+                        onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasFuerza, i, tareasFuerza)}
                         mostrarCarga={true}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
@@ -3768,6 +3815,12 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         <div style={{ flexShrink: 0, borderTop: `1px solid ${ds.border}`, paddingTop: 10, marginTop: 8 }}>
         {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginTop: 14 }}>{error}</div>}
         {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginTop: 14 }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 8, fontSize: 13.5 }}>
+          <strong style={{ fontFamily: dsF.mono, color: ds.accent }}>~{formatearDuracionDiseno(resumenDiseno.totalSeg)}</strong>
+          {resumenDiseno.fuerza.series ? <span style={{ color: ds.ink, fontWeight: 600 }}>{resumenDiseno.fuerza.series} series de fuerza</span> : null}
+          <span style={{ color: ds.inkSecondary }}>Para {targetPlayerIds === null ? "todos los jugadores" : `${(targetPlayerIds || []).length} jugador${(targetPlayerIds || []).length === 1 ? "" : "es"}`}</span>
+          {resumenDiseno.avisos.length > 0 && <span style={{ color: ds.danger, fontWeight: 600 }}>⚠ {resumenDiseno.avisos.length} aviso{resumenDiseno.avisos.length === 1 ? "" : "s"}</span>}
+        </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 10, marginTop: 8, flexWrap: "wrap" }}>
           <button onClick={onBack} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: 8, padding: "10px 16px", fontSize: 13.5, cursor: "pointer" }}>
             {readOnly ? "Volver" : "Cancelar"}
