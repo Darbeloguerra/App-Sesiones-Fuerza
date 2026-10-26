@@ -129,6 +129,16 @@ export function GlobalStyles() {
         padding-right: 28px !important;
       }
       .ds-reset select:not(.ds-select)::-ms-expand { display: none; }
+
+      /* Safari en iPhone/iPad hace zoom automático al tocar un campo cuyo texto
+         mide menos de 16 px, y deja la pantalla ampliada y descuadrada. En
+         pantallas táctiles todos los campos pasan a 16 px (el !important es
+         necesario porque cada pantalla fija su tamaño en línea). */
+      html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+      @media (pointer: coarse), (max-width: 1100px) {
+        input, select, textarea { font-size: 16px !important; }
+        input[type="number"], input[type="text"], input[type="search"] { touch-action: manipulation; }
+      }
       /* Igual con el <input type="date"> nativo: el icono de calendario y
          los controles del picker venían con el tema claro del sistema por
          defecto, chocando contra el fondo oscuro de la app. */
