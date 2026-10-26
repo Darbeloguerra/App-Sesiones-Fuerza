@@ -692,8 +692,23 @@ function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materi
   );
 }
 
+function estiloCeldaTabla(alerta) {
+  return { width: "100%", height: 44, textAlign: "center", fontWeight: 700, fontFamily: dsF.sans, background: ds.surface, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 10, color: alerta ? ds.danger : ds.ink, boxSizing: "border-box" };
+}
+function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho) {
+  return (
+    <label key={etiqueta} style={{ display: "flex", flexDirection: "column", gap: 2, width: ancho, flexShrink: 0 }}>
+      <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, minHeight: 14 }}>{etiqueta}</span>
+      <input value={valor ?? ""} inputMode="numeric" onChange={(e) => onCambiar(e.target.value.replace(/[^0-9]/g, ""))} placeholder={placeholder} style={estiloCeldaTabla(false)} />
+    </label>
+  );
+}
+
 function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo }) {
   const [abierta, setAbierta] = useState(false);
+  // En iPad horizontal / ordenador los números se editan directamente en la fila
+  // (tabla); el resto de opciones siguen en la hoja de edición (botón ⋯).
+  const tabla = useAnchoVentana() >= 1100;
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
   const resumen = resumenTareaDiseno(tarea, mostrarCarga);
 
@@ -702,7 +717,8 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   useEffect(() => {
     if (!tarea.abrirEditor) return;
     onCambiar({ ...tarea, abrirEditor: undefined });
-    if (!hojaTareaAbiertaGlobal) {
+    // En modo tabla los números se escriben en la propia fila: no hace falta abrir la hoja.
+    if (!tabla && !hojaTareaAbiertaGlobal) {
       hojaTareaAbiertaGlobal = true;
       setAbierta(true);
     }
@@ -763,10 +779,31 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: ds.ink, fontSize: 14, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{tarea.nombre}</div>
-          <div style={{ fontSize: 12.5, fontWeight: 600, color: resumen.incompleto ? ds.accent : ds.inkSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen.texto}</div>
+          {!tabla && <div style={{ fontSize: 12.5, fontWeight: 600, color: resumen.incompleto ? ds.accent : ds.inkSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen.texto}</div>}
+          {tabla && (tarea.lateralidad === "unilateral" || (tarea.materiales || []).length > 0) && (
+            <div style={{ fontSize: 11.5, color: ds.inkMuted, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[tarea.lateralidad === "unilateral" ? "Unilateral" : null, ...(tarea.materiales || [])].filter(Boolean).join(" · ")}</div>
+          )}
         </div>
-        <ChevronDown size={16} color={ds.inkMuted} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />
+        {!tabla && <ChevronDown size={16} color={ds.inkMuted} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />}
       </div>
+      {tabla && (
+        <>
+          {celdaTabla("SERIES", tarea.series, (v) => onCambiar({ ...tarea, series: v }), "—", 64)}
+          {celdaTabla(({ reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" })[tarea.modo] || "REPS", tarea.cantidad, (v) => onCambiar({ ...tarea, cantidad: v }), "—", 72)}
+          {mostrarCarga && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 2, width: 84, flexShrink: 0 }}>
+              <button type="button" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.accent, cursor: "pointer", minHeight: 14 }}>
+                {tarea.modoCarga === "pct1rm" ? "% 1RM" : "RIR"} ⇄
+              </button>
+              {tarea.modoCarga === "pct1rm"
+                ? <input value={tarea.pct1rm ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value.replace(/[^0-9]/g, ""), pct1rmOrigen: undefined })} placeholder="—" style={estiloCeldaTabla(false)} />
+                : <input value={tarea.rir ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, rir: e.target.value.replace(/[^0-9]/g, "") })} placeholder="—" style={estiloCeldaTabla(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10)} />}
+            </div>
+          )}
+          {Number(tarea.series) > 1 && celdaTabla("DESC. s", tarea.descanso, (v) => onCambiar({ ...tarea, descanso: v }), String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—"), 72)}
+          {tabla && <button type="button" title="Más opciones: medida, lado, material, nota" onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 44, height: 44, fontSize: 16, flexShrink: 0 }}>⋯</button>}
+        </>
+      )}
       {onSubir && (
         <button onClick={onSubir} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover antes">
           ↑
@@ -1166,15 +1203,19 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
 // Cuántas veces está ya un ejercicio en la sesión que se está diseñando —
 // lo aporta DisenoSesionReal; fuera de él, 0.
 const EnSesionContext = React.createContext(() => 0);
+// Hueco (columna derecha) donde la biblioteca se acopla en iPad horizontal / ordenador.
+const BibliotecaSlotContext = React.createContext(null);
 
-function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
+function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acoplable = false }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
   const [zonaFiltro, setZonaFiltro] = useState("");
   const [soloVideo, setSoloVideo] = useState(false);
   const [soloFav, setSoloFav] = useState(false);
   const [previsId, setPrevisId] = useState(null);
-  const [anadidos, setAnadidos] = useState({});
+  // Selección múltiple: se marcan varios ejercicios y se añaden de una vez.
+  const [seleccion, setSeleccion] = useState({});
+  const [colaZona, setColaZona] = useState([]);
   const [aviso, setAviso] = useState("");
   const [varianteVideo, setVarianteVideo] = useState("");
   // Ejercicio (ya existente sin zona, o { nombre, nuevo: true } recién
@@ -1185,7 +1226,9 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   const [guardandoZona, setGuardandoZona] = useState(false);
   const enSesion = React.useContext(EnSesionContext);
   const ancho = useAnchoVentana();
-  const dosPaneles = ancho >= 760;
+  const slotBiblio = React.useContext(BibliotecaSlotContext);
+  const acoplado = !!acoplable && !!slotBiblio;
+  const dosPaneles = !acoplado && ancho >= 760;
 
   const coincideBloque = (e) => !bloque || !e.bloque || e.bloque === bloque || (bloque === "Fuerza" && e.bloque === "Específicas");
   const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
@@ -1222,20 +1265,35 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
     setFiltro("");
     setPendienteZona(null);
     setPrevisId(null);
-    setAnadidos({});
+    setSeleccion({});
+    setColaZona([]);
     setAviso("");
     setVarianteVideo("");
   };
 
-  const anadir = (e) => {
-    if (!(e.tags_descriptivos && e.tags_descriptivos.length)) {
-      setPendienteZona(e);
+  const alternarSeleccion = (e) => {
+    setSeleccion((sel) => {
+      const nuevo = { ...sel };
+      if (nuevo[e.id]) delete nuevo[e.id];
+      else nuevo[e.id] = e;
+      return nuevo;
+    });
+  };
+  const seleccionados = Object.values(seleccion);
+  const anadirSeleccion = () => {
+    if (!seleccionados.length) return;
+    const conZona = seleccionados.filter((e) => e.tags_descriptivos && e.tags_descriptivos.length);
+    const sinZona = seleccionados.filter((e) => !(e.tags_descriptivos && e.tags_descriptivos.length));
+    conZona.forEach((e) => onAdd(e));
+    setSeleccion({});
+    if (sinZona.length) {
+      setPendienteZona(sinZona[0]);
+      setColaZona(sinZona.slice(1));
+      setAviso(`${conZona.length} añadidos. Faltan zonas corporales.`);
       return;
     }
-    onAdd(e);
-    setAnadidos((a) => ({ ...a, [e.id]: (a[e.id] || 0) + 1 }));
-    setAviso(`«${e.nombre}» añadido a ${bloque || "la sesión"}`);
-    if (!dosPaneles) cerrarTodo();
+    setAviso(`${conZona.length} ${conZona.length === 1 ? "ejercicio añadido" : "ejercicios añadidos"} a ${bloque || "la sesión"}`);
+    if (!acoplado) cerrarTodo();
   };
 
   const elegirZona = async (zona) => {
@@ -1247,7 +1305,13 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
         const actualizado = await onAsignarZona(pendienteZona, zona);
         onAdd(actualizado);
       }
-      cerrarTodo();
+      if (colaZona.length) {
+        setPendienteZona(colaZona[0]);
+        setColaZona(colaZona.slice(1));
+      } else {
+        setPendienteZona(null);
+        if (!acoplado) cerrarTodo();
+      }
     } catch (e) {
       // Se deja el aviso abierto para reintentar sin perder la búsqueda.
     }
@@ -1255,7 +1319,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
   };
 
   const chip = (activo, onClick, txt) => (
-    <button key={txt} type="button" onClick={onClick} style={{ fontSize: 11, padding: "3px 9px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: "transparent", color: activo ? ds.accent : ds.inkSecondary, whiteSpace: "nowrap", fontWeight: activo ? 600 : 400 }}>
+    <button key={txt} type="button" onClick={onClick} style={{ fontSize: 12.5, minHeight: 36, padding: "0 12px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: "transparent", color: activo ? ds.accent : ds.inkSecondary, whiteSpace: "nowrap", fontWeight: activo ? 600 : 400 }}>
       {txt}
     </button>
   );
@@ -1264,17 +1328,16 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
     <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
       {opciones.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 12, padding: "8px 4px" }}>Sin resultados{filtro.trim() ? " — puedes crear uno nuevo con este nombre" : " con estos filtros"}</div>}
       {opciones.map((e) => {
-        const n = enSesion(e.id) + (anadidos[e.id] || 0);
+        const n = enSesion(e.id);
+        const marcado = !!seleccion[e.id];
         const sel = e.id === previsId;
         const miniatura = miniaturaTarea(e.gif_url);
         return (
           <div
             key={e.id}
-            onClick={() => (dosPaneles ? (setPrevisId(e.id), setVarianteVideo("")) : anadir(e))}
-            style={{ padding: "6px 8px", paddingLeft: e.esVariante ? 22 : 8, borderRadius: 6, cursor: "pointer", display: "flex", alignItems: "center", gap: 8, background: sel ? ds.border : "transparent" }}
-            onMouseEnter={(ev) => !sel && (ev.currentTarget.style.background = ds.border)}
-            onMouseLeave={(ev) => !sel && (ev.currentTarget.style.background = "transparent")}
-          >
+            onClick={() => { alternarSeleccion(e); if (dosPaneles) { setPrevisId(e.id); setVarianteVideo(""); } }}
+            style={{ minHeight: 56, padding: "6px 10px", paddingLeft: e.esVariante ? 24 : 10, borderRadius: 10, cursor: "pointer", display: "flex", alignItems: "center", gap: 10, marginBottom: 4, border: `1px solid ${marcado ? ds.accent : ds.border}`, background: marcado ? ds.accentSubtle : sel ? ds.border : "transparent", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
+                      >
             <div style={{ width: 34, height: 34, borderRadius: 6, background: "rgba(127,127,127,0.15)", flexShrink: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkMuted, fontSize: 11 }}>
               {miniatura ? <img src={miniatura} alt="" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : e.gif_url ? "▶" : ""}
             </div>
@@ -1285,11 +1348,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
               <span style={{ color: ds.inkMuted, fontSize: 10.5, fontFamily: dsF.mono }}>{(e.tags_descriptivos || []).join(" · ")}</span>
             </div>
             {n > 0 && <span style={{ fontSize: 10.5, color: ds.accent, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 999, padding: "1px 7px", flexShrink: 0 }}>en sesión ×{n}</span>}
-            {dosPaneles && (
-              <button type="button" onClick={(ev) => { ev.stopPropagation(); anadir(e); }} style={{ fontSize: 11.5, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "3px 8px", cursor: "pointer", flexShrink: 0 }}>
-                + Añadir
-              </button>
-            )}
+            <span aria-hidden="true" style={{ flexShrink: 0, width: 28, height: 28, borderRadius: 8, border: `2px solid ${marcado ? ds.accent : ds.borderMuted || ds.border}`, background: marcado ? ds.accent : "transparent", color: ds.accentInk, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center" }}>{marcado ? "✓" : ""}</span>
           </div>
         );
       })}
@@ -1327,57 +1386,81 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona }) {
               </div>
             </div>
           )}
-          <button type="button" onClick={() => anadir(ejPrevis)} style={{ marginTop: 12, width: "100%", fontSize: 12.5, fontWeight: 600, color: "#fff", background: ds.accent, border: "none", borderRadius: 8, padding: "8px 10px", cursor: "pointer" }}>
-            + Añadir a «{bloque || "sesión"}»
+          <button type="button" onClick={() => alternarSeleccion(ejPrevis)} style={{ marginTop: 12, width: "100%", fontSize: 13, fontWeight: 600, color: seleccion[ejPrevis.id] ? ds.accent : "#fff", background: seleccion[ejPrevis.id] ? "transparent" : ds.accent, border: `1px solid ${ds.accent}`, borderRadius: 10, minHeight: 44, padding: "8px 10px", cursor: "pointer" }}>
+            {seleccion[ejPrevis.id] ? "✓ Seleccionado · quitar" : "Seleccionar"}
           </button>
         </>
       )}
     </div>
   );
 
+  const campoBusqueda = (
+    <input autoFocus={!acoplado} value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar ejercicio..." style={{ width: "100%", minHeight: 46, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, padding: "6px 12px", marginBottom: 8, boxSizing: "border-box" }} />
+  );
+
+  const cuerpo = !pendienteZona ? (
+    <>
+      {campoBusqueda}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+        {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
+        {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
+        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, maxHeight: dosPaneles || acoplado ? undefined : "min(56dvh, 460px)" }}>
+        {lista}
+        {dosPaneles && panelPrevis}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+        <span style={{ flex: "1 1 100%", fontSize: 11.5, color: ds.accent, minHeight: 14 }}>{aviso}</span>
+        {!acoplado && <button type="button" onClick={cerrarTodo} style={{ minHeight: 48, fontSize: 13.5, fontWeight: 600, color: ds.ink, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 12, padding: "0 16px", cursor: "pointer" }}>Cerrar</button>}
+        <button type="button" disabled={!seleccionados.length} onClick={anadirSeleccion} style={{ flex: 1, minHeight: 48, fontSize: 14, fontWeight: 700, color: ds.accentInk, background: ds.accent, border: "none", borderRadius: 12, padding: "0 16px", cursor: seleccionados.length ? "pointer" : "default", opacity: seleccionados.length ? 1 : 0.45 }}>
+          {seleccionados.length ? `Añadir ${seleccionados.length} ${seleccionados.length === 1 ? "ejercicio" : "ejercicios"}` : "Marca los ejercicios a añadir"}
+        </button>
+      </div>
+    </>
+  ) : (
+    <div style={{ padding: 4 }}>
+      <div style={{ fontSize: 12.5, color: ds.accent, marginBottom: 10, lineHeight: 1.4 }}>
+        "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}{colaZona.length ? ` (quedan ${colaZona.length} más)` : ""}
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
+      </div>
+      <button onClick={() => { setPendienteZona(null); setColaZona([]); }} disabled={guardandoZona} style={{ marginTop: 10, minHeight: 40, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+        {guardandoZona ? "Guardando..." : "Cancelar"}
+      </button>
+    </div>
+  );
+
+  // Acoplada: la biblioteca vive siempre visible en la columna derecha.
+  if (acoplado) {
+    return (
+      <>
+        <div style={{ fontSize: 12.5, color: ds.inkSecondary, padding: "6px 2px" }}>Elige los ejercicios en la biblioteca de la derecha →</div>
+        {createPortal(
+          <div className="ds-reset" style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 12, boxSizing: "border-box" }}>
+            <div style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700, marginBottom: 8 }}>Biblioteca{bloque ? ` · ${bloque}` : ""}</div>
+            {cuerpo}
+          </div>,
+          slotBiblio
+        )}
+      </>
+    );
+  }
+
   return (
     <div style={{ position: "relative" }}>
-      <button onClick={() => setAbierto((v) => !v)} style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}>
-        + Añadir tarea desde biblioteca
+      <button onClick={() => setAbierto((v) => !v)} style={{ minHeight: 44, fontSize: 13.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "0 14px", cursor: "pointer", fontWeight: 600 }}>
+        + Añadir ejercicios desde biblioteca
       </button>
       {abierto && (
-        <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
-          <div onClick={(ev) => ev.stopPropagation()} style={{ width: "100%", maxWidth: dosPaneles ? 900 : 440, height: dosPaneles ? "min(80dvh, 640px)" : undefined, maxHeight: "86dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12 }}>
+        <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: dosPaneles ? "center" : "flex-end", justifyContent: "center", padding: dosPaneles ? 16 : 0 }}>
+          <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: dosPaneles ? 900 : 560, height: dosPaneles ? "min(80dvh, 640px)" : "92dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: dosPaneles ? 12 : "20px 20px 0 0", boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12, paddingBottom: dosPaneles ? 12 : "calc(12px + env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: dsF.display, fontSize: 13.5, fontWeight: 700 }}>Añadir ejercicio{bloque ? ` · ${bloque}` : ""}</span>
-              <button type="button" onClick={cerrarTodo} style={{ background: "none", border: "none", color: ds.inkMuted, fontSize: 18, cursor: "pointer", lineHeight: 1 }}>×</button>
+              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>Añadir a {bloque || "la sesión"}</span>
+              <button type="button" aria-label="Cerrar" onClick={cerrarTodo} style={{ width: 44, height: 44, background: "none", border: "none", color: ds.inkMuted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
             </div>
-            {!pendienteZona && (
-              <>
-                <input autoFocus value={filtro} onChange={(e) => setFiltro(e.target.value)} placeholder="Buscar ejercicio..." style={{ width: "100%", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px", marginBottom: 6, boxSizing: "border-box" }} />
-                <div style={{ display: "flex", gap: 4, flexWrap: "wrap", marginBottom: 6 }}>
-                  {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
-                  {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
-                  {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
-                </div>
-                <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, maxHeight: dosPaneles ? undefined : "min(52dvh, 420px)" }}>
-                  {lista}
-                  {dosPaneles && panelPrevis}
-                </div>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginTop: 8, minHeight: 28 }}>
-                  <span style={{ fontSize: 11.5, color: ds.accent }}>{aviso}</span>
-                  <button type="button" onClick={cerrarTodo} style={{ fontSize: 12.5, fontWeight: 600, color: ds.ink, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, padding: "6px 14px", cursor: "pointer" }}>Hecho</button>
-                </div>
-              </>
-            )}
-            {pendienteZona && (
-              <div style={{ padding: 4 }}>
-                <div style={{ fontSize: 11.5, color: ds.accent, marginBottom: 8, lineHeight: 1.4 }}>
-                  "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}
-                </div>
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
-                </div>
-                <button onClick={() => setPendienteZona(null)} disabled={guardandoZona} style={{ marginTop: 8, fontSize: 11, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
-                  {guardandoZona ? "Guardando..." : "Cancelar"}
-                </button>
-              </div>
-            )}
+            {cuerpo}
           </div>
         </div>
       )}
@@ -2099,6 +2182,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   const ancho = useAnchoVentana();
   const anchoDesktop = ancho >= 900;
   const lateralBloques = ancho >= 1100;
+  const [slotBiblio, setSlotBiblio] = useState(null);
   // Le dice a SelectorEjercicioReal cómo guardar la zona corporal de un
   // ejercicio antiguo que todavía no la tenía, y refresca la lista local
   // para que el cambio se vea sin recargar la pantalla.
@@ -3087,6 +3171,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
 
   return (
     <EnSesionContext.Provider value={conteoEnSesion}>
+    <BibliotecaSlotContext.Provider value={lateralBloques ? slotBiblio : null}>
     <>
     <PantallaBase rol="entrenador" maxWidth={lateralBloques ? 1320 : ancho >= 700 ? 900 : 640} layoutFijo>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
@@ -3360,7 +3445,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                           onAmpliarVideo={setVideoAmpliado}
                         />
                       ) : (
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
+                        <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
                       ))}
                     {modoMovilidad === "no_incluir" && (
                       <div style={{ fontSize: 12.5, color: ds.inkMuted, textAlign: "center" }}>Bloque desactivado — no se incluirá en esta sesión.</div>
@@ -3469,7 +3554,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                             onAmpliarVideo={setVideoAmpliado}
                           />
                         ))}
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
+                        <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
                       </div>
                     )}
                     {modoPreventivo === "no_incluir" && (
@@ -3514,7 +3599,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                     ))}
                     {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Core" onAplicar={aplicarAlternancia} />}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
+                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
@@ -3661,7 +3746,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                     ))}
                     {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Fuerza" onAplicar={aplicarAlternancia} />}
                     <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
+                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
                       <button
                         onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
                         style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
@@ -3676,6 +3761,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           </div>
 
           </div>
+          {lateralBloques && <div ref={setSlotBiblio} style={{ width: ["movilidad", "preventivo", "core", "fuerza"].includes(bloqueActivo) ? 360 : 0, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
           </div>
         </div>
 
@@ -3745,6 +3831,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       </div>
     )}
     </>
+    </BibliotecaSlotContext.Provider>
     </EnSesionContext.Provider>
   );
 }
