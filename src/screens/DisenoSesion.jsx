@@ -1918,8 +1918,27 @@ const COLOR_BLOQUE_DISENO = { activacion: "#7C6FB0", movilidad: "#5FA87A", preve
 // Tarjeta desplegable de un bloque del diseñador (estilo del prototipo):
 // barra de color a la izquierda, icono, nombre · resumen, y el contenido
 // del bloque solo cuando está abierta.
-function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children }) {
+function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children, navegador = false }) {
   const info = BLOQUES_DISENO.find((x) => x.id === id) || { nombre: id };
+  // Modo navegador: solo se ve el bloque elegido en la barra/columna de bloques,
+  // con su cabecera fija (sin desplegar/plegar).
+  if (navegador) {
+    if (!abierto) return null;
+    return (
+      <div style={{ background: ds.surfaceRaised, border: `1px solid ${color}`, borderLeft: `4px solid ${color}`, borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px" }}>
+          <span style={{ width: 28, height: 28, borderRadius: 8, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+            <IconoBloqueDiseno id={id} />
+          </span>
+          <span style={{ flex: 1, minWidth: 0, fontSize: 14, fontWeight: 800, color: ds.ink }}>
+            {info.nombre}
+            <span style={{ fontWeight: 600, fontSize: 12, color: vacio ? ds.inkMuted : ds.inkSecondary }}> · {resumen || (vacio ? "Vacío" : "")}</span>
+          </span>
+        </div>
+        <div style={{ padding: "4px 14px 14px" }}>{children}</div>
+      </div>
+    );
+  }
   return (
     <div style={{ background: abierto ? ds.surfaceRaised : ds.surface, border: `1px solid ${abierto ? color : ds.border}`, borderLeft: `4px solid ${color}`, borderRadius: 12, overflow: "hidden" }}>
       <div onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer" }}>
@@ -1934,6 +1953,59 @@ function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, chi
       </div>
       {abierto && <div style={{ padding: "4px 14px 14px" }}>{children}</div>}
     </div>
+  );
+}
+
+// Navegación de bloques del diseñador: pastillas arriba (móvil / iPad vertical)
+// o columna a la izquierda (iPad horizontal y ordenador). Solo se ve un bloque a
+// la vez; la estructura por bloques no cambia.
+function NavegadorBloquesDiseno({ bloques, activo, onElegir, lateral }) {
+  return (
+    <nav
+      aria-label="Bloques de la sesión"
+      style={
+        lateral
+          ? { width: 214, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 0, display: "flex", flexDirection: "column", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 8, boxSizing: "border-box" }
+          : { flexShrink: 0, display: "flex", gap: 8, overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 2 }
+      }
+    >
+      {bloques.map((b) => {
+        const on = b.id === activo;
+        return (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => onElegir(b.id)}
+            title={b.texto || undefined}
+            style={{
+              flexShrink: 0,
+              minHeight: 44,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: lateral ? "0 12px" : "0 14px",
+              borderRadius: lateral ? 10 : 999,
+              border: `1px solid ${on ? b.color : ds.border}`,
+              background: on ? ds.accentSubtle : lateral ? "transparent" : ds.surface,
+              color: on ? ds.accent : ds.inkSecondary,
+              fontFamily: dsF.sans,
+              fontSize: 13.5,
+              fontWeight: on ? 700 : 600,
+              cursor: "pointer",
+              whiteSpace: "nowrap",
+              textAlign: "left",
+              touchAction: "manipulation",
+              WebkitTapHighlightColor: "transparent",
+            }}
+          >
+            <span style={{ width: 10, height: 10, borderRadius: "50%", background: b.color, flexShrink: 0, opacity: b.vacio ? 0.35 : 1 }} />
+            <span style={{ flex: lateral ? 1 : undefined }}>{b.nombre}</span>
+            {lateral && b.texto && <span style={{ fontSize: 11, fontWeight: 600, color: ds.inkMuted, maxWidth: 84, overflow: "hidden", textOverflow: "ellipsis" }}>{b.texto}</span>}
+            {!lateral && !b.vacio && <span style={{ width: 6, height: 6, borderRadius: "50%", background: ds.accent }} />}
+          </button>
+        );
+      })}
+    </nav>
   );
 }
 
@@ -2026,6 +2098,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // PantallaEntrenadorAncha para el resto de pantallas "anchas" de la app.
   const ancho = useAnchoVentana();
   const anchoDesktop = ancho >= 900;
+  const lateralBloques = ancho >= 1100;
   // Le dice a SelectorEjercicioReal cómo guardar la zona corporal de un
   // ejercicio antiguo que todavía no la tenía, y refresca la lista local
   // para que el cambio se vea sin recargar la pantalla.
@@ -2127,6 +2200,10 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // Paso activo en el nav de la izquierda — el constructor (columna central)
   // solo renderiza el contenido de este bloque, en vez de los 7 apilados.
   const [bloqueActivo, setBloqueActivo] = useState(BLOQUES_DISENO[0].id);
+  // Con la navegación por bloques siempre debe haber uno elegido.
+  useEffect(() => {
+    if (!bloqueActivo) setBloqueActivo(BLOQUES_DISENO[0].id);
+  }, [bloqueActivo]);
 
   const [tareasCore, setTareasCore] = useState([]);
   const [circuitosCore, setCircuitosCore] = useState([]);
@@ -2990,6 +3067,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     if (sinSeries.length) avisos.push(`${sinSeries.length} ejercicio(s) de Fuerza sin series o repeticiones: no cuentan en el tiempo estimado.`);
     return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs), porZona, descansoMedio: media(descansos), repsTotales, segTrabajo: segFuerza }, filasDescanso, sugerencias, avisos };
   })();
+  const datosNavegadorBloques = BLOQUES_DISENO.map((b) => ({
+    id: b.id,
+    nombre: b.nombre,
+    color: COLOR_BLOQUE_DISENO[b.id],
+    vacio: !!resumenDiseno.bloques.find((x) => x.id === b.id)?.vacio,
+    texto: resumenBloque(b.id),
+  }));
 
   // Cuántas veces está cada ejercicio ya en la sesión — lo consume el selector
   // para marcar «en sesión ×N» sin que el entrenador repita por error.
@@ -3004,7 +3088,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   return (
     <EnSesionContext.Provider value={conteoEnSesion}>
     <>
-    <PantallaBase rol="entrenador" maxWidth={anchoDesktop ? 1180 : 640} layoutFijo>
+    <PantallaBase rol="entrenador" maxWidth={lateralBloques ? 1320 : ancho >= 700 ? 900 : 640} layoutFijo>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         <div style={{ flexShrink: 0, maxHeight: "44%", overflowY: "auto" }}>
         <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -3175,11 +3259,14 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
 
           <BarraResumenDisenoReal resumen={resumenDiseno} bloqueActivo={bloqueActivo} onIrBloque={setBloqueActivo} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
+          {!lateralBloques && <NavegadorBloquesDiseno bloques={datosNavegadorBloques} activo={bloqueActivo} onElegir={setBloqueActivo} lateral={false} />}
+          <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch" }}>
+          {lateralBloques && <NavegadorBloquesDiseno bloques={datosNavegadorBloques} activo={bloqueActivo} onElegir={setBloqueActivo} lateral />}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
           {/* Constructor: una tarjeta desplegable por bloque. */}
           <div style={{ flex: "0 0 auto", width: "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box" }}>
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <TarjetaBloqueDiseno id="activacion" abierto={bloqueActivo === "activacion"} onToggle={() => setBloqueActivo((p) => (p === "activacion" ? null : "activacion"))} resumen={resumenBloque("activacion")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "activacion")?.vacio} color={COLOR_BLOQUE_DISENO["activacion"]}>
+                <TarjetaBloqueDiseno navegador id="activacion" abierto={bloqueActivo === "activacion"} onToggle={() => setBloqueActivo((p) => (p === "activacion" ? null : "activacion"))} resumen={resumenBloque("activacion")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "activacion")?.vacio} color={COLOR_BLOQUE_DISENO["activacion"]}>
                 {bloqueActivo === "activacion" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div onClick={() => setActivacionActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
@@ -3239,7 +3326,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="movilidad" abierto={bloqueActivo === "movilidad"} onToggle={() => setBloqueActivo((p) => (p === "movilidad" ? null : "movilidad"))} resumen={resumenBloque("movilidad")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "movilidad")?.vacio} color={COLOR_BLOQUE_DISENO["movilidad"]}>
+                <TarjetaBloqueDiseno navegador id="movilidad" abierto={bloqueActivo === "movilidad"} onToggle={() => setBloqueActivo((p) => (p === "movilidad" ? null : "movilidad"))} resumen={resumenBloque("movilidad")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "movilidad")?.vacio} color={COLOR_BLOQUE_DISENO["movilidad"]}>
                 {bloqueActivo === "movilidad" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <select value={modoMovilidad} onChange={(e) => { setModoMovilidad(e.target.value); setConservarMovilidad(false); }} style={campoSelectReal({ maxWidth: 220 })}>
@@ -3281,7 +3368,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="preventivo" abierto={bloqueActivo === "preventivo"} onToggle={() => setBloqueActivo((p) => (p === "preventivo" ? null : "preventivo"))} resumen={resumenBloque("preventivo")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "preventivo")?.vacio} color={COLOR_BLOQUE_DISENO["preventivo"]}>
+                <TarjetaBloqueDiseno navegador id="preventivo" abierto={bloqueActivo === "preventivo"} onToggle={() => setBloqueActivo((p) => (p === "preventivo" ? null : "preventivo"))} resumen={resumenBloque("preventivo")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "preventivo")?.vacio} color={COLOR_BLOQUE_DISENO["preventivo"]}>
                 {bloqueActivo === "preventivo" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <select value={modoPreventivo} onChange={(e) => { setModoPreventivo(e.target.value); setConservarPreventivo(false); }} style={campoSelectReal({ maxWidth: 220 })}>
@@ -3391,7 +3478,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
+                <TarjetaBloqueDiseno navegador id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
                 {bloqueActivo === "core" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasCore.map((t) => (
@@ -3438,7 +3525,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="resistencia" abierto={bloqueActivo === "resistencia"} onToggle={() => setBloqueActivo((p) => (p === "resistencia" ? null : "resistencia"))} resumen={resumenBloque("resistencia")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "resistencia")?.vacio} color={COLOR_BLOQUE_DISENO["resistencia"]}>
+                <TarjetaBloqueDiseno navegador id="resistencia" abierto={bloqueActivo === "resistencia"} onToggle={() => setBloqueActivo((p) => (p === "resistencia" ? null : "resistencia"))} resumen={resumenBloque("resistencia")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "resistencia")?.vacio} color={COLOR_BLOQUE_DISENO["resistencia"]}>
                 {bloqueActivo === "resistencia" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {tareasResistencia.map((t) => (
@@ -3504,7 +3591,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="cmj" abierto={bloqueActivo === "cmj"} onToggle={() => setBloqueActivo((p) => (p === "cmj" ? null : "cmj"))} resumen={resumenBloque("cmj")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "cmj")?.vacio} color={COLOR_BLOQUE_DISENO["cmj"]}>
+                <TarjetaBloqueDiseno navegador id="cmj" abierto={bloqueActivo === "cmj"} onToggle={() => setBloqueActivo((p) => (p === "cmj" ? null : "cmj"))} resumen={resumenBloque("cmj")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "cmj")?.vacio} color={COLOR_BLOQUE_DISENO["cmj"]}>
                 {bloqueActivo === "cmj" && (
                   <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
                     <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
@@ -3514,7 +3601,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   </div>
                 )}
                 </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="fuerza" abierto={bloqueActivo === "fuerza"} onToggle={() => setBloqueActivo((p) => (p === "fuerza" ? null : "fuerza"))} resumen={resumenBloque("fuerza")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "fuerza")?.vacio} color={COLOR_BLOQUE_DISENO["fuerza"]}>
+                <TarjetaBloqueDiseno navegador id="fuerza" abierto={bloqueActivo === "fuerza"} onToggle={() => setBloqueActivo((p) => (p === "fuerza" ? null : "fuerza"))} resumen={resumenBloque("fuerza")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "fuerza")?.vacio} color={COLOR_BLOQUE_DISENO["fuerza"]}>
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
@@ -3588,6 +3675,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
               </div>
           </div>
 
+          </div>
           </div>
         </div>
 
