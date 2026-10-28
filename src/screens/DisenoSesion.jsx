@@ -3891,3 +3891,4 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     </EnSesionContext.Provider>
   );
 }
+ 
