@@ -578,7 +578,7 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
   );
 }
 
-function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio }) {
+function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio, onSubir, onBajar, onEliminar }) {
   const ancho = useAnchoVentana();
   const lateral = ancho >= 700;
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -681,7 +681,14 @@ function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materi
           <NotaTareaReal nota={tarea.nota} onCambiar={(n) => onCambiar({ ...tarea, nota: n })} />
         </div>
 
-        <div style={{ padding: "10px 16px calc(14px + env(safe-area-inset-bottom))", borderTop: `1px solid ${ds.border}` }}>
+        <div style={{ padding: "10px 16px calc(14px + env(safe-area-inset-bottom))", borderTop: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 8 }}>
+          {(onSubir || onBajar || onEliminar) && (
+            <div style={{ display: "flex", gap: 6 }}>
+              {onSubir && <button type="button" onClick={() => { onSubir(); onCerrar(); }} style={{ flex: 1, minHeight: 44, borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink, fontFamily: dsF.sans, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>↑ Subir</button>}
+              {onBajar && <button type="button" onClick={() => { onBajar(); onCerrar(); }} style={{ flex: 1, minHeight: 44, borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink, fontFamily: dsF.sans, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>↓ Bajar</button>}
+              {onEliminar && <button type="button" onClick={() => { onEliminar(); onCerrar(); }} style={{ flex: 1, minHeight: 44, borderRadius: 10, border: `1px solid ${ds.dangerBorderSubtle}`, background: "transparent", color: ds.danger, fontFamily: dsF.sans, fontSize: 13, fontWeight: 600, cursor: "pointer" }}>Quitar</button>}
+            </div>
+          )}
           <button type="button" onClick={onCerrar} style={{ width: "100%", minHeight: 50, borderRadius: 12, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 15, fontFamily: dsF.sans, cursor: "pointer" }}>
             Hecho
           </button>
@@ -714,15 +721,32 @@ function datosSuperserie(tareas) {
   });
 }
 
+// Encabezado de columnas de la tabla (iPad horizontal): las columnas tienen los
+// mismos anchos que las celdas de FilaTareaReal para que queden alineadas.
+function EncabezadoTablaTareas({ mostrarCarga }) {
+  const col = (t, w) => <span style={{ width: w, flexShrink: 0, textAlign: "center", fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.04em", color: ds.inkMuted, textTransform: "uppercase" }}>{t}</span>;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 9px 0 11px" }}>
+      <span style={{ flex: 1, minWidth: 0, fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.04em", color: ds.inkMuted, textTransform: "uppercase" }}>Ejercicio</span>
+      {col("Series", 56)}
+      {col("Cant.", 56)}
+      {mostrarCarga && col("Carga", 84)}
+      {col("Desc.", 60)}
+      <span style={{ width: 40, flexShrink: 0 }} />
+      <span style={{ width: 32, flexShrink: 0 }} />
+    </div>
+  );
+}
+
 function estiloCeldaTabla(alerta) {
   return { width: "100%", height: 44, textAlign: "center", fontWeight: 700, fontFamily: dsF.sans, background: ds.surface, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 10, color: alerta ? ds.danger : ds.ink, boxSizing: "border-box" };
 }
-function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho) {
+function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "", apagada = false) {
   return (
-    <label key={etiqueta} style={{ display: "flex", flexDirection: "column", gap: 2, width: ancho, flexShrink: 0 }}>
-      <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted, minHeight: 14 }}>{etiqueta}</span>
-      <input value={valor ?? ""} inputMode="numeric" onChange={(e) => onCambiar(e.target.value.replace(/[^0-9]/g, ""))} placeholder={placeholder} style={estiloCeldaTabla(false)} />
-    </label>
+    <div key={etiqueta} style={{ position: "relative", width: ancho, flexShrink: 0, opacity: apagada ? 0.5 : 1 }}>
+      <input aria-label={etiqueta} value={valor ?? ""} inputMode="numeric" onChange={(e) => onCambiar(e.target.value.replace(/[^0-9]/g, ""))} placeholder={placeholder} style={estiloCeldaTabla(false)} />
+      {unidad && valor !== "" && valor != null && <span style={{ position: "absolute", right: 6, bottom: 3, fontSize: 9, color: ds.inkMuted, pointerEvents: "none" }}>{unidad}</span>}
+    </div>
   );
 }
 
@@ -763,7 +787,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
   return (
     <>
-    <div style={{ padding: "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 6 }}>
+    <div style={{ padding: enSuperserie ? "6px 8px 6px 7px" : "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 6 }}>
       <div
         role="button"
         tabIndex={0}
@@ -812,28 +836,28 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
       </div>
       {tabla && (
         <>
-          {celdaTabla("SERIES", tarea.series, (v) => onCambiar({ ...tarea, series: v }), "—", 64)}
-          {celdaTabla(({ reps: "REPS", tiempo: "SEG", minutos: "MIN", metros: "M" })[tarea.modo] || "REPS", tarea.cantidad, (v) => onCambiar({ ...tarea, cantidad: v }), "—", 72)}
+          {celdaTabla("Series", tarea.series, (v) => onCambiar({ ...tarea, series: v }), "—", 56)}
+          {celdaTabla("Cantidad", tarea.cantidad, (v) => onCambiar({ ...tarea, cantidad: v }), "—", 56, ({ reps: "", tiempo: "s", minutos: "min", metros: "m" })[tarea.modo] || "")}
           {mostrarCarga && (
-            <div style={{ display: "flex", flexDirection: "column", gap: 2, width: 84, flexShrink: 0 }}>
-              <button type="button" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ background: "none", border: "none", padding: 0, textAlign: "left", fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.accent, cursor: "pointer", minHeight: 14 }}>
-                {tarea.modoCarga === "pct1rm" ? "% 1RM" : "RIR"} ⇄
+            <div style={{ display: "flex", gap: 4, width: 84, flexShrink: 0 }}>
+              <button type="button" aria-label="Cambiar entre RIR y % del 1RM" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ width: 34, height: 44, flexShrink: 0, borderRadius: 10, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontFamily: dsF.mono, fontSize: 10.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+                {tarea.modoCarga === "pct1rm" ? "%" : "RIR"}
               </button>
               {tarea.modoCarga === "pct1rm"
-                ? <input value={tarea.pct1rm ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value.replace(/[^0-9]/g, ""), pct1rmOrigen: undefined })} placeholder="—" style={estiloCeldaTabla(false)} />
-                : <input value={tarea.rir ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, rir: e.target.value.replace(/[^0-9]/g, "") })} placeholder="—" style={estiloCeldaTabla(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10)} />}
+                ? <input aria-label="Porcentaje del 1RM" value={tarea.pct1rm ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value.replace(/[^0-9]/g, ""), pct1rmOrigen: undefined })} placeholder="—" style={{ ...estiloCeldaTabla(false), flex: 1, minWidth: 0 }} />
+                : <input aria-label="RIR" value={tarea.rir ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, rir: e.target.value.replace(/[^0-9]/g, "") })} placeholder="—" style={{ ...estiloCeldaTabla(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10), flex: 1, minWidth: 0 }} />}
             </div>
           )}
-          {Number(tarea.series) > 1 && celdaTabla("DESC. s", tarea.descanso, (v) => onCambiar({ ...tarea, descanso: v }), String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—"), 72)}
-          {tabla && <button type="button" title="Más opciones: medida, lado, material, nota" onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 44, height: 44, fontSize: 16, flexShrink: 0 }}>⋯</button>}
+          {celdaTabla("Descanso (s)", tarea.descanso, (v) => onCambiar({ ...tarea, descanso: v }), Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—", 60, "", Number(tarea.series) <= 1)}
+          <button type="button" title="Más opciones: medida, lado, material, nota, mover" onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 40, height: 44, fontSize: 16, flexShrink: 0 }}>⋯</button>
         </>
       )}
-      {onSubir && (
+      {!tabla && onSubir && (
         <button onClick={onSubir} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover antes">
           ↑
         </button>
       )}
-      {onBajar && (
+      {!tabla && onBajar && (
         <button onClick={onBajar} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover después">
           ↓
         </button>
@@ -842,7 +866,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         ×
       </button>
       {abierta && (
-        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} />
+        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />
       )}
     </div>
     {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
@@ -1354,7 +1378,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
   };
 
   const chip = (activo, onClick, txt) => (
-    <button key={txt} type="button" onClick={onClick} style={{ fontSize: 12.5, minHeight: 36, padding: "0 12px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: "transparent", color: activo ? ds.accent : ds.inkSecondary, whiteSpace: "nowrap", fontWeight: activo ? 600 : 400 }}>
+    <button key={txt} type="button" onClick={onClick} style={{ flexShrink: 0, fontSize: 12.5, minHeight: 36, padding: "0 12px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: "transparent", color: activo ? ds.accent : ds.inkSecondary, whiteSpace: "nowrap", fontWeight: activo ? 600 : 400 }}>
       {txt}
     </button>
   );
@@ -1436,7 +1460,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
   const cuerpo = !pendienteZona ? (
     <>
       {campoBusqueda}
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+      <div style={{ display: "flex", gap: 6, flexWrap: acoplado ? "nowrap" : "wrap", overflowX: acoplado ? "auto" : undefined, flexShrink: 0, marginBottom: 8, paddingBottom: acoplado ? 2 : 0 }}>
         {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
         {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
         {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
@@ -2083,7 +2107,7 @@ function NavegadorBloquesDiseno({ bloques, activo, onElegir, lateral }) {
       aria-label="Bloques de la sesión"
       style={
         lateral
-          ? { width: 214, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 0, display: "flex", flexDirection: "column", gap: 6, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 8, boxSizing: "border-box" }
+          ? { width: 190, flexShrink: 0, alignSelf: "stretch", minHeight: 0, maxHeight: "100%", overflowY: "auto", overscrollBehavior: "contain", display: "flex", flexDirection: "column", gap: 3, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 6, boxSizing: "border-box" }
           : { flexShrink: 0, display: "flex", gap: 8, overflowX: "auto", WebkitOverflowScrolling: "touch", paddingBottom: 2 }
       }
     >
@@ -2097,7 +2121,7 @@ function NavegadorBloquesDiseno({ bloques, activo, onElegir, lateral }) {
             title={b.texto || undefined}
             style={{
               flexShrink: 0,
-              minHeight: 44,
+              minHeight: lateral ? 36 : 44,
               display: "flex",
               alignItems: "center",
               gap: 8,
@@ -3259,8 +3283,8 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
             del mockup: cabecera con chevron + resumen de una línea, cuerpo
             en rejilla que se despliega al clicar. Ahorra el espacio vertical
             que antes se comía siempre, incluso una vez ya rellenada. */}
-        <div style={{ marginBottom: 10, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: anchoDesktop ? "2fr 1fr" : "1fr", gap: 12, padding: "12px 14px" }}>
+        <div style={{ marginBottom: 10, pointerEvents: readOnly ? "none" : undefined, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, overflow: "hidden", ...(lateralBloques ? { display: "flex", flexWrap: "wrap", alignItems: "flex-end" } : null) }}>
+          <div style={{ display: "grid", gridTemplateColumns: anchoDesktop ? "2fr 1fr" : "1fr", gap: 12, padding: lateralBloques ? "10px 14px" : "12px 14px", ...(lateralBloques ? { flex: "1 1 520px", minWidth: 0 } : null) }}>
             <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
               <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Nombre de la sesión</span>
               <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Fuerza tren inferior" style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, fontSize: 14, fontWeight: 600, padding: "9px 11px" }} />
@@ -3271,7 +3295,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
             </label>
           </div>
           {/* Destinatarios — visible y directo, sin abrir el modal de configuración */}
-          <div style={{ padding: "0 14px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+          <div style={{ padding: lateralBloques && targetPlayerIds === null ? "0 14px 10px 0" : "0 14px 12px", display: "flex", flexDirection: "column", gap: lateralBloques && targetPlayerIds === null ? 4 : 8, ...(lateralBloques ? { flex: targetPlayerIds === null ? "0 0 auto" : "1 1 100%" } : null) }}>
             <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>¿Para quién es?</span>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
               {[
@@ -3387,7 +3411,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
 
           <BarraResumenDisenoReal resumen={resumenDiseno} bloqueActivo={bloqueActivo} onIrBloque={setBloqueActivo} />
           {!lateralBloques && <NavegadorBloquesDiseno bloques={datosNavegadorBloques} activo={bloqueActivo} onElegir={setBloqueActivo} lateral={false} />}
-          <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch" }}>
+          <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
           {lateralBloques && <NavegadorBloquesDiseno bloques={datosNavegadorBloques} activo={bloqueActivo} onElegir={setBloqueActivo} lateral />}
           <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
           {/* Constructor: una tarjeta desplegable por bloque. */}
@@ -3608,6 +3632,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 <TarjetaBloqueDiseno navegador id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
                 {bloqueActivo === "core" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {lateralBloques && tareasCore.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
                     {tareasCore.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
@@ -3735,6 +3760,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
+                    {lateralBloques && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
@@ -3808,7 +3834,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           </div>
 
           </div>
-          {lateralBloques && <div ref={setSlotBiblio} style={{ width: ["movilidad", "preventivo", "core", "fuerza"].includes(bloqueActivo) ? 360 : 0, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
+          {lateralBloques && <div ref={setSlotBiblio} style={{ width: ["movilidad", "preventivo", "core", "fuerza"].includes(bloqueActivo) ? 320 : 0, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
           </div>
         </div>
 
