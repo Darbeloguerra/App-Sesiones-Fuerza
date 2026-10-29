@@ -18,7 +18,7 @@ import {
 import { formatearDuracionDiseno } from "../calc/duracionTarea.js";
 import { parseResistenciaData, pesoTareaAdherencia, crearFraccionCumplida, tareasHechasPorJugadorFecha } from "../calc/adherencia.js";
 import { cmjDeltaMismoDiaCicloAnterior, CMJ_METRICS, CMJ_METRIC_LIST, cmjBuildPlayers, CMJ_UMBRAL_DEFECTO } from "../calc/cmj.js";
-import { e1rmDeValores, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea, calcularCargaSugerida, fatigaTarea } from "../calc/e1rm.js";
+import { e1rmDeValores, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea, calcularCargaSugerida, fatigaTarea, interpretarFatiga } from "../calc/e1rm.js";
 import { PantallaBase } from "../core/layout.jsx";
 import { VideoEmbed, LoadingBlock, GraficaProgresoCargaReal } from "../core/components.jsx";
 import {
@@ -770,9 +770,13 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                     {campo("ultRir", "RIR", "—", ds.border)}
                   </div>
                   {f ? (
-                    <div style={{ fontSize: 12, fontWeight: 600, color: colorNivel }}>
-                      Fatiga en la tarea: {f.caidaPct <= 0 ? "ninguna" : `−${Math.round(f.caidaPct)} %`}
-                      {f.repsPerdidas > 0 ? ` · ${f.repsPerdidas} rep${f.repsPerdidas === 1 ? "" : "s"} menos que en la mejor` : ""}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: colorNivel }}>
+                        Fatiga en la tarea: {f.caidaPct <= 0 ? "ninguna" : `−${Math.round(f.caidaPct)} % de rendimiento`}
+                        {f.repsPerdidas > 0 ? ` · ${f.repsPerdidas} rep${f.repsPerdidas === 1 ? "" : "s"} menos (−${Math.round(f.repsPerdidasPct)} %)` : f.soloRir ? " · por tu RIR" : ""}
+                      </div>
+                      <div style={{ fontSize: 12, color: ds.inkSecondary, lineHeight: 1.4 }}>{interpretarFatiga(f)}</div>
+                      <div style={{ fontSize: 10.5, color: ds.inkMuted, lineHeight: 1.4 }}>Orientativo: se calcula con lo que anotas (reps y RIR) y depende también de tu sueño y descanso.</div>
                     </div>
                   ) : (
                     <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.4 }}>Anota reps y RIR de la última serie (déjalo en blanco la carga si fue la misma). Con eso la app mide cuánto te cansaste dentro de la tarea.</div>
