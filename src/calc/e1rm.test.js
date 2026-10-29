@@ -23,9 +23,15 @@ test("pct1RMporRTF: valores exactos de tabla y punto medio interpolado", () => {
   assert.equal(pct1RMporRTF(2.5), (TABLA_PCT_1RM_POR_RTF[2] + TABLA_PCT_1RM_POR_RTF[3]) / 2);
 });
 
-test("pct1RMporRTF: RTF fuera de rango se acota a [1, 10]", () => {
+test("pct1RMporRTF: RTF fuera de rango se acota a [1, 15]", () => {
   assert.equal(pct1RMporRTF(0), TABLA_PCT_1RM_POR_RTF[1]);
-  assert.equal(pct1RMporRTF(15), TABLA_PCT_1RM_POR_RTF[10]);
+  assert.equal(pct1RMporRTF(20), TABLA_PCT_1RM_POR_RTF[15]);
+});
+
+test("pct1RMporRTF: por encima de RTF 10 el %1RM sigue bajando (antes se quedaba en 75 %)", () => {
+  assert.ok(pct1RMporRTF(13) < pct1RMporRTF(10));
+  // 10 reps RIR 3 con 100 kg: e1RM ~147, no 133
+  assert.ok(e1rmDeValores(100, 10, 3) > 145);
 });
 
 test("e1rmDeValores: carga dividida por el %1RM del RTF", () => {
