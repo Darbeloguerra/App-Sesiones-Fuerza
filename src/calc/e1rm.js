@@ -13,7 +13,13 @@
 // RTS/Tuchscherer. Es una tabla GENERALISTA (mismo valor para cualquier
 // ejercicio) — el margen de error real es de varios puntos porcentuales,
 // mayor cuanto más se aleje el RTF de 1-10 o más difieran las reps.
-export const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75 };
+// De 11 a 15 se continúa con la media de Epley y Brzycki. ANTES la tabla se
+// cortaba en 10 y todo RTF mayor se trataba como 10 (75 %): una serie de
+// 10 reps con RIR 3 (RTF 13) daba un e1RM ~9 % por debajo del real, y una de
+// 12 reps RIR 2 (RTF 14) ~12 % por debajo — de ahí las cargas sugeridas
+// demasiado bajas al pautar por %1RM o por RIR a partir de esas marcas.
+export const RTF_MAX_TABLA = 15;
+export const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75, 11: 0.73, 12: 0.7, 13: 0.68, 14: 0.66, 15: 0.64 };
 
 // Por encima de ~12 repeticiones, el RIR reportado por el jugador deja de
 // ser fiable (la relación reps-%1RM ya no es lineal y la autopercepción del
@@ -24,10 +30,10 @@ export const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87
 export const REPS_MAX_RIR_FIABLE = 12;
 
 export function pct1RMporRTF(rtf) {
-  const rtfClamp = Math.max(1, Math.min(10, rtf));
+  const rtfClamp = Math.max(1, Math.min(RTF_MAX_TABLA, rtf));
   const base = Math.floor(rtfClamp);
   const resto = rtfClamp - base;
-  if (resto === 0 || base >= 10) return TABLA_PCT_1RM_POR_RTF[base];
+  if (resto === 0 || base >= RTF_MAX_TABLA) return TABLA_PCT_1RM_POR_RTF[base];
   return TABLA_PCT_1RM_POR_RTF[base] + (TABLA_PCT_1RM_POR_RTF[base + 1] - TABLA_PCT_1RM_POR_RTF[base]) * resto;
 }
 
