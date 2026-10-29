@@ -1036,6 +1036,9 @@ export function usePlayerHistory(playerId) {
       rirReal: r.ignorar ? "" : r.rir ?? "",
       repsReal: r.ignorar ? "" : r.reps_hechas ?? "",
       seriesHechas: r.series_hechas ?? "",
+      ultimaRepsReal: r.ignorar ? "" : r.ultima_reps ?? "",
+      ultimaCargaReal: r.ignorar ? "" : r.ultima_carga_kg ?? "",
+      ultimaRirReal: r.ignorar ? "" : r.ultima_rir ?? "",
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
@@ -1104,6 +1107,9 @@ export function useEquipoHistory() {
       subtipoCorporal: r.subtipo_corporal || "",
       sets: t.series,
       seriesHechas: r.series_hechas ?? "",
+      ultimaRepsReal: r.ignorar ? "" : r.ultima_reps ?? "",
+      ultimaCargaReal: r.ignorar ? "" : r.ultima_carga_kg ?? "",
+      ultimaRirReal: r.ignorar ? "" : r.ultima_rir ?? "",
     };
   });
   return { loaded: true, items };
