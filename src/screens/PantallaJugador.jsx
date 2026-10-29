@@ -18,7 +18,7 @@ import {
 import { formatearDuracionDiseno } from "../calc/duracionTarea.js";
 import { parseResistenciaData, pesoTareaAdherencia, crearFraccionCumplida, tareasHechasPorJugadorFecha } from "../calc/adherencia.js";
 import { cmjDeltaMismoDiaCicloAnterior, CMJ_METRICS, CMJ_METRIC_LIST, cmjBuildPlayers, CMJ_UMBRAL_DEFECTO } from "../calc/cmj.js";
-import { e1rmDeValores, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea, calcularCargaSugerida } from "../calc/e1rm.js";
+import { e1rmDeValores, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea, calcularCargaSugerida, fatigaTarea } from "../calc/e1rm.js";
 import { PantallaBase } from "../core/layout.jsx";
 import { VideoEmbed, LoadingBlock, GraficaProgresoCargaReal } from "../core/components.jsx";
 import {
@@ -736,6 +736,50 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
                 </div>
               );
             })()}
+            {(() => {
+              // Última serie (opcional): con la mejor serie de arriba permite medir cuánta fatiga hubo dentro de la tarea.
+              const pautadas = Number(tarea.series);
+              const hechas = registro.series !== "" && registro.series != null ? Number(registro.series) : pautadas;
+              const pideRirAqui = tarea.pideRir !== false || necesitaCalibrarE1rm(tarea, registro);
+              if (!Number.isFinite(hechas) || hechas < 2 || !pideRirAqui || registro.subtipo === "asistencia" || (tarea.unidad && tarea.unidad !== "reps")) return null;
+              const campo = (clave, etiqueta, placeholder, subrayado) => (
+                <label style={{ display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+                  <EtiquetaCampoReal>{etiqueta}</EtiquetaCampoReal>
+                  <input
+                    value={registro[clave] ?? ""}
+                    inputMode="decimal"
+                    onChange={(e) => onCambiarRegistro({ ...registro, [clave]: e.target.value })}
+                    placeholder={placeholder}
+                    style={{ background: "transparent", border: "none", borderBottom: `2px solid ${subrayado}`, color: ds.ink, fontFamily: dsF.mono, fontSize: 17, fontWeight: 700, padding: "2px 0 6px", textAlign: "center", outline: "none", width: "100%" }}
+                  />
+                </label>
+              );
+              const igual = () => onCambiarRegistro({ ...registro, ultReps: registro.reps, ultCarga: registro.carga, ultRir: registro.rir });
+              const f = fatigaTarea({ cargaReal: registro.carga, repsReal: registro.reps, rirReal: registro.rir, ultimaCargaReal: registro.ultCarga, ultimaRepsReal: registro.ultReps, ultimaRirReal: registro.ultRir });
+              const colorNivel = f ? (f.nivel === "alta" ? ds.danger : f.nivel === "moderada" ? ds.accent : ds.success) : ds.inkMuted;
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, borderTop: `1px solid ${ds.border}`, paddingTop: 10 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <EtiquetaCampoReal>ÚLTIMA SERIE (OPCIONAL)</EtiquetaCampoReal>
+                    <span style={{ flex: 1 }} />
+                    <ChipSeleccionableReal activo={false} onClick={igual}>Igual que la mejor</ChipSeleccionableReal>
+                  </div>
+                  <div style={{ display: "flex", gap: 12 }}>
+                    {campo("ultReps", (tarea.unidad || "reps").toUpperCase(), registro.reps || "—", ds.border)}
+                    {campo("ultCarga", "CARGA KG", registro.carga || "—", ds.border)}
+                    {campo("ultRir", "RIR", "—", ds.border)}
+                  </div>
+                  {f ? (
+                    <div style={{ fontSize: 12, fontWeight: 600, color: colorNivel }}>
+                      Fatiga en la tarea: {f.caidaPct <= 0 ? "ninguna" : `−${Math.round(f.caidaPct)} %`}
+                      {f.repsPerdidas > 0 ? ` · ${f.repsPerdidas} rep${f.repsPerdidas === 1 ? "" : "s"} menos que en la mejor` : ""}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.4 }}>Anota reps y RIR de la última serie (déjalo en blanco la carga si fue la misma). Con eso la app mide cuánto te cansaste dentro de la tarea.</div>
+                  )}
+                </div>
+              );
+            })()}
             {necesitaCalibrarE1rm(tarea, registro) && (
               <div style={{ fontSize: 11, color: ds.accent, lineHeight: 1.4 }}>
                 * Es la primera vez con este ejercicio: anota reps y RIR (cuántas repeticiones te quedaban antes del fallo). Con eso la app calcula tu 1RM estimado y, la próxima vez, te recomienda la carga.
@@ -1358,7 +1402,7 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
       const r = registrosByTarea.get(id);
       if (r && r.enviado === false) {
         hechoInicial[id] = true;
-        registroInicial[id] = { reps: r.reps_hechas ?? "", carga: r.carga_kg ?? "", rir: r.rir ?? "", subtipo: r.subtipo_corporal || "", series: r.series_hechas ?? "" };
+        registroInicial[id] = { reps: r.reps_hechas ?? "", carga: r.carga_kg ?? "", rir: r.rir ?? "", subtipo: r.subtipo_corporal || "", series: r.series_hechas ?? "", ultReps: r.ultima_reps ?? "", ultCarga: r.ultima_carga_kg ?? "", ultRir: r.ultima_rir ?? "" };
       }
     });
     if (Object.keys(hechoInicial).length) {
@@ -2027,7 +2071,7 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
   const getRegistro = (id) => {
     if (registrosDraft[id]) return registrosDraft[id];
     const t = tareasVisualesById.get(id);
-    return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "", series: "" };
+    return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "", series: "", ultReps: "", ultCarga: "", ultRir: "" };
   };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
 
@@ -2108,6 +2152,10 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
           carga_kg: draft.carga,
           rir: draft.rir,
           subtipo_corporal: draft.subtipo || "",
+          // Última serie (opcional): sirve para medir la fatiga dentro de la tarea.
+          ultima_reps: draft.ultReps ?? "",
+          ultima_carga_kg: draft.ultCarga ?? "",
+          ultima_rir: draft.ultRir ?? "",
           // Series completadas (un toque en la tarea): lo que marcó el
           // jugador, o las pautadas si no tocó nada. Solo si la tarea tiene
           // un nº de series numérico y no es Resistencia ni CMJ.
