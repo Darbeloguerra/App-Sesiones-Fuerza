@@ -15,6 +15,7 @@ import {
   evaluarRendimientoEquipo,
   calcularCargaFuerzaPorMicro,
   calcularCargaSugerida,
+  fatigaTarea,
 } from "./e1rm.js";
 
 test("pct1RMporRTF: valores exactos de tabla y punto medio interpolado", () => {
@@ -179,4 +180,28 @@ test("calcularCargaSugerida: traslada una marca previa a un diseño de hoy disti
 test("calcularCargaSugerida: sin marca de referencia o salto de reps demasiado grande -> null", () => {
   assert.equal(calcularCargaSugerida(null, 5, 2), null);
   assert.equal(calcularCargaSugerida({ cargaReal: 100, repsReal: 5, rirReal: 2 }, 12, 2), null); // salto de 7 reps
+});
+
+test("fatigaTarea: sin datos de última serie -> null (no se asume sin fatiga)", () => {
+  assert.equal(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2 }), null);
+  assert.equal(fatigaTarea(null), null);
+});
+
+test("fatigaTarea: misma carga, menos reps y menos RIR -> caída de e1RM y reps perdidas", () => {
+  const f = fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 3, ultimaRirReal: 0 });
+  assert.equal(f.mismaCarga, true);
+  assert.equal(f.repsPerdidas, 2);
+  // RTF 7 (83 %) -> RTF 3 (92 %): e1RM 120,5 -> 108,7 = ~9,8 % de caída
+  assert.ok(f.caidaPct > 9 && f.caidaPct < 10.5);
+  assert.equal(f.nivel, "moderada");
+});
+
+test("fatigaTarea: última serie igual a la mejor -> 0 % y nivel baja; carga vacía = misma carga", () => {
+  const f = fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaCargaReal: "", ultimaRepsReal: 5, ultimaRirReal: 2 });
+  assert.equal(Math.round(f.caidaPct), 0);
+  assert.equal(f.nivel, "baja");
+});
+
+test("fatigaTarea: falta RIR de la última serie -> null", () => {
+  assert.equal(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 4, ultimaRirReal: "" }), null);
 });
