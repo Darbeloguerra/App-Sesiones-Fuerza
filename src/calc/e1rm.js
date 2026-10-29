@@ -372,3 +372,35 @@ export function calcularCargaSugerida(registroRef, repsHoy, rirHoy, redondeo = 2
   const e1RM = cargaRef / pctRef;
   return Math.round((e1RM * pctHoy) / redondeo) * redondeo;
 }
+
+// ---------- Fatiga dentro de la tarea (mejor serie vs. última serie) ----------
+// Cada registro guarda la MEJOR serie (cargaReal/repsReal/rirReal) y, opcional,
+// la ÚLTIMA (ultimaCargaReal/ultimaRepsReal/ultimaRirReal). La fatiga de la
+// tarea es cuánto cae el e1RM de la última serie respecto al de la mejor:
+// misma carga y menos reps (o menos reserva) = el jugador "se vació" por el
+// camino. Si la última serie se dejó sin carga, se asume la misma que la
+// mejor (lo habitual: no cambiar el peso entre series). Sin reps o sin RIR en
+// alguna de las dos series no hay dato (null) — nunca se asume "sin fatiga".
+// Los umbrales son orientativos y se pueden ajustar según lo que vean los datos.
+export const FATIGA_CFG = { moderada: 5, alta: 10 };
+export function fatigaTarea(it) {
+  if (!it) return null;
+  const vacio = (v) => v === "" || v == null;
+  if (vacio(it.ultimaRepsReal) && vacio(it.ultimaRirReal) && vacio(it.ultimaCargaReal)) return null;
+  const cargaMejor = Number(it.cargaReal);
+  const cargaUltima = vacio(it.ultimaCargaReal) ? cargaMejor : Number(it.ultimaCargaReal);
+  const e1Mejor = e1rmDeValores(cargaMejor, it.repsReal, it.rirReal);
+  const e1Ultima = e1rmDeValores(cargaUltima, it.ultimaRepsReal, it.ultimaRirReal);
+  if (e1Mejor == null || e1Ultima == null) return null;
+  const caidaPct = ((e1Mejor - e1Ultima) / e1Mejor) * 100;
+  const mismaCarga = cargaUltima === cargaMejor;
+  const nivel = caidaPct >= FATIGA_CFG.alta ? "alta" : caidaPct >= FATIGA_CFG.moderada ? "moderada" : "baja";
+  return {
+    caidaPct,
+    nivel,
+    e1rmMejor: e1Mejor,
+    e1rmUltima: e1Ultima,
+    mismaCarga,
+    repsPerdidas: mismaCarga ? Number(it.repsReal) - Number(it.ultimaRepsReal) : null,
+  };
+}
