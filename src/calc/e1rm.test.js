@@ -16,6 +16,7 @@ import {
   calcularCargaFuerzaPorMicro,
   calcularCargaSugerida,
   fatigaTarea,
+  interpretarFatiga,
 } from "./e1rm.js";
 
 test("pct1RMporRTF: valores exactos de tabla y punto medio interpolado", () => {
@@ -24,15 +25,10 @@ test("pct1RMporRTF: valores exactos de tabla y punto medio interpolado", () => {
   assert.equal(pct1RMporRTF(2.5), (TABLA_PCT_1RM_POR_RTF[2] + TABLA_PCT_1RM_POR_RTF[3]) / 2);
 });
 
-test("pct1RMporRTF: RTF fuera de rango se acota a [1, 15]", () => {
+test("pct1RMporRTF: RTF fuera de rango se acota a [1, 10] (comportamiento original, sin ampliar)", () => {
   assert.equal(pct1RMporRTF(0), TABLA_PCT_1RM_POR_RTF[1]);
-  assert.equal(pct1RMporRTF(20), TABLA_PCT_1RM_POR_RTF[15]);
-});
-
-test("pct1RMporRTF: por encima de RTF 10 el %1RM sigue bajando (antes se quedaba en 75 %)", () => {
-  assert.ok(pct1RMporRTF(13) < pct1RMporRTF(10));
-  // 10 reps RIR 3 con 100 kg: e1RM ~147, no 133
-  assert.ok(e1rmDeValores(100, 10, 3) > 145);
+  assert.equal(pct1RMporRTF(15), TABLA_PCT_1RM_POR_RTF[10]);
+  assert.equal(pct1RMporRTF(20), 0.75);
 });
 
 test("e1rmDeValores: carga dividida por el %1RM del RTF", () => {
@@ -204,4 +200,21 @@ test("fatigaTarea: última serie igual a la mejor -> 0 % y nivel baja; carga vac
 
 test("fatigaTarea: falta RIR de la última serie -> null", () => {
   assert.equal(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 4, ultimaRirReal: "" }), null);
+});
+
+test("fatigaTarea: % de reps perdidas contado con la misma carga; soloRir si la caída es solo de RIR", () => {
+  const f = fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 3, ultimaRirReal: 0 });
+  assert.equal(Math.round(f.repsPerdidasPct), 40);
+  assert.equal(f.soloRir, false);
+  const g = fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 3, ultimaRepsReal: 5, ultimaRirReal: 1 });
+  assert.equal(g.repsPerdidas, 0);
+  assert.equal(g.soloRir, true);
+  assert.ok(g.caidaPct > 0);
+});
+
+test("interpretarFatiga: un texto por nivel y null sin dato", () => {
+  assert.equal(interpretarFatiga(null), null);
+  assert.match(interpretarFatiga({ nivel: "baja" }), /Fatiga baja/);
+  assert.match(interpretarFatiga({ nivel: "moderada" }), /Fatiga moderada/);
+  assert.match(interpretarFatiga({ nivel: "alta" }), /Fatiga alta/);
 });
