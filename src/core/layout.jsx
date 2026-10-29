@@ -36,14 +36,36 @@ export const TEMA = {
 // centrado calculado sobre esa caja inflada queda desplazado hacia arriba en
 // lo que sí se ve — exactamente el síntoma. window.visualViewport.height
 // existe justo para esto: el alto realmente visible en cada momento.
-export function useAlturaVentana() {
+// Zona realmente visible: alto Y desplazamiento superior. Con el teclado del
+// iPhone abierto, iOS no cambia el viewport de diseño: lo "panea" (offsetTop
+// > 0) y encoge el visible. Una caja position:fixed con top:0 y solo el alto
+// se quedaba fuera de la zona visible (o con una franja vacía encima del
+// teclado, como se veía al escribir en reps/carga/RIR). Ahora la caja sigue
+// al viewport visible (top = offsetTop, height = alto) y se vuelve a medir
+// unos instantes después de enfocar/desenfocar, porque iOS anima el teclado
+// y el primer valor que da suele estar a medias.
+export function useViewportVisible() {
   const medirAhora = () => {
-    if (typeof window === "undefined") return 900;
-    return window.visualViewport ? window.visualViewport.height : window.innerHeight;
+    if (typeof window === "undefined") return { alto: 900, arriba: 0 };
+    const vv = window.visualViewport;
+    return vv ? { alto: Math.round(vv.height), arriba: Math.round(vv.offsetTop) } : { alto: window.innerHeight, arriba: 0 };
   };
-  const [alto, setAlto] = useState(medirAhora);
+  const [medida, setMedida] = useState(medirAhora);
   useEffect(() => {
-    const medir = () => setAlto(medirAhora());
+    const medir = () => {
+      const m = medirAhora();
+      setMedida((prev) => (prev.alto === m.alto && prev.arriba === m.arriba ? prev : m));
+    };
+    const temporizadores = [];
+    const medirVarias = () => {
+      medir();
+      [120, 350, 700].forEach((ms) => temporizadores.push(setTimeout(medir, ms)));
+    };
+    const alDesenfocar = () => {
+      medirVarias();
+      // Al cerrar el teclado iOS a veces deja la página desplazada hacia arriba.
+      temporizadores.push(setTimeout(() => { if (!document.activeElement || !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement.tagName)) window.scrollTo(0, 0); }, 400));
+    };
     medir();
     const vv = window.visualViewport;
     if (vv) {
@@ -52,7 +74,9 @@ export function useAlturaVentana() {
     } else {
       window.addEventListener("resize", medir);
     }
-    window.addEventListener("orientationchange", medir);
+    window.addEventListener("orientationchange", medirVarias);
+    document.addEventListener("focusin", medirVarias);
+    document.addEventListener("focusout", alDesenfocar);
     return () => {
       if (vv) {
         vv.removeEventListener("resize", medir);
@@ -60,10 +84,17 @@ export function useAlturaVentana() {
       } else {
         window.removeEventListener("resize", medir);
       }
-      window.removeEventListener("orientationchange", medir);
+      window.removeEventListener("orientationchange", medirVarias);
+      document.removeEventListener("focusin", medirVarias);
+      document.removeEventListener("focusout", alDesenfocar);
+      temporizadores.forEach(clearTimeout);
     };
   }, []);
-  return alto;
+  return medida;
+}
+
+export function useAlturaVentana() {
+  return useViewportVisible().alto;
 }
 
 export function useAnchoVentana() {
@@ -97,14 +128,14 @@ export function useAnchoVentana() {
 // - centrarContenido: para estados pequeños (carga, error, PIN) en vez de
 //   contenido de página completa — centra el bloque también verticalmente.
 export function PantallaBase({ children, rol = "entrenador", maxWidth, centrarContenido = false, layoutFijo = false }) {
-  const alto = useAlturaVentana();
+  const { alto, arriba } = useViewportVisible();
   const anchoMax = maxWidth || (rol === "jugador" ? 420 : 640);
   return (
     <div
       className="ds-reset"
       style={{
         position: "fixed",
-        top: 0,
+        top: arriba,
         left: 0,
         right: 0,
         height: alto,
