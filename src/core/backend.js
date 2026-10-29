@@ -83,7 +83,7 @@ export const NUMERIC_DEFAULTS = {
   sesiones: { preventivo_activo: 0 },
   circuitos: { rondas: null },
   tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null, descanso_seg: null },
-  registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null },
+  registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null, ultima_reps: null, ultima_carga_kg: null, ultima_rir: null },
   referenciasFuerza: { carga_kg: null, reps: null, rir: null },
 };
 export function sanitizeNumericos(entity, out) {
@@ -246,6 +246,12 @@ export const api = {
     if (error && entity === "registros" && "series_hechas" in toSave && /series_hechas/.test(`${error.message || ""} ${error.details || ""}`)) {
       const { series_hechas: _omitido, ...sinSeries } = toSave;
       ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: conflictKey }).select().maybeSingle());
+    }
+    // Igual para las columnas de la última serie (sql_add_ultima_serie.sql):
+    // si aún no existen, se guarda el registro sin ellas en vez de perderlo.
+    if (error && entity === "registros" && ("ultima_reps" in toSave || "ultima_carga_kg" in toSave || "ultima_rir" in toSave) && /ultima_(reps|carga_kg|rir)/.test(`${error.message || ""} ${error.details || ""}`)) {
+      const { ultima_reps: _a, ultima_carga_kg: _b, ultima_rir: _c, ...sinUltima } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinUltima, { onConflict: conflictKey }).select().maybeSingle());
     }
     // Preventivo por jugador: tareas.para_jugadores. Si la columna aún no existe
     // y el valor está vacío, se guarda sin ella; si tiene valor NO se puede
