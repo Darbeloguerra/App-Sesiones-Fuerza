@@ -38,6 +38,7 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
+import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -619,7 +620,7 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
   );
 }
 
-function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio, onSubir, onBajar, onEliminar }) {
+function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio, onSubir, onBajar, onEliminar, evalGuia = null }) {
   const ancho = useAnchoVentana();
   const lateral = ancho >= 700;
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -661,6 +662,7 @@ function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materi
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ fontWeight: 700, fontSize: 16, color: ds.ink }}>{tarea.nombre}</div>
             {mostrarCarga && <div style={{ fontSize: 12, color: ds.inkSecondary }}>Ref. anterior: {ref ?? "sin registro previo"}</div>}
+            {evalGuia && <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.4, color: evalGuia.estado === "dentro" ? ds.success : ds.accent }}>{evalGuia.estado === "dentro" ? "✓ " : "⚠ "}{evalGuia.mensaje}</div>}
           </div>
           <button type="button" aria-label="Cerrar" onClick={onCerrar} style={{ width: 44, height: 44, borderRadius: 12, border: "none", background: "transparent", color: ds.inkSecondary, fontSize: 24, cursor: "pointer" }}>×</button>
         </div>
@@ -762,6 +764,40 @@ function datosSuperserie(tareas) {
   });
 }
 
+// Guía por objetivo de la sesión: rango de RIR y, para cada nº de repeticiones,
+// el %1RM que lo deja (ver calc/guiaObjetivo.js para la base científica).
+function BannerGuiaObjetivo({ objetivo }) {
+  const tira = tiraReferencia(objetivo, 6);
+  return (
+    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 12.5, color: ds.ink }}>
+        <b>Objetivo {objetivo.etiqueta.toLowerCase()}</b> · trabaja con <b style={{ color: ds.accent }}>{etiquetaRir(objetivo)}</b> ({objetivo.fuente})
+      </div>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {tira.map((x) => (
+          <span key={x.reps} style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>
+            {x.reps} rep{x.reps === 1 ? "" : "s"} → <b style={{ color: ds.ink }}>{x.texto}</b>
+          </span>
+        ))}
+      </div>
+      {objetivo.zonas && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ fontSize: 11.5, color: ds.ink }}>Carga de máxima potencia según el ejercicio:</div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+            {objetivo.zonas.map((z) => (
+              <span key={z.ejercicio} style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>
+                {z.ejercicio} → <b style={{ color: ds.ink }}>{z.rango}</b>
+              </span>
+            ))}
+          </div>
+          <div style={{ fontSize: 10.5, color: ds.inkMuted }}>{objetivo.fuenteZonas}</div>
+        </div>
+      )}
+      <div style={{ fontSize: 10.5, color: ds.inkMuted, lineHeight: 1.4 }}>{objetivo.nota || "% del 1RM que deja ese RIR. Rangos medios de estudios; el RIR lo estima el jugador."}</div>
+    </div>
+  );
+}
+
 // Encabezado de columnas de la tabla (iPad horizontal): las columnas tienen los
 // mismos anchos que las celdas de FilaTareaReal para que queden alineadas.
 function EncabezadoTablaTareas({ mostrarCarga }) {
@@ -793,11 +829,14 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null }) {
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, objetivoGuia = null }) {
   const [abierta, setAbierta] = useState(false);
   // En iPad horizontal / ordenador los números se editan directamente en la fila
   // (tabla); el resto de opciones siguen en la hoja de edición (botón ⋯).
   const tabla = useAnchoVentana() >= 1100;
+  // Veredicto frente al objetivo de la sesión (solo fuerza con repeticiones).
+  const evalGuia = objetivoGuia && mostrarCarga && (tarea.modo || "reps") === "reps" ? evaluarTarea(objetivoGuia, { reps: tarea.cantidad, rir: tarea.rir, pct1rm: tarea.pct1rm, modoCarga: tarea.modoCarga }) : null;
+  const fueraRango = evalGuia && evalGuia.estado !== "dentro";
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
   const resumen = resumenTareaDiseno(tarea, mostrarCarga);
 
@@ -871,6 +910,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: ds.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.25, ...(tabla ? { overflowWrap: "break-word" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{tarea.nombre}</div>
           {!tabla && <div style={{ fontSize: 12.5, fontWeight: 600, color: resumen.incompleto ? ds.accent : ds.inkSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen.texto}</div>}
+          {!tabla && fueraRango && <div style={{ fontSize: 11.5, color: ds.accent, lineHeight: 1.3 }}>⚠ {evalGuia.estado === "bajo" ? "Demasiado cerca del fallo para el objetivo" : "Demasiado lejos del fallo para el objetivo"}</div>}
         </div>
         {!tabla && <ChevronDown size={16} color={ds.inkMuted} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />}
       </div>
@@ -894,7 +934,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             {tarea.lateralidad === "unilateral" ? "Unilat." : "Bilat."}
           </button>
           <SelectorMaterialReal compacto seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
-          <button type="button" aria-label="Más opciones" title="Más opciones: unidad de medida, tipo de resistencia, nota, mover, quitar" onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 32, height: 38, fontSize: 16, flexShrink: 0 }}>⋯</button>
+          <button type="button" aria-label="Más opciones" title={fueraRango ? evalGuia.mensaje : "Más opciones: unidad de medida, tipo de resistencia, nota, mover, quitar"} onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 32, height: 38, fontSize: 16, flexShrink: 0, ...(fueraRango ? { borderColor: ds.accent, color: ds.accent, background: ds.accentSubtle } : null) }}>{fueraRango ? "⚠" : "⋯"}</button>
         </>
       )}
       {!tabla && onSubir && (
@@ -913,7 +953,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         </button>
       )}
       {abierta && (
-        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />
+        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} evalGuia={evalGuia} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />
       )}
     </div>
     {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
@@ -1120,7 +1160,7 @@ function CampoResistenciaTareaReal({ tarea, onCambiar, orden, onSubir, onBajar, 
   return (
     <div style={{ padding: "10px 12px", background: ds.bgElevated, borderRadius: 8, border: `1px solid ${ds.border}`, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        {!tabla && tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
+        {tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
           <button
             type="button"
             onClick={() => tieneVideoJugable && onAmpliarVideo?.(tarea.gif)}
@@ -3252,6 +3292,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     { id: "core", nombre: "Core", onAdd: (...a) => { setBloqueActivo("core"); return agregarTarea(setTareasCore)(...a); } },
     ...(modoPreventivo === "manual" ? [{ id: "preventivo", nombre: "Preventivo", onAdd: (...a) => { setBloqueActivo("preventivo"); return agregarTarea(setTareasPreventivoManual)(...a); } }] : []),
   ];
+  const guiaObjetivo = objetivoDeTexto(objetivo);
   const destinoActual = destinosBiblio.find((d) => d.id === destinoBiblio) || destinosBiblio[0];
 
   return (
@@ -3309,6 +3350,19 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Objetivo (opcional)</span>
                   <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ minHeight: 46, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, padding: "0 12px" }} />
                 </label>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    {OBJETIVOS_SESION.map((o) => {
+                      const activo = guiaObjetivo?.id === o.id;
+                      return (
+                        <button key={o.id} type="button" onClick={() => setObjetivo(activo ? "" : o.etiqueta)} style={{ minHeight: 44, padding: "0 16px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: activo ? ds.accent : ds.ink, fontWeight: 600 }}>
+                          {o.etiqueta}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.4 }}>Con «Fuerza» o «Hipertrofia» el diseñador te muestra el rango de RIR y el %1RM adecuados y avisa si una tarea se sale. Un objetivo escrito a mano no activa la guía.</span>
+                </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>¿Para quién es?</span>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3767,6 +3821,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
+                    {guiaObjetivo && <BannerGuiaObjetivo objetivo={guiaObjetivo} />}
                     {lateralBloques && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
@@ -3776,6 +3831,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                         superserie={datosSuperserie(tareasFuerza)[i]}
                         onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasFuerza, i, tareasFuerza)}
                         mostrarCarga={true}
+                        objetivoGuia={guiaObjetivo}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         referenciasPorEjercicio={referenciasPorEjercicio}
@@ -3891,4 +3947,3 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     </EnSesionContext.Provider>
   );
 }
- 
