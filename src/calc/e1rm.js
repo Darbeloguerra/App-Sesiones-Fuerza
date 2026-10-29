@@ -13,12 +13,15 @@
 // RTS/Tuchscherer. Es una tabla GENERALISTA (mismo valor para cualquier
 // ejercicio) — el margen de error real es de varios puntos porcentuales,
 // mayor cuanto más se aleje el RTF de 1-10 o más difieran las reps.
-// De 11 a 15 se continúa con la media de Epley y Brzycki. ANTES la tabla se
-// cortaba en 10 y todo RTF mayor se trataba como 10 (75 %): una serie de
-// 10 reps con RIR 3 (RTF 13) daba un e1RM ~9 % por debajo del real, y una de
-// 12 reps RIR 2 (RTF 14) ~12 % por debajo — de ahí las cargas sugeridas
-// demasiado bajas al pautar por %1RM o por RIR a partir de esas marcas.
-export const RTF_MAX_TABLA = 15;
+// Los valores 11-15 (media de Epley y Brzycki) están en la tabla pero NO se
+// usan: RTF_MAX_TABLA = 10 mantiene el comportamiento original (todo RTF > 10
+// se trata como 10 = 75 %). Esas fórmulas están validadas sobre todo hasta ~10
+// repeticiones y no se ha comprobado con datos reales de esta plantilla que
+// ampliar la tabla acerque el e1RM a la realidad (podría incluso inflarlo).
+// Para activarlo: subir RTF_MAX_TABLA a 15 SOLO tras validarlo con datos reales
+// (comparar, por jugador y ejercicio, el e1RM de series RTF <= 10 con el de
+// series RTF 11-15 cercanas en el tiempo: la razón mediana debería acercarse a 1).
+export const RTF_MAX_TABLA = 10;
 export const TABLA_PCT_1RM_POR_RTF = { 1: 1.0, 2: 0.96, 3: 0.92, 4: 0.9, 5: 0.87, 6: 0.85, 7: 0.83, 8: 0.8, 9: 0.77, 10: 0.75, 11: 0.73, 12: 0.7, 13: 0.68, 14: 0.66, 15: 0.64 };
 
 // Por encima de ~12 repeticiones, el RIR reportado por el jugador deja de
@@ -402,5 +405,23 @@ export function fatigaTarea(it) {
     e1rmUltima: e1Ultima,
     mismaCarga,
     repsPerdidas: mismaCarga ? Number(it.repsReal) - Number(it.ultimaRepsReal) : null,
+    // % de repeticiones perdidas con la misma carga: es un dato CONTADO (no
+    // depende del RIR), por eso es la parte más objetiva de la fatiga.
+    repsPerdidasPct: mismaCarga && Number(it.repsReal) > 0 ? ((Number(it.repsReal) - Number(it.ultimaRepsReal)) / Number(it.repsReal)) * 100 : null,
+    // Caída que viene solo de la reserva declarada (mismas reps, menos RIR):
+    // más subjetiva, pero comparable entre sesiones del MISMO jugador.
+    soloRir: mismaCarga && Number(it.repsReal) - Number(it.ultimaRepsReal) <= 0 && caidaPct > 0,
   };
+}
+
+// Lectura breve para el jugador. Orientativa: se calcula con lo que anota
+// (reps y RIR), no con un medidor de velocidad, y los cortes de nivel son
+// propios de la app. Apoyo conceptual: más fatiga dentro de la serie cambia
+// la adaptación (menos potencia, algo más de hipertrofia; Pareja-Blanco 2017)
+// y, para fuerza, no hace falta acabar cerca del fallo (Robinson 2024).
+export function interpretarFatiga(f) {
+  if (!f) return null;
+  if (f.nivel === "alta") return "Fatiga alta: acabaste muy cansado. Si buscas fuerza o potencia, más fatiga no suma más ganancia; revisa el descanso entre series o la carga.";
+  if (f.nivel === "moderada") return "Fatiga moderada: es normal en series de trabajo. Bajaste algo, pero sin vaciarte.";
+  return "Fatiga baja: mantuviste el rendimiento de la primera a la última serie. Si te sobró margen, la próxima vez puedes subir un poco la carga.";
 }
