@@ -1,111 +1,215 @@
-import test from "node:test";
-import assert from "node:assert/strict";
-import { sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
+// Guía de %1RM y RIR según el objetivo de la sesión (diseñador).
+//
+// BASE: la cercanía al fallo (RIR) recomendada por objetivo, según el metaanálisis
+// de 55 estudios de Robinson, Pelland, Remmert, Refalo, Jukic, Steele y Zourdos
+// (Sports Medicine, 2024, DOI 10.1007/s40279-024-02069-2): fuerza ~3-5
+// repeticiones antes del fallo (la cercanía al fallo no mostró efecto claro
+// sobre la fuerza); hipertrofia 0-5 (más cerca del fallo tiende a más hipertrofia).
+// Respaldo para fuerza: Davies et al. 2016 (Sports Med 46:487-502) y Grgic et al.
+// 2022 (J Sport Health Sci): llegar al fallo no es necesario para ganar fuerza.
+// Son rangos medios de estudios, amplios, y el RIR lo estima el jugador.
+// POTENCIA: no hay un rango de RIR publicado que yo haya podido verificar. Se usa
+// un criterio conservador y explícito de la app: RIR >= 3 (lejos del fallo). Lo
+// que sí está medido es que la pérdida de velocidad crece con el % de
+// repeticiones realizadas respecto al máximo (Rodríguez-Rosell et al., 2020,
+// J Strength Cond Res 34:2537-2547), y que parar con poca pérdida de velocidad
+// mejoró más el salto (Pareja-Blanco et al., 2017). El %1RM de máxima potencia
+// depende del ejercicio (Soriano et al., 2015, Sports Med 45:1191-1205, 27
+// estudios): sentadilla en torno a 30-70 %, salto con carga <= ~30 %, cargada
+// y cargada colgante >= ~70 %. Son zonas amplias y los cortes son aproximados.
+//
+// La conversión %1RM <-> repeticiones máximas usa la tabla RTF de e1rm.js
+// (válida hasta RTF 10 = 75 %; más allá no se dan cifras).
+import { TABLA_PCT_1RM_POR_RTF, pct1RMporRTF } from "./e1rm.js";
 
-const fuerza = objetivoDeTexto("Fuerza");
-const hiper = objetivoDeTexto("hipertrofia");
+export const RTF_TABLA_MAX = 10;
+export const OBJETIVOS_SESION = [
+  { id: "fuerza", etiqueta: "Fuerza", rir: { min: 3, max: 5 }, fuente: "Robinson et al., 2024" },
+  { id: "hipertrofia", etiqueta: "Hipertrofia", rir: { min: 0, max: 5 }, fuente: "Robinson et al., 2024" },
+  {
+    id: "potencia",
+    etiqueta: "Potencia",
+    rir: { min: 3, max: null },
+    fuente: "criterio de la app: lejos del fallo",
+    nota: "Lejos del fallo y a máxima velocidad intencionada. Los cortes de carga son aproximados.",
+    zonas: [
+      { id: "pliometrico", tipo: "Pliométrico", ejemplos: "saltos con carga, lanzamientos", rango: "≤30 %" },
+      { id: "nopliometrico", tipo: "No pliométrico", ejemplos: "sentadilla, press, peso muerto…", rango: "30–70 %" },
+    ],
+    fuenteZonas: "Soriano et al., 2015 y 2017",
+  },
+];
 
-test("objetivoDeTexto: solo coincidencia exacta con la etiqueta", () => {
-  assert.equal(fuerza.id, "fuerza");
-  assert.equal(hiper.id, "hipertrofia");
-  assert.equal(objetivoDeTexto("Fuerza tren inferior"), null);
-  assert.equal(objetivoDeTexto(""), null);
-});
+const textoRir = (o) => (o.rir.max == null ? `RIR ≥ ${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
+export const etiquetaRir = textoRir;
 
-test("rtfDePct: inverso de la tabla; fuera de tabla -> null", () => {
-  assert.equal(rtfDePct(90), 4);
-  assert.equal(rtfDePct(80), 8);
-  assert.equal(rtfDePct(75), 10);
-  assert.equal(rtfDePct(70), null);
-  assert.equal(rtfDePct(101), null);
-  assert.ok(Math.abs(rtfDePct(88.5) - 4.5) < 1e-9);
-});
+// RIR por defecto al elegir el objetivo (punto de partida editable): fuerza 4
+// (centro de 3-5), hipertrofia 2 (zona cercana al fallo sin llegar), potencia 3
+// (el mínimo del criterio conservador de la app).
+export const RIR_DEFECTO = { fuerza: 4, hipertrofia: 2, potencia: 3 };
 
-test("guiaPorReps fuerza: 4 reps con RIR 3-5 -> 77-83 %; 1 rep -> 85-90 %", () => {
-  const g4 = guiaPorReps(fuerza, 4);
-  assert.deepEqual([g4.pctMin, g4.pctMax, g4.parcial], [77, 83, false]);
-  const g1 = guiaPorReps(fuerza, 1);
-  assert.deepEqual([g1.pctMin, g1.pctMax], [85, 90]);
-});
+// Sugerencia de RIR y %1RM para N repeticiones. El % sale de la misma tabla
+// RTF (reps + RIR); null si cae fuera de la tabla fiable o si el objetivo
+// no se rige por RIR->% (potencia: la carga depende del tipo de movimiento).
+// Potencia: %1RM por defecto dentro de la zona del tipo de movimiento
+// (pliométrico: techo 30 %; no pliométrico: centro de 30-70 %). Punto de partida editable.
+export const PCT_POTENCIA_DEFECTO = { pliometrico: 30, nopliometrico: 50 };
 
-test("guiaPorReps: RTF fuera de tabla -> parcial o null", () => {
-  assert.equal(guiaPorReps(fuerza, 5).parcial, false); // 5+5 = 10 cabe justo
-  assert.equal(guiaPorReps(fuerza, 6).parcial, true); // 6+5 = 11 se sale de la tabla
-  assert.equal(guiaPorReps(fuerza, 8), null); // 8+3 = 11 no cabe
-  assert.equal(guiaPorReps(fuerza, 0), null);
-});
+export function sugerirCarga(objetivo, reps, tipo) {
+  const n = Math.round(Number(reps));
+  if (!objetivo || !Number.isFinite(n) || n < 1) return null;
+  const rir = RIR_DEFECTO[objetivo.id];
+  if (rir == null) return null;
+  const rtf = n + rir;
+  const pct1rm = objetivo.zonas
+    ? PCT_POTENCIA_DEFECTO[tipo === "pliometrico" ? "pliometrico" : "nopliometrico"]
+    : rtf > RTF_TABLA_MAX ? null : Math.round(pct1RMporRTF(rtf) * 100);
+  return { rir, pct1rm };
+}
 
-test("evaluarTarea: 3x4 al 90 % para fuerza -> bajo (RIR 0)", () => {
-  const r = evaluarTarea(fuerza, { reps: 4, pct1rm: 90, modoCarga: "pct1rm" });
-  assert.equal(r.estado, "bajo");
-  assert.match(r.mensaje, /77–83 %/);
-});
+// Rellena RIR y %1RM de una tarea solo si están vacíos o los puso antes esta
+// misma función (cargaAuto). Lo que escribe el entrenador nunca se pisa.
+export function aplicarSugerencia(objetivo, t) {
+  if (!objetivo || (t.modo || "reps") !== "reps") return t;
+  const vacio = (v) => v === "" || v == null;
+  if (!(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
+  const s = sugerirCarga(objetivo, t.cantidad, t.tipoMov);
+  if (!s) return t;
+  return { ...t, rir: String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
+}
 
-test("evaluarTarea: 4 reps al 80 % -> dentro (RIR 4); 4 reps al 70 % -> alto", () => {
-  assert.equal(evaluarTarea(fuerza, { reps: 4, pct1rm: 80, modoCarga: "pct1rm" }).estado, "dentro");
-  assert.equal(evaluarTarea(fuerza, { reps: 4, pct1rm: 70, modoCarga: "pct1rm" }).estado, "alto");
-});
+// Solo coincidencia exacta con la etiqueta: un objetivo escrito a mano ("fuerza
+// tren inferior") no activa la guía, para no dar un veredicto por adivinación.
+export function objetivoDeTexto(texto) {
+  const t = String(texto || "").trim().toLowerCase();
+  return OBJETIVOS_SESION.find((o) => o.etiqueta.toLowerCase() === t) || null;
+}
 
-test("evaluarTarea por RIR: RIR 1 -> bajo, RIR 4 -> dentro, RIR 8 -> alto; vacío -> null", () => {
-  assert.equal(evaluarTarea(fuerza, { reps: 4, rir: 1, modoCarga: "rir" }).estado, "bajo");
-  assert.equal(evaluarTarea(fuerza, { reps: 4, rir: 4, modoCarga: "rir" }).estado, "dentro");
-  assert.equal(evaluarTarea(fuerza, { reps: 4, rir: 8, modoCarga: "rir" }).estado, "alto");
-  assert.equal(evaluarTarea(fuerza, { reps: 4, rir: "", modoCarga: "rir" }), null);
-  assert.equal(evaluarTarea(null, { reps: 4, rir: 4, modoCarga: "rir" }), null);
-});
+// Inverso de la tabla: %1RM (0-100) -> repeticiones máximas (RTF). null si
+// queda fuera de la tabla fiable (< 75 % o > 100 %).
+export function rtfDePct(pct) {
+  const p = Number(pct) / 100;
+  if (!Number.isFinite(p) || p > 1 + 1e-9 || p < TABLA_PCT_1RM_POR_RTF[RTF_TABLA_MAX] - 1e-9) return null;
+  for (let r = 1; r < RTF_TABLA_MAX; r++) {
+    const a = TABLA_PCT_1RM_POR_RTF[r];
+    const b = TABLA_PCT_1RM_POR_RTF[r + 1];
+    if (p <= a + 1e-9 && p >= b - 1e-9) return r + (a - p) / (a - b);
+  }
+  return null;
+}
 
-test("hipertrofia: RIR 0 y 5 dentro; 7 alto", () => {
-  assert.equal(evaluarTarea(hiper, { reps: 8, rir: 0, modoCarga: "rir" }).estado, "dentro");
-  assert.equal(evaluarTarea(hiper, { reps: 8, rir: 5, modoCarga: "rir" }).estado, "dentro");
-  assert.equal(evaluarTarea(hiper, { reps: 8, rir: 7, modoCarga: "rir" }).estado, "alto");
-});
+// Para N repeticiones: rango de %1RM que deja el RIR del objetivo.
+// Devuelve null si ni siquiera el RIR mínimo cabe en la tabla (RTF > 10).
+export function guiaPorReps(objetivo, reps) {
+  const n = Math.round(Number(reps));
+  if (!objetivo || !Number.isFinite(n) || n < 1) return null;
+  const rtfMin = n + objetivo.rir.min;
+  if (rtfMin > RTF_TABLA_MAX) return null;
+  const pctMax = Math.round(pct1RMporRTF(rtfMin) * 100);
+  if (objetivo.rir.max == null) return { reps: n, pctMin: null, pctMax, parcial: false, soloTecho: true };
+  const rtfMax = n + objetivo.rir.max;
+  const parcial = rtfMax > RTF_TABLA_MAX;
+  const pctMin = Math.round(pct1RMporRTF(Math.min(rtfMax, RTF_TABLA_MAX)) * 100);
+  return { reps: n, pctMin, pctMax, parcial, soloTecho: false };
+}
 
-test("tiraReferencia: filas por reps, la última puede ser parcial", () => {
-  const t = tiraReferencia(fuerza, 6);
-  assert.equal(t[0].texto, "85–90 %");
-  assert.equal(t.find((x) => x.reps === 4).texto, "77–83 %");
-  assert.ok(OBJETIVOS_SESION.length === 3);
-});
+const fmtRango = (g) => (g.soloTecho ? `hasta ${g.pctMax} %` : g.pctMin === g.pctMax ? `${g.pctMax} %` : `${g.pctMin}–${g.pctMax} %`);
 
-const pot = objetivoDeTexto("Potencia");
+// Evalúa una tarea de fuerza (reps + carga por RIR o por %1RM) contra el objetivo.
+// estado: "dentro" | "bajo" (RIR por debajo del rango: demasiado cerca del fallo)
+//         | "alto" (RIR por encima: demasiado lejos) | null (sin datos suficientes).
+export function evaluarTarea(objetivo, { reps, rir, pct1rm, modoCarga }) {
+  if (!objetivo) return null;
+  const n = Number(reps);
+  if (!Number.isFinite(n) || n < 1) return null;
+  const g = guiaPorReps(objetivo, n);
+  const rango = textoRir(objetivo);
+  const sug = g && !g.soloTecho ? ` Para ${g.reps} rep${g.reps === 1 ? "" : "s"} con ${rango}: ${fmtRango(g)}${g.parcial ? " o menos" : ""} del 1RM.` : "";
+  let rirImp = null;
+  let origen = "";
+  let lejosDeTabla = false;
+  if (modoCarga === "pct1rm") {
+    const p = Number(pct1rm);
+    if (!Number.isFinite(p) || p <= 0) return null;
+    const rtf = rtfDePct(p);
+    if (rtf == null) {
+      if (p < 75 && objetivo.rir.max != null && RTF_TABLA_MAX - n >= objetivo.rir.max) lejosDeTabla = true;
+      else return null;
+    } else {
+      rirImp = rtf - n;
+      origen = `Al ${Math.round(p)} % el máximo ronda ${Math.round(rtf)} reps: con ${n} quedas en RIR ${Math.max(0, Math.round(rirImp))}.`;
+    }
+  } else {
+    if (rir === "" || rir == null) return null;
+    rirImp = Number(rir);
+    if (!Number.isFinite(rirImp)) return null;
+  }
+  if (lejosDeTabla) {
+    return { estado: "alto", rirImplicito: null, mensaje: `Al ${Math.round(Number(pct1rm))} % harías bastantes más reps de las pautadas (RIR por encima de ${objetivo.rir.max}): demasiado lejos del fallo para ${objetivo.etiqueta.toLowerCase()}.${sug}` };
+  }
+  const tol = 0.5;
+  let estado = "dentro";
+  if (rirImp < objetivo.rir.min - tol) estado = "bajo";
+  else if (objetivo.rir.max != null && rirImp > objetivo.rir.max + tol) estado = "alto";
+  const rirTxt = Math.max(0, Math.round(rirImp));
+  let mensaje;
+  if (estado === "dentro") mensaje = `Dentro del rango para ${objetivo.etiqueta.toLowerCase()} (${rango}).`;
+  else if (estado === "bajo") mensaje = `${origen ? origen + " " : `RIR ${rirTxt}: `}Por debajo del rango para ${objetivo.etiqueta.toLowerCase()} (${rango}).${sug}`;
+  else mensaje = `${origen ? origen + " " : `RIR ${rirTxt}: `}Por encima del rango para ${objetivo.etiqueta.toLowerCase()} (${rango}).${sug}`;
+  return { estado, rirImplicito: rirImp, mensaje };
+}
 
-test("potencia: RIR >= 3 sin techo; la guía da solo un máximo de %1RM", () => {
-  assert.equal(pot.id, "potencia");
-  const g = guiaPorReps(pot, 3);
-  assert.equal(g.soloTecho, true);
-  assert.equal(g.pctMax, 85); // 3 reps + RIR 3 = RTF 6 -> 85 %
-  assert.equal(guiaPorReps(pot, 8), null); // 8+3 = 11 fuera de tabla
-  assert.equal(tiraReferencia(pot, 3)[2].texto, "≤85 %");
-});
+// Tira de referencia para el diseñador: reps -> rango de %1RM.
+export function tiraReferencia(objetivo, maxReps = 6) {
+  if (!objetivo) return [];
+  const out = [];
+  for (let r = 1; r <= maxReps; r++) {
+    const g = guiaPorReps(objetivo, r);
+    if (g) out.push({ reps: r, texto: g.soloTecho || g.parcial ? `≤${g.pctMax} %` : g.pctMin === g.pctMax ? `${g.pctMax} %` : `${g.pctMin}–${g.pctMax} %` });
+  }
+  return out;
+}
 
-test("potencia: RIR 1 -> bajo; RIR 3 y RIR 8 -> dentro (no hay techo)", () => {
-  assert.equal(evaluarTarea(pot, { reps: 3, rir: 1, modoCarga: "rir" }).estado, "bajo");
-  assert.equal(evaluarTarea(pot, { reps: 3, rir: 3, modoCarga: "rir" }).estado, "dentro");
-  assert.equal(evaluarTarea(pot, { reps: 3, rir: 8, modoCarga: "rir" }).estado, "dentro");
-  const r = evaluarTarea(pot, { reps: 3, pct1rm: 90, modoCarga: "pct1rm" });
-  assert.equal(r.estado, "bajo");
-  assert.doesNotMatch(r.mensaje, /hasta/);
-  assert.equal(pot.zonas.length, 3);
-});
+// Zona de %1RM que el desplegable marca en ámbar. Fuerza/Hipertrofia: el rango
+// que deja el RIR del objetivo para esas repeticiones. Potencia: la zona del
+// tipo de movimiento (pliométrico <=30 %, no pliométrico 30-70 %).
+export function zonaPct(objetivo, { reps, tipoMov } = {}) {
+  if (!objetivo) return null;
+  if (objetivo.zonas) return tipoMov === "pliometrico" ? { min: 0, max: 30 } : { min: 30, max: 70 };
+  const g = guiaPorReps(objetivo, reps);
+  if (!g || g.soloTecho) return null;
+  return { min: g.pctMin, max: g.pctMax };
+}
 
-test("sugerirCarga: fuerza 4 reps -> RIR 4 y 80 % (RTF 8); 7 reps -> RIR 4 sin %; potencia solo RIR", () => {
-  assert.deepEqual(sugerirCarga(fuerza, 4), { rir: 4, pct1rm: 80 });
-  assert.deepEqual(sugerirCarga(fuerza, 7), { rir: 4, pct1rm: null });
-  assert.deepEqual(sugerirCarga(hiper, 8), { rir: 2, pct1rm: 75 });
-  assert.deepEqual(sugerirCarga(pot, 3), { rir: 3, pct1rm: null });
-  assert.equal(sugerirCarga(fuerza, ""), null);
-});
+// Zona de RIR (min..max, max null = sin techo) del objetivo.
+export function zonaRir(objetivo) {
+  return objetivo ? { min: objetivo.rir.min, max: objetivo.rir.max } : null;
+}
 
-test("aplicarSugerencia: rellena vacíos, se actualiza si fue automático, nunca pisa lo manual", () => {
-  const vacia = { modo: "reps", cantidad: "4", rir: "", pct1rm: "" };
-  const a = aplicarSugerencia(fuerza, vacia);
-  assert.deepEqual([a.rir, a.pct1rm, a.cargaAuto], ["4", "80", true]);
-  const b = aplicarSugerencia(fuerza, { ...a, cantidad: "3" });
-  assert.deepEqual([b.rir, b.pct1rm], ["4", "83"]);
-  const c = aplicarSugerencia(hiper, { ...a, cantidad: "8" });
-  assert.equal(c.rir, "2");
-  const manual = { ...a, rir: "1", cargaAuto: false };
-
-  assert.equal(aplicarSugerencia(fuerza, { ...manual, cantidad: "3" }).rir, "1");
-  assert.equal(aplicarSugerencia(fuerza, { modo: "tiempo", cantidad: "30", rir: "", pct1rm: "" }).rir, "");
-});
+// Qué implica subir o bajar cada valor, con su fuente. Solo afirmaciones
+// respaldadas por los estudios citados (tendencias, no garantías).
+export function implicaciones(campo, objetivo) {
+  const id = objetivo?.id;
+  if (campo === "reps") {
+    return {
+      lineas: [
+        { etq: "Más reps", txt: "con la misma carga: te acercas al fallo (baja el RIR) y sube la fatiga." },
+        { etq: "Menos reps", txt: "más margen; admite más carga con el mismo RIR." },
+      ],
+      fuente: "Tabla de repeticiones máximas de la app",
+    };
+  }
+  if (campo === "rir") {
+    if (id === "fuerza") return { lineas: [{ etq: "Más RIR", txt: "(más lejos del fallo): menos fatiga; entre RIR 3 y 5 la fuerza se gana igual." }, { etq: "Menos RIR", txt: "(más cerca): más fatiga y sin ganancia clara de fuerza; sí tiende a más hipertrofia." }], fuente: "Robinson et al., 2024" };
+    if (id === "hipertrofia") return { lineas: [{ etq: "Menos RIR", txt: "(más cerca del fallo, 0–5): tiende a más hipertrofia, con más fatiga." }, { etq: "Más RIR", txt: "(más lejos): menos fatiga, pero la hipertrofia tiende a ser menor." }], fuente: "Robinson et al., 2024" };
+    if (id === "potencia") return { lineas: [{ etq: "Más RIR", txt: "(lejos del fallo): la pérdida de velocidad crece con las repeticiones hechas, así que parar antes la mantiene." }, { etq: "Menos RIR", txt: "(cerca del fallo): baja la velocidad; parar con poca pérdida de velocidad mejoró más el salto." }], fuente: "Rodríguez-Rosell et al., 2020; Pareja-Blanco et al., 2017" };
+    return null;
+  }
+  if (campo === "pct") {
+    if (id === "fuerza") return { lineas: [{ etq: "Cargas altas y moderadas", txt: "dan más fuerza que las ligeras; entre ellas la diferencia no fue significativa." }, { etq: "Cargas ligeras", txt: "dan menos ganancia de fuerza." }], fuente: "López et al., 2021 (series al fallo; alta = hasta 8 repeticiones máximas)" };
+    if (id === "hipertrofia") return { lineas: [{ etq: "Cualquier carga", txt: "(ligera, moderada o alta) da una hipertrofia similar si las series se llevan al fallo." }], fuente: "López et al., 2021" };
+    if (id === "potencia") return { lineas: [{ etq: "Dentro de la zona", txt: "es la carga de máxima potencia del movimiento." }, { etq: "Por encima o por debajo", txt: "la potencia máxima baja." }], fuente: "Soriano et al., 2015 y 2017" };
+    return null;
+  }
+  return null;
+}
