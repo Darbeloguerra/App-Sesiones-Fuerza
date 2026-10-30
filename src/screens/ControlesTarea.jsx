@@ -8,6 +8,9 @@ import { ds, dsF } from "../core/designSystem.jsx";
 
 export const ANCHO_COL = 66;
 export const ANCHO_FLECHAS = 92;
+// Por debajo de este ancho de ventana la fila pasa a dos niveles y los desplegables
+// suben como hoja inferior.
+export const ANCHO_MIN_TABLA = 760;
 const ALTO_CELDA = 34;
 
 function medidas() {
@@ -23,6 +26,12 @@ export function Desplegable({ ancla, onCerrar, ancho = 320, children }) {
       if (!el) return;
       const r = el.getBoundingClientRect();
       const { w, h, hLayout } = medidas();
+      if (w < ANCHO_MIN_TABLA) {
+        const v = window.visualViewport;
+        const finVisible = v ? v.offsetTop + v.height : hLayout;
+        setPos({ hoja: true, bottom: Math.max(0, hLayout - finVisible), maxHeight: Math.round(h * 0.85) });
+        return;
+      }
       const a = Math.min(ancho, w - 16);
       const left = Math.max(8, Math.min(r.left + r.width / 2 - a / 2, w - a - 8));
       const abajo = h - r.bottom - 12;
@@ -50,13 +59,18 @@ export function Desplegable({ ancla, onCerrar, ancho = 320, children }) {
     return () => window.removeEventListener("keydown", alTecla);
   }, [onCerrar]);
   if (!pos) return null;
+  const hoja = !!pos.hoja;
+  const estiloPos = hoja
+    ? { left: 0, right: 0, bottom: pos.bottom, maxHeight: pos.maxHeight, borderRadius: "16px 16px 0 0", paddingBottom: "max(12px, env(safe-area-inset-bottom, 0px))" }
+    : pos;
   return createPortal(
-    <div className="ds-reset" style={{ position: "fixed", inset: 0, zIndex: 1300 }} onClick={onCerrar}>
+    <div className="ds-reset" style={{ position: "fixed", inset: 0, zIndex: 1300, background: hoja ? "rgba(0,0,0,0.55)" : undefined }} onClick={onCerrar}>
       <div
         role="dialog"
         onClick={(e) => e.stopPropagation()}
-        style={{ position: "fixed", ...pos, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", boxSizing: "border-box", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.45)", fontFamily: dsF.sans, color: ds.ink }}
+        style={{ position: "fixed", ...estiloPos, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", boxSizing: "border-box", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.45)", fontFamily: dsF.sans, color: ds.ink, ...(hoja ? { borderRadius: "16px 16px 0 0", padding: "10px 12px max(12px, env(safe-area-inset-bottom, 0px))" } : null) }}
       >
+        {hoja && <span style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, background: ds.border, flexShrink: 0 }} />}
         {children}
       </div>
     </div>,
@@ -114,7 +128,7 @@ export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
   return (
     <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
       <span style={{ fontSize: 10, fontWeight: 600, color: ds.inkSecondary, paddingLeft: 2 }}>{etiqueta}</span>
-      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, fontSize: 13, fontWeight: 600, fontFamily: dsF.sans }}>
+      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, fontSize: 16, fontWeight: 600, fontFamily: dsF.sans }}>
         {opciones.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
       </select>
     </label>
@@ -123,7 +137,7 @@ export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
 
 // Celda numérica: muestra el valor y abre un desplegable con valores rápidos,
 // "Otro valor" (teclado) y, opcionalmente, campos extra y la explicación.
-export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio }) {
+export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false }) {
   const [abierto, setAbierto] = useState(false);
   const [teclado, setTeclado] = useState(false);
   const [borrador, setBorrador] = useState("");
@@ -143,7 +157,8 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
     { v: "__otro", t: "Otro valor… (teclado)", tenue: true, onElegir: () => { setBorrador(tiene ? String(valor) : ""); setTeclado(true); } },
   ];
   return (
-    <div style={{ width: ANCHO_COL, flexShrink: 0, opacity: apagada ? 0.5 : 1 }}>
+    <div style={movil ? { minWidth: 0, display: "flex", flexDirection: "column", gap: 3, opacity: apagada ? 0.5 : 1 } : { width: ANCHO_COL, flexShrink: 0, opacity: apagada ? 0.5 : 1 }}>
+      {movil && <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 600, color: ds.inkMuted, textAlign: "center", whiteSpace: "nowrap", fontFamily: dsF.sans }}>{etiqueta}</span>}
       <button ref={ref} type="button" aria-label={etiqueta} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
         style={{ position: "relative", width: "100%", height: ALTO_CELDA, boxSizing: "border-box", borderRadius: 10, background: ds.surface, border: `${abierto || (resaltar && tiene) ? 2 : 1}px solid ${alerta ? ds.danger : abierto || (resaltar && tiene) ? ds.accent : ds.border}`, color: alerta ? ds.danger : resaltar && tiene ? ds.accent : tiene ? ds.ink : ds.inkMuted, fontWeight: tiene ? 700 : 600, fontSize: 13, fontFamily: dsF.sans, cursor: "pointer", padding: 0 }}>
         {tiene ? valor : placeholder}
@@ -191,6 +206,15 @@ export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, aria
   );
 }
 
+export function EtiquetaAccion({ texto, onClick, ariaLabel }) {
+  return (
+    <button type="button" aria-label={ariaLabel || texto} onClick={onClick}
+      style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer", ...TONOS.normal }}>
+      {texto}
+    </button>
+  );
+}
+
 export function EtiquetaFija({ texto }) {
   return <span style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", background: ds.border, color: ds.ink, whiteSpace: "nowrap" }}>{texto}</span>;
 }
@@ -230,7 +254,7 @@ function PanelMaterial({ tarea, onCambiar, disponibles, onAgregarMaterial, mostr
         })}
       </div>
       <div style={{ display: "flex", gap: 6 }}>
-        <input value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anadir(); }} placeholder="Añadir material nuevo…" aria-label="Material nuevo" style={{ flex: 1, minWidth: 0, height: 40, boxSizing: "border-box", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "0 10px", fontSize: 13, fontFamily: dsF.sans }} />
+        <input value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anadir(); }} placeholder="Añadir material nuevo…" aria-label="Material nuevo" style={{ flex: 1, minWidth: 0, height: 40, boxSizing: "border-box", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "0 10px", fontSize: 16, fontFamily: dsF.sans }} />
         <button type="button" onClick={anadir} style={{ width: 44, height: 40, borderRadius: 10, border: `1px solid ${ds.border}`, background: "transparent", color: ds.accent, fontSize: 18, cursor: "pointer" }}>+</button>
       </div>
       <button type="button" onClick={cerrar} style={{ height: 40, borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Listo</button>
@@ -259,7 +283,7 @@ function PanelNota({ tarea, onCambiar, cerrar }) {
   return (
     <>
       <Cabecera titulo="Nota para el jugador" subtitulo="Opcional" />
-      <textarea autoFocus aria-label="Nota" value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} style={{ boxSizing: "border-box", width: "100%", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "10px 12px", fontSize: 13, lineHeight: 1.4, fontFamily: dsF.sans, resize: "none" }} />
+      <textarea autoFocus aria-label="Nota" value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} style={{ boxSizing: "border-box", width: "100%", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "10px 12px", fontSize: 16, lineHeight: 1.4, fontFamily: dsF.sans, resize: "none" }} />
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button type="button" onClick={() => { onCambiar({ ...tarea, nota: "" }); cerrar(); }} style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "none", background: "transparent", color: ds.inkSecondary, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Borrar</button>
         <button type="button" onClick={() => { onCambiar({ ...tarea, nota: texto.trim() }); cerrar(); }} style={{ height: 40, padding: "0 16px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Guardar</button>
