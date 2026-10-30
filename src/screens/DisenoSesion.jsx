@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, BookOpen, Lock, Play } from "lucide-react";
 import { ds, dsF, dsR, DsBadge } from "../core/designSystem.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
-import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectReal, ChipReal, TAGS_DESCRIPTIVOS_BIBLIOTECA } from "../core/components.jsx";
+import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectReal, ChipReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, tagsParaBloque } from "../core/components.jsx";
 import { genId, ID_PREFIX, api, supabase } from "../core/backend.js";
 import {
   sharedDataCache,
@@ -1403,7 +1403,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
       <div style={{ display: "flex", gap: 6, flexWrap: acoplado ? "nowrap" : "wrap", overflowX: acoplado ? "auto" : undefined, flexShrink: 0, marginBottom: 8, paddingBottom: acoplado ? 2 : 0 }}>
         {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
         {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
-        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
+        {tagsParaBloque(bloque).map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, maxHeight: acoplado ? undefined : "min(60dvh, 520px)" }}>
         {lista}
@@ -1430,7 +1430,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
         "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}{colaZona.length ? ` (quedan ${colaZona.length} más)` : ""}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
+        {tagsParaBloque(bloque).map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
       </div>
       <button onClick={() => { setPendienteZona(null); setColaZona([]); }} disabled={guardandoZona} style={{ marginTop: 10, minHeight: 40, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
         {guardandoZona ? "Guardando..." : "Cancelar"}
