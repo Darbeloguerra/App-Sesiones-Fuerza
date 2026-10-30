@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { ChevronDown, BookOpen, Lock, Play } from "lucide-react";
 import { ds, dsF, dsR, DsBadge } from "../core/designSystem.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
-import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectReal, ChipReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, tagsParaBloque } from "../core/components.jsx";
+import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectReal, ChipReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, SelectCompacto, SelectorZonaRegion, TAGS_MOVILIDAD, tagsDeZonaRegion } from "../core/components.jsx";
 import { genId, ID_PREFIX, api, supabase } from "../core/backend.js";
 import {
   sharedDataCache,
@@ -1244,6 +1244,9 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
   const [zonaFiltro, setZonaFiltro] = useState("");
+  const [regionFiltro, setRegionFiltro] = useState("");
+  const [zonaSel, setZonaSel] = useState("");
+  const [regionSel, setRegionSel] = useState("");
   const [soloVideo, setSoloVideo] = useState(false);
   const [soloFav, setSoloFav] = useState(false);
   const [previsId, setPrevisId] = useState(null);
@@ -1269,6 +1272,7 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
   const coincideTexto = (e) => (e.nombre || "").toLowerCase().includes(filtro.toLowerCase());
   const coincideFiltros = (e) =>
     (!zonaFiltro || (e.tags_descriptivos || []).includes(zonaFiltro)) &&
+    (!regionFiltro || bloque !== "Movilidad" || (e.tags_descriptivos || []).includes(regionFiltro)) &&
     (!soloVideo || !!e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean)) &&
     (!soloFav || !!e.favorito);
 
@@ -1326,15 +1330,19 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
     if (!acoplado) cerrarTodo();
   };
 
-  const elegirZona = async (zona) => {
+  const elegirZona = async (zona, region = "") => {
+    if (!zona) return;
+    const etiquetas = tagsDeZonaRegion(zona, bloque === "Movilidad" ? region : "");
     setGuardandoZona(true);
     try {
       if (pendienteZona.nuevo) {
-        onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: [zona], bloque: bloque || "" });
+        onAdd({ nombre: pendienteZona.nombre, nuevo: true, tags_descriptivos: etiquetas, bloque: bloque || "" });
       } else {
-        const actualizado = await onAsignarZona(pendienteZona, zona);
+        const actualizado = await onAsignarZona(pendienteZona, etiquetas);
         onAdd(actualizado);
       }
+      setZonaSel("");
+      setRegionSel("");
       if (colaZona.length) {
         setPendienteZona(colaZona[0]);
         setColaZona(colaZona.slice(1));
@@ -1403,7 +1411,16 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
       <div style={{ display: "flex", gap: 6, flexWrap: acoplado ? "nowrap" : "wrap", overflowX: acoplado ? "auto" : undefined, flexShrink: 0, marginBottom: 8, paddingBottom: acoplado ? 2 : 0 }}>
         {chip(soloVideo, () => setSoloVideo((v) => !v), "▶ Con vídeo")}
         {chip(soloFav, () => setSoloFav((v) => !v), "♥ Favoritos")}
-        {tagsParaBloque(bloque).map((t) => chip(zonaFiltro === t, () => setZonaFiltro(zonaFiltro === t ? "" : t), t))}
+        <select aria-label="Filtrar por zona" value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} style={{ flexShrink: 0, height: 34, padding: "0 10px", borderRadius: 999, border: `1px solid ${zonaFiltro ? ds.accent : ds.border}`, background: zonaFiltro ? ds.accentSubtle : "transparent", color: zonaFiltro ? ds.accent : ds.inkSecondary, fontSize: 16, fontFamily: dsF.sans }}>
+          <option value="">Todas las zonas</option>
+          {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        {bloque === "Movilidad" && (
+          <select aria-label="Filtrar por región" value={regionFiltro} onChange={(e) => setRegionFiltro(e.target.value)} style={{ flexShrink: 0, height: 34, padding: "0 10px", borderRadius: 999, border: `1px solid ${regionFiltro ? ds.accent : ds.border}`, background: regionFiltro ? ds.accentSubtle : "transparent", color: regionFiltro ? ds.accent : ds.inkSecondary, fontSize: 16, fontFamily: dsF.sans }}>
+            <option value="">Todas las regiones</option>
+            {TAGS_MOVILIDAD.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: "flex", gap: 12, maxHeight: acoplado ? undefined : "min(60dvh, 520px)" }}>
         {lista}
@@ -1429,10 +1446,11 @@ function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acopl
       <div style={{ fontSize: 12.5, color: ds.accent, marginBottom: 10, lineHeight: 1.4 }}>
         "{pendienteZona.nombre}" no tiene zona corporal — asígnasela para {pendienteZona.nuevo ? "crearlo" : "añadirla"}{colaZona.length ? ` (quedan ${colaZona.length} más)` : ""}
       </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {tagsParaBloque(bloque).map((t) => <TagChipReal key={t} tag={t} activo={false} onClick={() => elegirZona(t)} />)}
-      </div>
-      <button onClick={() => { setPendienteZona(null); setColaZona([]); }} disabled={guardandoZona} style={{ marginTop: 10, minHeight: 40, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
+      <SelectorZonaRegion bloque={bloque} zona={zonaSel} region={regionSel} onZona={setZonaSel} onRegion={setRegionSel} />
+      <button type="button" disabled={!zonaSel || guardandoZona} onClick={() => elegirZona(zonaSel, regionSel)} style={{ marginTop: 10, width: "100%", minHeight: 44, fontSize: 14, fontWeight: 700, color: ds.accentInk, background: ds.accent, border: "none", borderRadius: 12, opacity: !zonaSel || guardandoZona ? 0.5 : 1, cursor: "pointer", fontFamily: dsF.sans }}>
+        {guardandoZona ? "Guardando..." : pendienteZona.nuevo ? "Crear y añadir" : "Guardar zona y añadir"}
+      </button>
+      <button onClick={() => { setPendienteZona(null); setColaZona([]); setZonaSel(""); setRegionSel(""); }} disabled={guardandoZona} style={{ marginTop: 10, minHeight: 40, fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: "none", cursor: "pointer", padding: 0 }}>
         {guardandoZona ? "Guardando..." : "Cancelar"}
       </button>
     </div>
