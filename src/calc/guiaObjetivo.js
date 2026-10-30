@@ -31,18 +31,47 @@ export const OBJETIVOS_SESION = [
     etiqueta: "Potencia",
     rir: { min: 3, max: null },
     fuente: "criterio de la app: lejos del fallo",
-    nota: "% máximo del 1RM que mantiene ese RIR. La carga de máxima potencia depende del ejercicio; el RIR ≥ 3 es un criterio conservador de la app, no un rango publicado.",
+    nota: "Lejos del fallo y a máxima velocidad intencionada. Los cortes de carga son aproximados.",
     zonas: [
-      { ejercicio: "Sentadilla", rango: "30–70 %" },
-      { ejercicio: "Salto con carga", rango: "≤30 %" },
-      { ejercicio: "Cargada / arrancada", rango: "≥70 %" },
+      { tipo: "Pliométrico", ejemplos: "saltos con carga, lanzamientos", rango: "≤30 %" },
+      { tipo: "No pliométrico", ejemplos: "sentadilla, press…", rango: "30–70 %" },
+      { tipo: "Halterofilia", ejemplos: "cargadas, arrancadas", rango: "≥70 %" },
     ],
-    fuenteZonas: "Soriano et al., 2015 (cortes aproximados)",
+    fuenteZonas: "Soriano et al., 2015 y 2017",
   },
 ];
 
 const textoRir = (o) => (o.rir.max == null ? `RIR ≥ ${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
 export const etiquetaRir = textoRir;
+
+// RIR por defecto al elegir el objetivo (punto de partida editable): fuerza 4
+// (centro de 3-5), hipertrofia 2 (zona cercana al fallo sin llegar), potencia 3
+// (el mínimo del criterio conservador de la app).
+export const RIR_DEFECTO = { fuerza: 4, hipertrofia: 2, potencia: 3 };
+
+// Sugerencia de RIR y %1RM para N repeticiones. El % sale de la misma tabla
+// RTF (reps + RIR); null si cae fuera de la tabla fiable o si el objetivo
+// no se rige por RIR->% (potencia: la carga depende del tipo de movimiento).
+export function sugerirCarga(objetivo, reps) {
+  const n = Math.round(Number(reps));
+  if (!objetivo || !Number.isFinite(n) || n < 1) return null;
+  const rir = RIR_DEFECTO[objetivo.id];
+  if (rir == null) return null;
+  const rtf = n + rir;
+  const pct1rm = objetivo.zonas || rtf > RTF_TABLA_MAX ? null : Math.round(pct1RMporRTF(rtf) * 100);
+  return { rir, pct1rm };
+}
+
+// Rellena RIR y %1RM de una tarea solo si están vacíos o los puso antes esta
+// misma función (cargaAuto). Lo que escribe el entrenador nunca se pisa.
+export function aplicarSugerencia(objetivo, t) {
+  if (!objetivo || (t.modo || "reps") !== "reps") return t;
+  const vacio = (v) => v === "" || v == null;
+  if (!(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
+  const s = sugerirCarga(objetivo, t.cantidad);
+  if (!s) return t;
+  return { ...t, rir: String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
+}
 
 // Solo coincidencia exacta con la etiqueta: un objetivo escrito a mano ("fuerza
 // tren inferior") no activa la guía, para no dar un veredicto por adivinación.
@@ -90,7 +119,7 @@ export function evaluarTarea(objetivo, { reps, rir, pct1rm, modoCarga }) {
   if (!Number.isFinite(n) || n < 1) return null;
   const g = guiaPorReps(objetivo, n);
   const rango = textoRir(objetivo);
-  const sug = g ? ` Para ${g.reps} rep${g.reps === 1 ? "" : "s"} con ${rango}: ${fmtRango(g)}${g.parcial ? " o menos" : ""} del 1RM.` : "";
+  const sug = g && !g.soloTecho ? ` Para ${g.reps} rep${g.reps === 1 ? "" : "s"} con ${rango}: ${fmtRango(g)}${g.parcial ? " o menos" : ""} del 1RM.` : "";
   let rirImp = null;
   let origen = "";
   let lejosDeTabla = false;
