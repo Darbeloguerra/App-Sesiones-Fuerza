@@ -120,11 +120,11 @@ export const regionDeTags = (tags) => (tags || []).find((t) => TAGS_MOVILIDAD.in
 export const tagsDeZonaRegion = (zona, region) => (zona === "Movilidad" ? [zona, region] : [zona]).filter(Boolean);
 
 // Desplegable compacto con título pequeño encima.
-export function SelectCompacto({ etiqueta, valor, onCambiar, opciones, vacio, tituloVisible = true }) {
+export function SelectCompacto({ etiqueta, valor, onCambiar, opciones, vacio, tituloVisible = true, alerta = false }) {
   return (
     <label style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: "1 1 150px" }}>
       {tituloVisible && <span style={{ fontSize: 10, fontWeight: 600, color: ds.inkSecondary, paddingLeft: 2 }}>{etiqueta}</span>}
-      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: valor ? ds.ink : ds.inkMuted, fontSize: 16, fontWeight: 600, fontFamily: dsF.sans }}>
+      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${alerta ? ds.danger : ds.border}`, background: ds.surface, color: valor ? ds.ink : ds.inkMuted, fontSize: 16, fontWeight: 600, fontFamily: dsF.sans }}>
         <option value="">{vacio}</option>
         {opciones.map((o) => <option key={o} value={o}>{o}</option>)}
       </select>
@@ -133,11 +133,11 @@ export function SelectCompacto({ etiqueta, valor, onCambiar, opciones, vacio, ti
 }
 
 // Zona corporal y, en movilidad, su región: dos desplegables.
-export function SelectorZonaRegion({ zona, region, onZona, onRegion }) {
+export function SelectorZonaRegion({ zona, region, onZona, onRegion, alerta = false, tituloVisible = true }) {
   return (
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-      <SelectCompacto etiqueta="Zona corporal" valor={zona} onCambiar={onZona} opciones={TAGS_DESCRIPTIVOS_BIBLIOTECA} vacio="Elige la zona…" />
-      {zona === "Movilidad" && <SelectCompacto etiqueta="Región (opcional)" valor={region} onCambiar={onRegion} opciones={TAGS_MOVILIDAD} vacio="Sin región" />}
+      <SelectCompacto etiqueta="Zona corporal" valor={zona} onCambiar={onZona} opciones={TAGS_DESCRIPTIVOS_BIBLIOTECA} vacio="Elige la zona…" alerta={alerta} tituloVisible={tituloVisible} />
+      {zona === "Movilidad" && <SelectCompacto etiqueta="Región (opcional)" valor={region} onCambiar={onRegion} opciones={TAGS_MOVILIDAD} vacio="Sin región" tituloVisible={tituloVisible} />}
     </div>
   );
 }
