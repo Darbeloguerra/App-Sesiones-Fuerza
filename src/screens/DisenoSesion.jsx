@@ -38,7 +38,7 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
-import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { objetivoDeTexto, avisoDeTarea, firmaCarga, textoSugerido, tiraReferencia, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, FlechasTarea } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
@@ -619,6 +619,19 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
   );
 }
 
+// Resumen sobre la lista de fuerza: cuántas tareas tienen la carga fuera de la zona.
+function ResumenAvisosCarga({ objetivo, tareas }) {
+  if (!objetivo) return null;
+  const n = tareas.filter((t) => avisoDeTarea(objetivo, t)).length;
+  if (!n) return null;
+  return (
+    <div role="status" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", background: ds.bgElevated, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, fontSize: 12, lineHeight: 1.4, color: ds.inkSecondary }}>
+      <span style={{ color: ds.accent, fontWeight: 700 }}>⚠ {n === 1 ? "1 tarea" : `${n} de ${tareas.length} tareas`}</span>
+      <span>con la carga fuera de la zona de {objetivo.etiqueta}. Toca la etiqueta de cada tarea para ver el motivo.</span>
+    </div>
+  );
+}
+
 function datosSuperserie(tareas) {
   let grupo = 0;
   let dentro = 0;
@@ -692,7 +705,7 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
 
 // Contenido de la fila en modo tabla (iPad horizontal): nombre con etiquetas
 // (tipo, material, nota, aviso), cinco cajones iguales con desplegable y flechas.
-function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, evalGuia, fueraRango, orden, superserie, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null }) {
+function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null }) {
   const modo = tarea.modo || "reps";
   const enSuper = !!superserie && (superserie.conAnt || superserie.conSig);
   const modos = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -705,12 +718,16 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, eval
   const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null;
   const zr = conGuia ? zonaRir(objetivoGuia) : null;
   const zp = conGuia ? zonaPct(objetivoGuia, { reps: tarea.cantidad, tipoMov: tarea.tipoMov }) : null;
-  const rirOpc = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: v === 6 ? "6 o más" : String(v), zona: !!zr && v >= zr.min && (zr.max == null || v <= zr.max), nota: !!zr && v >= zr.min && (zr.max == null || v <= zr.max) ? "zona" : "" }));
-  const pctOpc = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map((v) => { const z = !!zp && v >= zp.min && v <= zp.max; return { v: String(v), t: `${v} %`, zona: z, nota: z ? "zona" : "" }; });
+  const rirOpc = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: v === 6 ? "6 o más" : String(v), zona: !!zr && v >= zr.min && (zr.max == null || v <= zr.max), fuera: !!zr && !(v >= zr.min && (zr.max == null || v <= zr.max)), nota: !!zr && v >= zr.min && (zr.max == null || v <= zr.max) ? "zona" : "" }));
+  const pctOpc = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map((v) => { const z = !!zp && v >= zp.min && v <= zp.max; return { v: String(v), t: `${v} %`, zona: z, fuera: !!zp && !z, nota: z ? "zona" : "" }; });
   const textoZonaPct = zp ? (zp.min === 0 ? `≤${zp.max}` : `${zp.min}–${zp.max}`) : "";
   const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
   const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
   const autoRec = Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—";
+  const avRir = aviso && (aviso.campo === "rir" || aviso.campo === "ambos") ? aviso.estado : null;
+  const avPct = aviso && (aviso.campo === "pct" || aviso.campo === "ambos") ? aviso.estado : null;
+  const textoBoton = aviso && aviso.sugerido ? `Usar lo sugerido: ${textoSugerido(aviso.sugerido)}` : null;
+  const infoAviso = aviso ? { mensaje: aviso.mensaje, textoBoton, onAplicar: onAplicarSugerido } : null;
   const claseLetra = enSuper ? { background: ds.accent, color: ds.accentInk } : { background: ds.border, color: ds.accent };
   const letra = orden != null && (
     <span style={{ minWidth: 26, height: 26, padding: "0 5px", boxSizing: "border-box", borderRadius: 8, ...claseLetra, fontFamily: dsF.mono, fontSize: 11.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{orden}</span>
@@ -723,7 +740,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, eval
       <EtiquetaMaterial tarea={tarea} onCambiar={onCambiar} disponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} />
       <EtiquetaNota tarea={tarea} onCambiar={onCambiar} />
       {onVerVideo && <EtiquetaAccion texto="▶ Vídeo" ariaLabel="Ver vídeo" onClick={onVerVideo} />}
-      {fueraRango && <EtiquetaAviso mensaje={evalGuia.mensaje} />}
+      {aviso && <EtiquetaAviso aviso={aviso} objetivo={objetivoGuia} onAplicar={onAplicarSugerido} onIgnorar={onIgnorarAviso} />}
     </div>
   );
   const flechas = <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />;
@@ -740,9 +757,9 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, eval
         pie={mostrarCarga && modo === "reps" ? <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={sug ? `Rellena RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null} /> : null} />
       {mostrarCarga && (
         <>
-          <CeldaDesplegable movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc}
+          <CeldaDesplegable movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc}
             pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />
-          <CeldaDesplegable movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc}
+          <CeldaDesplegable movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc}
             pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />
         </>
       )}
@@ -782,8 +799,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   // en móvil, en dos niveles. Siempre con los mismos desplegables.
   const movil = useAnchoVentana() < ANCHO_MIN_TABLA;
   // Veredicto frente al objetivo de la sesión (solo fuerza con repeticiones).
-  const evalGuia = objetivoGuia && mostrarCarga && (tarea.modo || "reps") === "reps" ? evaluarTarea(objetivoGuia, { reps: tarea.cantidad, rir: tarea.rir, pct1rm: tarea.pct1rm, modoCarga: tarea.modoCarga }) : null;
-  const fueraRango = evalGuia && evalGuia.estado !== "dentro";
+  const aviso = objetivoGuia && mostrarCarga ? avisoDeTarea(objetivoGuia, tarea) : null;
   // Con objetivo de sesión, RIR y %1RM se rellenan solos al poner las repeticiones.
   // Si el entrenador escribe RIR o % a mano, deja de actualizarse (cargaAuto=false).
   const cambiarOriginal = onCambiar;
@@ -796,6 +812,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
     if (mostrarCarga && (editoCarga || t !== nuevo)) t = { ...t, modoCarga: Number(t.pct1rm) > 0 ? "pct1rm" : "rir" };
     cambiarOriginal(t);
   };
+  const aplicarSugerido = () => {
+    const t = aplicarSugerencia(objetivoGuia, tarea, true);
+    cambiarOriginal({ ...t, avisoOk: undefined, modoCarga: Number(t.pct1rm) > 0 ? "pct1rm" : "rir" });
+  };
+  const ignorarAviso = () => onCambiar({ ...tarea, avisoOk: firmaCarga(tarea) });
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
   const resumen = resumenTareaDiseno(tarea, mostrarCarga);
 
@@ -809,8 +830,8 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
   return (
     <>
-    <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
-      <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} evalGuia={evalGuia} fueraRango={fueraRango} orden={orden} superserie={superserie} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
+    <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto || aviso ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
+      <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
     </div>
     {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
       <button
@@ -3687,6 +3708,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
                     {guiaObjetivo && <BannerGuiaObjetivo objetivo={guiaObjetivo} />}
+                    <ResumenAvisosCarga objetivo={guiaObjetivo} tareas={tareasFuerza} />
                     {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
