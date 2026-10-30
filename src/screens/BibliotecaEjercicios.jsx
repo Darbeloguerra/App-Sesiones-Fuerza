@@ -284,7 +284,8 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   // sentido dejar marcar varias a la vez como antes.
   const zonaSelEd = zonaDeTags(tagsSel);
   const regionSelEd = regionDeTags(tagsSel);
-  const seleccionarZona = (t) => setTagsSel(tagsDeZonaRegion(t, t === "Movilidad" ? regionSelEd : ""));
+  const [faltante, setFaltante] = useState("");
+  const seleccionarZona = (t) => { setFaltante(""); setTagsSel(tagsDeZonaRegion(t, t === "Movilidad" ? regionSelEd : "")); };
   const seleccionarRegion = (r) => setTagsSel(tagsDeZonaRegion(zonaSelEd, r));
   const videoIdValido = extractYouTubeId(videoUrl);
   const esDirectoValido = esVideoDirecto(videoUrl);
@@ -429,7 +430,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
-          <SelectorZonaRegion zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} />
+          <SelectorZonaRegion zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} alerta={!!faltante && !zonaSelEd} tituloVisible={false} />
         </div>
         <div onClick={() => setSinLateralidad((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <span
@@ -544,12 +545,14 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           </div>
         )}
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-          {error && <div style={{ color: ds.danger, fontSize: 12, flex: 1, alignSelf: "center" }}>{error}</div>}
+          {(faltante || error) && <div role="alert" style={{ color: ds.danger, fontSize: 12.5, flex: 1, alignSelf: "center" }}>{faltante || error}</div>}
           <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
           <DsButton
             disabled={guardando}
             onClick={async () => {
-              if (!nombre.trim() || !zonaSelEd) return;
+              if (!nombre.trim()) { setFaltante("Escribe el nombre del ejercicio."); return; }
+              if (!zonaSelEd) { setFaltante("Elige la zona corporal: es obligatoria."); return; }
+              setFaltante("");
               setGuardando(true);
               await onGuardar({
                 id: ejercicioEditar?.id,
