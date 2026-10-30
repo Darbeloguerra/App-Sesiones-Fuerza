@@ -33,9 +33,8 @@ export const OBJETIVOS_SESION = [
     fuente: "criterio de la app: lejos del fallo",
     nota: "Lejos del fallo y a máxima velocidad intencionada. Los cortes de carga son aproximados.",
     zonas: [
-      { tipo: "Pliométrico", ejemplos: "saltos con carga, lanzamientos", rango: "≤30 %" },
-      { tipo: "No pliométrico", ejemplos: "sentadilla, press…", rango: "30–70 %" },
-      { tipo: "Halterofilia", ejemplos: "cargadas, arrancadas", rango: "≥70 %" },
+      { id: "pliometrico", tipo: "Pliométrico", ejemplos: "saltos con carga, lanzamientos", rango: "≤30 %" },
+      { id: "nopliometrico", tipo: "No pliométrico", ejemplos: "sentadilla, press, peso muerto…", rango: "30–70 %" },
     ],
     fuenteZonas: "Soriano et al., 2015 y 2017",
   },
@@ -52,13 +51,19 @@ export const RIR_DEFECTO = { fuerza: 4, hipertrofia: 2, potencia: 3 };
 // Sugerencia de RIR y %1RM para N repeticiones. El % sale de la misma tabla
 // RTF (reps + RIR); null si cae fuera de la tabla fiable o si el objetivo
 // no se rige por RIR->% (potencia: la carga depende del tipo de movimiento).
-export function sugerirCarga(objetivo, reps) {
+// Potencia: %1RM por defecto dentro de la zona del tipo de movimiento
+// (pliométrico: techo 30 %; no pliométrico: centro de 30-70 %). Punto de partida editable.
+export const PCT_POTENCIA_DEFECTO = { pliometrico: 30, nopliometrico: 50 };
+
+export function sugerirCarga(objetivo, reps, tipo) {
   const n = Math.round(Number(reps));
   if (!objetivo || !Number.isFinite(n) || n < 1) return null;
   const rir = RIR_DEFECTO[objetivo.id];
   if (rir == null) return null;
   const rtf = n + rir;
-  const pct1rm = objetivo.zonas || rtf > RTF_TABLA_MAX ? null : Math.round(pct1RMporRTF(rtf) * 100);
+  const pct1rm = objetivo.zonas
+    ? PCT_POTENCIA_DEFECTO[tipo === "pliometrico" ? "pliometrico" : "nopliometrico"]
+    : rtf > RTF_TABLA_MAX ? null : Math.round(pct1RMporRTF(rtf) * 100);
   return { rir, pct1rm };
 }
 
@@ -68,7 +73,7 @@ export function aplicarSugerencia(objetivo, t) {
   if (!objetivo || (t.modo || "reps") !== "reps") return t;
   const vacio = (v) => v === "" || v == null;
   if (!(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
-  const s = sugerirCarga(objetivo, t.cantidad);
+  const s = sugerirCarga(objetivo, t.cantidad, t.tipoMov);
   if (!s) return t;
   return { ...t, rir: String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
 }
@@ -163,4 +168,48 @@ export function tiraReferencia(objetivo, maxReps = 6) {
     if (g) out.push({ reps: r, texto: g.soloTecho || g.parcial ? `≤${g.pctMax} %` : g.pctMin === g.pctMax ? `${g.pctMax} %` : `${g.pctMin}–${g.pctMax} %` });
   }
   return out;
+}
+
+// Zona de %1RM que el desplegable marca en ámbar. Fuerza/Hipertrofia: el rango
+// que deja el RIR del objetivo para esas repeticiones. Potencia: la zona del
+// tipo de movimiento (pliométrico <=30 %, no pliométrico 30-70 %).
+export function zonaPct(objetivo, { reps, tipoMov } = {}) {
+  if (!objetivo) return null;
+  if (objetivo.zonas) return tipoMov === "pliometrico" ? { min: 0, max: 30 } : { min: 30, max: 70 };
+  const g = guiaPorReps(objetivo, reps);
+  if (!g || g.soloTecho) return null;
+  return { min: g.pctMin, max: g.pctMax };
+}
+
+// Zona de RIR (min..max, max null = sin techo) del objetivo.
+export function zonaRir(objetivo) {
+  return objetivo ? { min: objetivo.rir.min, max: objetivo.rir.max } : null;
+}
+
+// Qué implica subir o bajar cada valor, con su fuente. Solo afirmaciones
+// respaldadas por los estudios citados (tendencias, no garantías).
+export function implicaciones(campo, objetivo) {
+  const id = objetivo?.id;
+  if (campo === "reps") {
+    return {
+      lineas: [
+        { etq: "Más reps", txt: "con la misma carga: te acercas al fallo (baja el RIR) y sube la fatiga." },
+        { etq: "Menos reps", txt: "más margen; admite más carga con el mismo RIR." },
+      ],
+      fuente: "Tabla de repeticiones máximas de la app",
+    };
+  }
+  if (campo === "rir") {
+    if (id === "fuerza") return { lineas: [{ etq: "Más RIR", txt: "(más lejos del fallo): menos fatiga; entre RIR 3 y 5 la fuerza se gana igual." }, { etq: "Menos RIR", txt: "(más cerca): más fatiga y sin ganancia clara de fuerza; sí tiende a más hipertrofia." }], fuente: "Robinson et al., 2024" };
+    if (id === "hipertrofia") return { lineas: [{ etq: "Menos RIR", txt: "(más cerca del fallo, 0–5): tiende a más hipertrofia, con más fatiga." }, { etq: "Más RIR", txt: "(más lejos): menos fatiga, pero la hipertrofia tiende a ser menor." }], fuente: "Robinson et al., 2024" };
+    if (id === "potencia") return { lineas: [{ etq: "Más RIR", txt: "(lejos del fallo): la pérdida de velocidad crece con las repeticiones hechas, así que parar antes la mantiene." }, { etq: "Menos RIR", txt: "(cerca del fallo): baja la velocidad; parar con poca pérdida de velocidad mejoró más el salto." }], fuente: "Rodríguez-Rosell et al., 2020; Pareja-Blanco et al., 2017" };
+    return null;
+  }
+  if (campo === "pct") {
+    if (id === "fuerza") return { lineas: [{ etq: "Cargas altas y moderadas", txt: "dan más fuerza que las ligeras; entre ellas la diferencia no fue significativa." }, { etq: "Cargas ligeras", txt: "dan menos ganancia de fuerza." }], fuente: "López et al., 2021 (series al fallo; alta = hasta 8 repeticiones máximas)" };
+    if (id === "hipertrofia") return { lineas: [{ etq: "Cualquier carga", txt: "(ligera, moderada o alta) da una hipertrofia similar si las series se llevan al fallo." }], fuente: "López et al., 2021" };
+    if (id === "potencia") return { lineas: [{ etq: "Dentro de la zona", txt: "es la carga de máxima potencia del movimiento." }, { etq: "Por encima o por debajo", txt: "la potencia máxima baja." }], fuente: "Soriano et al., 2015 y 2017" };
+    return null;
+  }
+  return null;
 }
