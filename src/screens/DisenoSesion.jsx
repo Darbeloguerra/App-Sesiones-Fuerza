@@ -38,7 +38,7 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
-import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, aplicarSugerencia, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -768,32 +768,21 @@ function datosSuperserie(tareas) {
 // el %1RM que lo deja (ver calc/guiaObjetivo.js para la base científica).
 function BannerGuiaObjetivo({ objetivo }) {
   const tira = tiraReferencia(objetivo, 6);
+  const chip = { fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap" };
   return (
-    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "8px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 12.5, color: ds.ink }}>
-        <b>Objetivo {objetivo.etiqueta.toLowerCase()}</b> · trabaja con <b style={{ color: ds.accent }}>{etiquetaRir(objetivo)}</b> ({objetivo.fuente})
-      </div>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {tira.map((x) => (
-          <span key={x.reps} style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>
-            {x.reps} rep{x.reps === 1 ? "" : "s"} → <b style={{ color: ds.ink }}>{x.texto}</b>
-          </span>
-        ))}
-      </div>
-      {objetivo.zonas && (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <div style={{ fontSize: 11.5, color: ds.ink }}>Carga de máxima potencia según el ejercicio:</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {objetivo.zonas.map((z) => (
-              <span key={z.ejercicio} style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "3px 9px", whiteSpace: "nowrap" }}>
-                {z.ejercicio} → <b style={{ color: ds.ink }}>{z.rango}</b>
-              </span>
-            ))}
-          </div>
-          <div style={{ fontSize: 10.5, color: ds.inkMuted }}>{objetivo.fuenteZonas}</div>
-        </div>
-      )}
-      <div style={{ fontSize: 10.5, color: ds.inkMuted, lineHeight: 1.4 }}>{objetivo.nota || "% del 1RM que deja ese RIR. Rangos medios de estudios; el RIR lo estima el jugador."}</div>
+    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11.5, color: ds.ink }}>
+      <span style={{ whiteSpace: "nowrap" }}>
+        <b>{objetivo.etiqueta}</b> · <b style={{ color: ds.accent }}>{etiquetaRir(objetivo)}</b>
+      </span>
+      {!objetivo.zonas && tira.map((x) => (
+        <span key={x.reps} style={chip}>{x.reps} rep{x.reps === 1 ? "" : "s"} <b style={{ color: ds.ink }}>{x.texto}</b></span>
+      ))}
+      {objetivo.zonas && objetivo.zonas.map((z) => (
+        <span key={z.tipo} title={z.ejemplos} style={chip}>{z.tipo} <b style={{ color: ds.ink }}>{z.rango}</b></span>
+      ))}
+      <span style={{ fontSize: 10, color: ds.inkMuted, flex: "1 1 160px", minWidth: 0 }} title={objetivo.nota || ""}>
+        {objetivo.zonas ? "% del 1RM. " : "% del 1RM que deja ese RIR. "}{objetivo.fuenteZonas || objetivo.fuente}
+      </span>
     </div>
   );
 }
@@ -817,7 +806,7 @@ function EncabezadoTablaTareas({ mostrarCarga }) {
 }
 
 function estiloCeldaTabla(alerta) {
-  return { width: "100%", height: 38, textAlign: "center", fontWeight: 700, fontSize: 14, fontFamily: dsF.sans, background: ds.surface, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 10, color: alerta ? ds.danger : ds.ink, boxSizing: "border-box" };
+  return { width: "100%", height: 34, textAlign: "center", fontWeight: 700, fontSize: 13, fontFamily: dsF.sans, background: ds.surface, border: `1px solid ${alerta ? ds.danger : ds.border}`, borderRadius: 10, color: alerta ? ds.danger : ds.ink, boxSizing: "border-box" };
 }
 function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "", apagada = false, resaltarSiTiene = false) {
   const tiene = valor !== "" && valor != null;
@@ -837,6 +826,16 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   // Veredicto frente al objetivo de la sesión (solo fuerza con repeticiones).
   const evalGuia = objetivoGuia && mostrarCarga && (tarea.modo || "reps") === "reps" ? evaluarTarea(objetivoGuia, { reps: tarea.cantidad, rir: tarea.rir, pct1rm: tarea.pct1rm, modoCarga: tarea.modoCarga }) : null;
   const fueraRango = evalGuia && evalGuia.estado !== "dentro";
+  // Con objetivo de sesión, RIR y %1RM se rellenan solos al poner las repeticiones.
+  // Si el entrenador escribe RIR o % a mano, deja de actualizarse (cargaAuto=false).
+  const cambiarOriginal = onCambiar;
+  onCambiar = (nuevo) => {
+    let t = nuevo;
+    const editoCarga = String(nuevo.rir ?? "") !== String(tarea.rir ?? "") || String(nuevo.pct1rm ?? "") !== String(tarea.pct1rm ?? "");
+    if (editoCarga) t = { ...t, cargaAuto: false };
+    else if (objetivoGuia && mostrarCarga && String(nuevo.cantidad ?? "") !== String(tarea.cantidad ?? "")) t = aplicarSugerencia(objetivoGuia, t);
+    cambiarOriginal(t);
+  };
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
   const resumen = resumenTareaDiseno(tarea, mostrarCarga);
 
@@ -880,7 +879,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
             abrir();
           }
         }}
-        style={{ flex: 1, minWidth: 0, minHeight: tabla ? 40 : 48, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", touchAction: "manipulation" }}
+        style={{ flex: 1, minWidth: 0, minHeight: tabla ? 36 : 48, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", touchAction: "manipulation" }}
       >
         {!tabla && tarea.gif && (miniaturaTarea(tarea.gif) || extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif)) && (
           <button
@@ -908,7 +907,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
           </span>
         )}
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ color: ds.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.25, ...(tabla ? { overflowWrap: "break-word" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{tarea.nombre}</div>
+          <div style={{ color: ds.ink, fontSize: 13.5, fontWeight: 600, lineHeight: 1.25, ...(tabla ? { overflowWrap: "break-word" } : { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }) }}>{tarea.nombre}</div>
           {!tabla && <div style={{ fontSize: 12.5, fontWeight: 600, color: resumen.incompleto ? ds.accent : ds.inkSecondary, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{resumen.texto}</div>}
           {!tabla && fueraRango && <div style={{ fontSize: 11.5, color: ds.accent, lineHeight: 1.3 }}>⚠ {evalGuia.estado === "bajo" ? "Demasiado cerca del fallo para el objetivo" : "Demasiado lejos del fallo para el objetivo"}</div>}
         </div>
@@ -920,7 +919,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
           {celdaTabla("Repeticiones", tarea.cantidad, (v) => onCambiar({ ...tarea, cantidad: v }), "—", 44, ({ reps: "", tiempo: "s", minutos: "min", metros: "m" })[tarea.modo] || "")}
           {mostrarCarga && (
             <div style={{ display: "flex", gap: 3, width: 76, flexShrink: 0 }}>
-              <button type="button" aria-label="Cambiar entre RIR y % del 1RM" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ width: 30, height: 38, flexShrink: 0, borderRadius: 8, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+              <button type="button" aria-label="Cambiar entre RIR y % del 1RM" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ width: 30, height: 34, flexShrink: 0, borderRadius: 8, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
                 {tarea.modoCarga === "pct1rm" ? "%" : "RIR"}
               </button>
               {tarea.modoCarga === "pct1rm"
@@ -930,11 +929,11 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
           )}
           {/* Recuperación: en gris el valor automático recomendado; si escribes uno, pasa a manual (ámbar). Borrarlo vuelve al automático. */}
           {celdaTabla("Recuperación (s)", tarea.descanso, (v) => onCambiar({ ...tarea, descanso: v }), Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—", 50, "", Number(tarea.series) <= 1, true)}
-          <button type="button" aria-label="Lado" title="Bilateral: las dos piernas/brazos a la vez. Unilateral: se repite cada lado. Toca para cambiar." onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })} style={{ width: 60, height: 38, flexShrink: 0, borderRadius: 8, border: `1px solid ${tarea.lateralidad === "unilateral" ? ds.accent : ds.border}`, background: tarea.lateralidad === "unilateral" ? ds.accentSubtle : ds.surface, color: tarea.lateralidad === "unilateral" ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
+          <button type="button" aria-label="Lado" title="Bilateral: las dos piernas/brazos a la vez. Unilateral: se repite cada lado. Toca para cambiar." onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })} style={{ width: 60, height: 34, flexShrink: 0, borderRadius: 8, border: `1px solid ${tarea.lateralidad === "unilateral" ? ds.accent : ds.border}`, background: tarea.lateralidad === "unilateral" ? ds.accentSubtle : ds.surface, color: tarea.lateralidad === "unilateral" ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
             {tarea.lateralidad === "unilateral" ? "Unilat." : "Bilat."}
           </button>
           <SelectorMaterialReal compacto seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
-          <button type="button" aria-label="Más opciones" title={fueraRango ? evalGuia.mensaje : "Más opciones: unidad de medida, tipo de resistencia, nota, mover, quitar"} onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 32, height: 38, fontSize: 16, flexShrink: 0, ...(fueraRango ? { borderColor: ds.accent, color: ds.accent, background: ds.accentSubtle } : null) }}>{fueraRango ? "⚠" : "⋯"}</button>
+          <button type="button" aria-label="Más opciones" title={fueraRango ? evalGuia.mensaje : "Más opciones: unidad de medida, tipo de resistencia, nota, mover, quitar"} onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 32, height: 34, fontSize: 16, flexShrink: 0, ...(fueraRango ? { borderColor: ds.accent, color: ds.accent, background: ds.accentSubtle } : null) }}>{fueraRango ? "⚠" : "⋯"}</button>
         </>
       )}
       {!tabla && onSubir && (
@@ -2359,6 +2358,15 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   const [tareasResistencia, setTareasResistencia] = useState([]);
   const [circuitosResistencia, setCircuitosResistencia] = useState([]);
   const [tareasFuerza, setTareasFuerza] = useState([]);
+  // Al elegir o cambiar el objetivo se rellenan RIR y %1RM de las tareas de fuerza
+  // que estén vacías o rellenadas automáticamente (nunca las escritas a mano).
+  const objetivoActivo = objetivoDeTexto(objetivo);
+  const objetivoPrevioRef = useRef(objetivoActivo?.id);
+  useEffect(() => {
+    if (objetivoPrevioRef.current === objetivoActivo?.id) return;
+    objetivoPrevioRef.current = objetivoActivo?.id;
+    if (objetivoActivo) setTareasFuerza((prev) => prev.map((t) => aplicarSugerencia(objetivoActivo, t)));
+  }, [objetivoActivo?.id]);
   // Progresión de carga al reutilizar una sesión: puntos de %1RM que se suben
   // a las tareas de Fuerza pautadas por %1RM. "0" = mantener todas.
   const [pasoProgresion, setPasoProgresion] = useState(sinProgresion ? "0" : "2");
