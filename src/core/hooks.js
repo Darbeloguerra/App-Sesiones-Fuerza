@@ -855,7 +855,8 @@ export async function resolveEjercicio(ejercicios, def) {
 // vez de dejarlo sin clasificar, se le asigna ahí mismo y queda guardado
 // para siempre en ese ejercicio.
 export async function actualizarZonaEjercicio(ejercicio, zona) {
-  const record = { ...ejercicio, tags_descriptivos: [zona] };
+  // zona puede ser un texto o una lista [zona, región] (la región solo en movilidad).
+  const record = { ...ejercicio, tags_descriptivos: Array.isArray(zona) ? zona : [zona] };
   const saved = await api.save("ejercicios", record);
   invalidateEntityCache("ejercicios");
   return saved;
