@@ -180,3 +180,20 @@ test("avisoDeTarea: silenciar con avisoOk hasta que cambie la carga", () => {
   assert.ok(avisoDeTarea(fuerza, { ...ok, rir: "1" }));
   assert.equal(avisoDeTarea(fuerza, { ...t, modo: "tiempo" }), null);
 });
+
+test("evaluarCarga reps: fuerza >8 es informativo; hipertrofia no avisa; potencia >6 avisa", () => {
+  const f = evaluarCarga(fuerza, { reps: 12, rir: 4, pct1rm: "" });
+  assert.equal(f.estado, "info");
+  assert.equal(f.campo, "reps");
+  assert.equal(evaluarCarga(hiper, { reps: 15, rir: 2, pct1rm: "" }).estado, "dentro");
+  const pot = objetivoDeTexto("Potencia");
+  const p = evaluarCarga(pot, { reps: 8, rir: 3, pct1rm: 50, tipoMov: "nopliometrico" });
+  assert.equal(p.estado, "fuera");
+  assert.equal(p.campo, "reps");
+  assert.equal(p.sugerido, null);
+  assert.equal(evaluarCarga(pot, { reps: 6, rir: 3, pct1rm: 50, tipoMov: "nopliometrico" }).estado, "dentro");
+});
+test("evaluarCarga reps: sin RIR ni % también avisa por repeticiones", () => {
+  assert.equal(evaluarCarga(fuerza, { reps: 10, rir: "", pct1rm: "" }).campo, "reps");
+  assert.equal(evaluarCarga(fuerza, { reps: 5, rir: "", pct1rm: "" }), null);
+});
