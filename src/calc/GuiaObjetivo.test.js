@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
+import { evaluarCarga, avisoDeTarea, firmaCarga, sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
 
 const fuerza = objetivoDeTexto("Fuerza");
 const hiper = objetivoDeTexto("hipertrofia");
@@ -136,4 +136,47 @@ test("zonaRir e implicaciones", () => {
   assert.ok(implicaciones("pct", pot).fuente.includes("Soriano"));
   assert.equal(implicaciones("reps", null).lineas.length, 2);
   assert.equal(implicaciones("pct", null), null);
+});
+
+test("evaluarCarga fuerza: carga sugerida está dentro", () => {
+  const e = evaluarCarga(fuerza, { reps: 5, rir: 4, pct1rm: 77 });
+  assert.equal(e.estado, "dentro");
+});
+test("evaluarCarga fuerza: RIR 0 queda fuera por cerca del fallo y sugiere", () => {
+  const e = evaluarCarga(fuerza, { reps: 5, rir: 0, pct1rm: "" });
+  assert.equal(e.estado, "fuera");
+  assert.equal(e.campo, "rir");
+  assert.match(e.corto, /demasiado cerca del fallo/);
+  assert.equal(e.sugerido.rir, 4);
+});
+test("evaluarCarga fuerza: RIR y % que se contradicen", () => {
+  const e = evaluarCarga(fuerza, { reps: 6, rir: 4, pct1rm: 90 });
+  assert.equal(e.estado, "inconsistente");
+  assert.equal(e.campo, "ambos");
+  assert.equal(e.corto, "RIR y % no coinciden");
+});
+test("evaluarCarga fuerza: solo % que implica RIR fuera", () => {
+  const e = evaluarCarga(fuerza, { reps: 5, rir: "", pct1rm: 90 });
+  assert.equal(e.estado, "fuera");
+  assert.equal(e.campo, "pct");
+});
+test("evaluarCarga: sin datos o sin objetivo no avisa", () => {
+  assert.equal(evaluarCarga(null, { reps: 5, rir: 0 }), null);
+  assert.equal(evaluarCarga(fuerza, { reps: "", rir: 0 }), null);
+  assert.equal(evaluarCarga(fuerza, { reps: 5, rir: "", pct1rm: "" }), null);
+});
+test("evaluarCarga potencia: % fuera de la zona por tipo", () => {
+  const pot = objetivoDeTexto("Potencia");
+  assert.equal(evaluarCarga(pot, { reps: 3, rir: 3, pct1rm: 50, tipoMov: "nopliometrico" }).estado, "dentro");
+  const e = evaluarCarga(pot, { reps: 3, rir: 3, pct1rm: 50, tipoMov: "pliometrico" });
+  assert.equal(e.estado, "fuera");
+  assert.equal(e.campo, "pct");
+});
+test("avisoDeTarea: silenciar con avisoOk hasta que cambie la carga", () => {
+  const t = { modo: "reps", cantidad: "5", rir: "0", pct1rm: "" };
+  assert.ok(avisoDeTarea(fuerza, t));
+  const ok = { ...t, avisoOk: firmaCarga(t) };
+  assert.equal(avisoDeTarea(fuerza, ok), null);
+  assert.ok(avisoDeTarea(fuerza, { ...ok, rir: "1" }));
+  assert.equal(avisoDeTarea(fuerza, { ...t, modo: "tiempo" }), null);
 });
