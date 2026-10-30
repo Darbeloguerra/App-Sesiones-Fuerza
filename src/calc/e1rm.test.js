@@ -17,6 +17,7 @@ import {
   calcularCargaSugerida,
   fatigaTarea,
   interpretarFatiga,
+  resumenFatiga,
 } from "./e1rm.js";
 
 test("pct1RMporRTF: valores exactos de tabla y punto medio interpolado", () => {
@@ -214,7 +215,22 @@ test("fatigaTarea: % de reps perdidas contado con la misma carga; soloRir si la 
 
 test("interpretarFatiga: un texto por nivel y null sin dato", () => {
   assert.equal(interpretarFatiga(null), null);
-  assert.match(interpretarFatiga({ nivel: "baja" }), /Fatiga baja/);
-  assert.match(interpretarFatiga({ nivel: "moderada" }), /Fatiga moderada/);
-  assert.match(interpretarFatiga({ nivel: "alta" }), /Fatiga alta/);
+  assert.match(interpretarFatiga({ nivel: "baja" }), /subir un poco la carga/);
+  assert.match(interpretarFatiga({ nivel: "moderada" }), /normal en series de trabajo/);
+  assert.match(interpretarFatiga({ nivel: "alta" }), /muy cansado/);
+});
+
+test("resumenFatiga: un solo porcentaje, reps perdidas en llano", () => {
+  const r = resumenFatiga(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 3, ultimaRirReal: 0 }));
+  assert.equal(r.nombre, "Fatiga moderada");
+  assert.match(r.texto, /rindió un 10 % menos que la mejor \(2 reps menos\)/);
+  assert.equal((r.texto.match(/%/g) || []).length, 1);
+  assert.equal(resumenFatiga(null), null);
+});
+
+test("resumenFatiga: sin caída -> mantuvo el rendimiento; solo RIR -> 'menos reserva'", () => {
+  const igual = resumenFatiga(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 2, ultimaRepsReal: 5, ultimaRirReal: 2 }));
+  assert.match(igual.texto, /Mantuviste el rendimiento/);
+  const rir = resumenFatiga(fatigaTarea({ cargaReal: 100, repsReal: 5, rirReal: 3, ultimaRepsReal: 5, ultimaRirReal: 1 }));
+  assert.match(rir.texto, /con menos reserva/);
 });
