@@ -98,14 +98,29 @@ function ListaOpciones({ opciones, valor, onElegir, etiqueta, altoMax = 260 }) {
       {opciones.map((o) => {
         const sel = String(o.v) === String(valor);
         const base = { flexShrink: 0, height: 38, boxSizing: "border-box", padding: "0 12px", borderRadius: 8, border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, fontWeight: 600, cursor: "pointer", textAlign: "left", fontFamily: dsF.sans, width: "100%" };
+        const nota = o.fuera ? (sel ? "fuera de zona" : "fuera") : (o.nota || "");
         const estilo = sel ? { ...base, background: ds.accent, color: ds.accentInk, fontWeight: 700 } : o.zona ? { ...base, background: ds.accentSubtle, color: ds.accent } : o.tenue ? { ...base, background: "transparent", color: ds.inkMuted, fontSize: 12.5 } : { ...base, background: "transparent", color: ds.ink };
         return (
           <button key={String(o.v) + o.t} ref={sel ? selRef : undefined} type="button" role="option" aria-selected={sel} onClick={() => o.onElegir ? o.onElegir() : onElegir(o.v)} style={estilo}>
             <span>{o.t}</span>
-            <span style={{ fontSize: 11 }}>{sel ? "✓ " : ""}{o.nota || ""}</span>
+            <span style={{ fontSize: 11, color: o.fuera && !sel ? ds.danger : undefined }}>{sel ? "✓ " : ""}{nota}</span>
           </button>
         );
       })}
+    </div>
+  );
+}
+
+// Aviso dentro de un desplegable: motivo y botón para usar la carga sugerida.
+export function BloqueAviso({ info, cerrar }) {
+  if (!info) return null;
+  const rojo = info.estado === "inconsistente";
+  return (
+    <div style={{ border: `1px solid ${rojo ? ds.danger : ds.accentBorderSubtle}`, background: rojo ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
+      <span><b style={{ color: rojo ? ds.danger : ds.accent }}>⚠</b> {info.mensaje}</span>
+      {info.textoBoton && info.onAplicar && (
+        <button type="button" onClick={() => { info.onAplicar(); cerrar(); }} style={{ height: 34, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontSize: 12.5, fontWeight: 700, fontFamily: dsF.sans, cursor: "pointer" }}>{info.textoBoton}</button>
+      )}
     </div>
   );
 }
@@ -137,7 +152,7 @@ export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
 
 // Celda numérica: muestra el valor y abre un desplegable con valores rápidos,
 // "Otro valor" (teclado) y, opcionalmente, campos extra y la explicación.
-export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false }) {
+export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false, aviso = null, avisoInfo = null }) {
   const [abierto, setAbierto] = useState(false);
   const [teclado, setTeclado] = useState(false);
   const [borrador, setBorrador] = useState("");
@@ -159,14 +174,16 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
   return (
     <div style={movil ? { minWidth: 0, display: "flex", flexDirection: "column", gap: 3, opacity: apagada ? 0.5 : 1 } : { width: ANCHO_COL, flexShrink: 0, opacity: apagada ? 0.5 : 1 }}>
       {movil && <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 600, color: ds.inkMuted, textAlign: "center", whiteSpace: "nowrap", fontFamily: dsF.sans }}>{etiqueta}</span>}
-      <button ref={ref} type="button" aria-label={etiqueta} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
-        style={{ position: "relative", width: "100%", height: ALTO_CELDA, boxSizing: "border-box", borderRadius: 10, background: ds.surface, border: `${abierto || (resaltar && tiene) ? 2 : 1}px solid ${alerta ? ds.danger : abierto || (resaltar && tiene) ? ds.accent : ds.border}`, color: alerta ? ds.danger : resaltar && tiene ? ds.accent : tiene ? ds.ink : ds.inkMuted, fontWeight: tiene ? 700 : 600, fontSize: 13, fontFamily: dsF.sans, cursor: "pointer", padding: 0 }}>
+      <button ref={ref} type="button" aria-label={aviso ? `${etiqueta} (aviso de carga)` : etiqueta} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
+        style={{ position: "relative", width: "100%", height: ALTO_CELDA, boxSizing: "border-box", borderRadius: 10, background: ds.surface, border: `${abierto || aviso || (resaltar && tiene) ? 2 : 1}px solid ${alerta || aviso === "inconsistente" ? ds.danger : aviso === "fuera" ? ds.accent : abierto || (resaltar && tiene) ? ds.accent : ds.border}`, color: alerta || aviso === "inconsistente" ? ds.danger : aviso === "fuera" ? ds.accent : resaltar && tiene ? ds.accent : tiene ? ds.ink : ds.inkMuted, fontWeight: tiene ? 700 : 600, fontSize: 13, fontFamily: dsF.sans, cursor: "pointer", padding: 0 }}>
         {tiene ? valor : placeholder}
         {sufijo && tiene && <span style={{ position: "absolute", right: 5, bottom: 2, fontSize: 9, color: ds.inkMuted }}>{sufijo}</span>}
+        {aviso && <span aria-hidden="true" style={{ position: "absolute", top: -7, right: -4, fontSize: 10, lineHeight: "14px", padding: "0 3px", borderRadius: 6, background: aviso === "inconsistente" ? ds.danger : ds.accent, color: ds.accentInk }}>⚠</span>}
       </button>
       {abierto && (
         <Desplegable ancla={ref} onCerrar={cerrar} ancho={330}>
           <Cabecera titulo={titulo || etiqueta} subtitulo={subtitulo} />
+          {avisoInfo && !teclado && <BloqueAviso info={{ ...avisoInfo, estado: aviso }} cerrar={cerrar} />}
           {extra}
           {teclado ? (
             <div style={{ display: "flex", gap: 8 }}>
@@ -187,6 +204,7 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
 const TONOS = {
   normal: { border: `1px solid ${ds.border}`, color: ds.inkSecondary, background: "transparent" },
   activo: { border: `1px solid ${ds.accent}`, color: ds.accent, background: ds.accentSubtle, fontWeight: 700 },
+  peligro: { border: `1px solid ${ds.danger}`, color: ds.danger, background: "transparent", fontWeight: 700 },
   vacio: { border: `1px dashed ${ds.border}`, color: ds.inkMuted, background: "transparent" },
 };
 
@@ -300,13 +318,21 @@ export function EtiquetaNota({ tarea, onCambiar }) {
   );
 }
 
-export function EtiquetaAviso({ mensaje }) {
+export function EtiquetaAviso({ aviso, objetivo, onAplicar, onIgnorar }) {
+  const rojo = aviso.estado === "inconsistente";
+  const sug = aviso.sugerido ? `RIR ${aviso.sugerido.rir}${aviso.sugerido.pct1rm != null ? ` · ${aviso.sugerido.pct1rm} %` : ""}` : "";
+  const botonBase = { height: 34, borderRadius: 9, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" };
   return (
-    <EtiquetaDesplegable rotulo="⚠ Revisa la carga ▾" ariaLabel="Aviso de la guía" tono="activo" ancho={300}>
-      {() => (
+    <EtiquetaDesplegable rotulo={`⚠ ${aviso.corto} ▾`} tono={rojo ? "peligro" : "activo"} ancho={330} ariaLabel="Aviso de carga">
+      {(cerrar) => (
         <>
-          <Cabecera titulo="Guía del objetivo" />
-          <span style={{ fontSize: 12.5, lineHeight: 1.45, color: ds.ink, padding: "0 4px" }}>{mensaje}</span>
+          <Cabecera titulo="Guía del objetivo" subtitulo={objetivo ? `${objetivo.etiqueta} · ${objetivo.rir.max == null ? `RIR ${objetivo.rir.min}+` : `RIR ${objetivo.rir.min}–${objetivo.rir.max}`}` : ""} />
+          <div style={{ border: `1px solid ${rojo ? ds.danger : ds.accentBorderSubtle}`, background: rojo ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
+            <span>{aviso.mensaje}</span>
+            {sug && onAplicar && <button type="button" onClick={() => { onAplicar(); cerrar(); }} style={{ ...botonBase, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700 }}>Aplicar sugerido: {sug}</button>}
+            {onIgnorar && <button type="button" onClick={() => { onIgnorar(); cerrar(); }} style={{ ...botonBase, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontWeight: 600 }}>Dejarlo así, es intencionado</button>}
+          </div>
+          {aviso.fuente && <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px" }}>{aviso.fuente}</span>}
         </>
       )}
     </EtiquetaDesplegable>
