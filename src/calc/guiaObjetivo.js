@@ -69,10 +69,10 @@ export function sugerirCarga(objetivo, reps, tipo) {
 
 // Rellena RIR y %1RM de una tarea solo si están vacíos o los puso antes esta
 // misma función (cargaAuto). Lo que escribe el entrenador nunca se pisa.
-export function aplicarSugerencia(objetivo, t) {
+export function aplicarSugerencia(objetivo, t, forzar = false) {
   if (!objetivo || (t.modo || "reps") !== "reps") return t;
   const vacio = (v) => v === "" || v == null;
-  if (!(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
+  if (!forzar && !(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
   const s = sugerirCarga(objetivo, t.cantidad, t.tipoMov);
   if (!s) return t;
   return { ...t, rir: String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
@@ -212,4 +212,75 @@ export function implicaciones(campo, objetivo) {
     return null;
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Aviso de carga: compara el RIR y el %1RM elegidos con la zona del objetivo y
+// entre sí. Nunca bloquea; devuelve el motivo y la carga sugerida.
+//   estado: "dentro" | "fuera" (fuera de la zona del objetivo)
+//           | "inconsistente" (el RIR y el % se contradicen según la tabla)
+//   campo:  "rir" | "pct" | "ambos" (qué celda se señala)
+// ---------------------------------------------------------------------------
+export function textoSugerido(s) {
+  return s ? `RIR ${s.rir}${s.pct1rm != null ? ` · ${s.pct1rm} %` : ""}` : "";
+}
+
+export function evaluarCarga(objetivo, { reps, rir, pct1rm, tipoMov } = {}) {
+  if (!objetivo) return null;
+  const n = Math.round(Number(reps));
+  if (!Number.isFinite(n) || n < 1) return null;
+  const tieneRir = rir !== "" && rir != null && Number.isFinite(Number(rir));
+  const p = Number(pct1rm);
+  const tienePct = pct1rm !== "" && pct1rm != null && Number.isFinite(p) && p > 0;
+  if (!tieneRir && !tienePct) return null;
+  const r = tieneRir ? Number(rir) : null;
+  const rtf = tienePct ? rtfDePct(p) : null;
+  const rirDePct = rtf != null ? rtf - n : null;
+  const sug = sugerirCarga(objetivo, n, tipoMov);
+  const sugerido = sug ? { rir: sug.rir, pct1rm: sug.pct1rm } : null;
+  const fraseSug = sug ? ` Sugerido para ${n} rep${n === 1 ? "" : "s"}: ${textoSugerido(sug)}.` : "";
+  const fuente = objetivo.fuente || "Robinson et al., 2024";
+  const res = (estado, campo, corto, mensaje, fuenteAviso) => ({ estado, campo, corto, mensaje, sugerido, fuente: fuenteAviso || fuente });
+
+  // 1) RIR y % que se contradicen (la tabla solo es fiable hasta RTF 10).
+  if (tieneRir && rirDePct != null && Math.abs(rirDePct - r) > 1) {
+    const cola = rirDePct < 0
+      ? `el ${Math.round(p)} % del 1RM solo permite unas ${Math.round(rtf)} reps como máximo y pautas ${n}.`
+      : `con ${n} reps el ${Math.round(p)} % del 1RM te deja en RIR ${Math.round(rirDePct)}, no en RIR ${r}.`;
+    return res("inconsistente", "ambos", "RIR y % no coinciden", `RIR ${r} y ${Math.round(p)} % no coinciden: ${cola}${fraseSug}`, "Tabla de repeticiones máximas de la app");
+  }
+
+  // 2) Zona de RIR (el declarado o el que implica el %).
+  const rirEf = tieneRir ? r : rirDePct;
+  if (rirEf != null && Number.isFinite(rirEf)) {
+    const rango = textoRir(objetivo);
+    const campo = tieneRir ? "rir" : "pct";
+    const quien = tieneRir ? `RIR ${r}` : `${Math.round(p)} %`;
+    const como = tieneRir ? "" : `Al ${Math.round(p)} % quedas en RIR ${Math.max(0, Math.round(rirEf))}. `;
+    if (rirEf < objetivo.rir.min - 0.5) return res("fuera", campo, `${quien}: demasiado cerca del fallo`, `${como}${tieneRir ? `RIR ${r}` : "Eso"} queda por debajo de la zona de ${objetivo.etiqueta.toLowerCase()} (${rango}): demasiado cerca del fallo.${fraseSug}`);
+    if (objetivo.rir.max != null && rirEf > objetivo.rir.max + 0.5) return res("fuera", campo, `${quien}: demasiado lejos del fallo`, `${como}${tieneRir ? `RIR ${r}` : "Eso"} queda por encima de la zona de ${objetivo.etiqueta.toLowerCase()} (${rango}): demasiado lejos del fallo.${fraseSug}`);
+  }
+
+  // 3) Zona de %1RM para esas repeticiones (o para el tipo de movimiento en potencia).
+  const zp = tienePct ? zonaPct(objetivo, { reps: n, tipoMov }) : null;
+  if (zp) {
+    const txt = zp.min === 0 ? `hasta ${zp.max} %` : `${zp.min}–${zp.max} %`;
+    const donde = objetivo.zonas ? (tipoMov === "pliometrico" ? "para movimientos pliométricos" : "para movimientos no pliométricos") : `para ${n} rep${n === 1 ? "" : "s"}`;
+    if (p > zp.max + 1) return res("fuera", "pct", `${Math.round(p)} %: por encima de la zona`, `${Math.round(p)} % queda por encima de la zona de ${objetivo.etiqueta.toLowerCase()} ${donde} (${txt}).${fraseSug}`, objetivo.fuenteZonas);
+    if (p < zp.min - 1) return res("fuera", "pct", `${Math.round(p)} %: por debajo de la zona`, `${Math.round(p)} % queda por debajo de la zona de ${objetivo.etiqueta.toLowerCase()} ${donde} (${txt}).${fraseSug}`, objetivo.fuenteZonas);
+  }
+  return { estado: "dentro", campo: null, corto: "", mensaje: "", sugerido, fuente };
+}
+
+// Marca de carga: si coincide con tarea.avisoOk, el aviso se silencia ("dejarlo así").
+export function firmaCarga(t) {
+  return [t.cantidad, t.rir, t.pct1rm, t.tipoMov || ""].join("|");
+}
+
+// Aviso vigente de una tarea (null si no hay objetivo, no son repeticiones, está dentro o se silenció).
+export function avisoDeTarea(objetivo, t) {
+  if (!objetivo || !t || (t.modo || "reps") !== "reps") return null;
+  if (t.avisoOk && t.avisoOk === firmaCarga(t)) return null;
+  const e = evaluarCarga(objetivo, { reps: t.cantidad, rir: t.rir, pct1rm: t.pct1rm, tipoMov: t.tipoMov });
+  return e && e.estado !== "dentro" ? e : null;
 }
