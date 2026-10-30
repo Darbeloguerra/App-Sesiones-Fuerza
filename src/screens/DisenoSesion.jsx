@@ -39,7 +39,7 @@ import {
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
 import { objetivoDeTexto, avisoDeTarea, firmaCarga, textoSugerido, tiraReferencia, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
-import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, FlechasTarea } from "./ControlesTarea.jsx";
+import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, EtiquetaDesplegable, FlechasTarea } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -622,10 +622,10 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
 // Resumen sobre la lista de fuerza: cuántas tareas tienen la carga fuera de la zona.
 function ResumenAvisosCarga({ objetivo, tareas }) {
   if (!objetivo) return null;
-  const n = tareas.filter((t) => avisoDeTarea(objetivo, t)).length;
+  const n = tareas.filter((t) => { const a = avisoDeTarea(objetivo, t); return a && a.estado !== "info"; }).length;
   if (!n) return null;
   return (
-    <div role="status" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "7px 10px", background: ds.bgElevated, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, fontSize: 12, lineHeight: 1.4, color: ds.inkSecondary }}>
+    <div role="status" style={{ flex: "1 1 260px", minWidth: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "5px 10px", background: ds.bgElevated, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, fontSize: 12, lineHeight: 1.4, color: ds.inkSecondary }}>
       <span style={{ color: ds.accent, fontWeight: 700 }}>⚠ {n === 1 ? "1 tarea" : `${n} de ${tareas.length} tareas`}</span>
       <span>con la carga fuera de la zona de {objetivo.etiqueta}. Toca la etiqueta de cada tarea para ver el motivo.</span>
     </div>
@@ -669,7 +669,17 @@ function BannerGuiaObjetivo({ objetivo }) {
       <span style={{ fontSize: 10, color: ds.inkMuted, flex: "1 1 160px", minWidth: 0 }} title={objetivo.nota || ""}>
         {objetivo.zonas ? "% del 1RM. " : "% del 1RM que deja ese RIR. "}{objetivo.fuenteZonas || objetivo.fuente}
       </span>
+      {objetivo.repsTexto && <span style={{ fontSize: 11, color: ds.inkSecondary, flex: "1 1 100%" }}>{objetivo.repsTexto}</span>}
     </div>
+  );
+}
+
+// Chip "Guía" que sustituye a la franja fija: abre la misma información bajo demanda.
+function GuiaChip({ objetivo }) {
+  return (
+    <EtiquetaDesplegable rotulo={`Guía de ${objetivo.etiqueta.toLowerCase()} ▾`} ariaLabel="Guía del objetivo" ancho={420}>
+      {() => <BannerGuiaObjetivo objetivo={objetivo} />}
+    </EtiquetaDesplegable>
   );
 }
 
@@ -726,6 +736,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const autoRec = Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—";
   const avRir = aviso && (aviso.campo === "rir" || aviso.campo === "ambos") ? aviso.estado : null;
   const avPct = aviso && (aviso.campo === "pct" || aviso.campo === "ambos") ? aviso.estado : null;
+  const avReps = aviso && aviso.campo === "reps" && aviso.estado === "fuera" ? "fuera" : null;
   const textoBoton = aviso && aviso.sugerido ? `Usar lo sugerido: ${textoSugerido(aviso.sugerido)}` : null;
   const infoAviso = aviso ? { mensaje: aviso.mensaje, textoBoton, onAplicar: onAplicarSugerido } : null;
   const claseLetra = enSuper ? { background: ds.accent, color: ds.accentInk } : { background: ds.border, color: ds.accent };
@@ -747,7 +758,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const celdas = (
     <>
       <CeldaDesplegable movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />
-      <CeldaDesplegable movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo="por serie" valor={tarea.cantidad} sufijo={unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={nums(valoresCant)}
+      <CeldaDesplegable movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), fuera: conGuia && !!objetivoGuia.reps && !objetivoGuia.reps.suave && v > objetivoGuia.reps.max }))}
         extra={(
           <div style={{ display: "flex", gap: 8 }}>
             <CampoSelect etiqueta="Medido en" valor={modo} onCambiar={(v) => onCambiar({ ...tarea, modo: v })} opciones={modos.map((m) => ({ v: m, t: etqModo[m] }))} />
@@ -3707,8 +3718,12 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
-                    {guiaObjetivo && <BannerGuiaObjetivo objetivo={guiaObjetivo} />}
-                    <ResumenAvisosCarga objetivo={guiaObjetivo} tareas={tareasFuerza} />
+                    {guiaObjetivo && (
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        <GuiaChip objetivo={guiaObjetivo} />
+                        <ResumenAvisosCarga objetivo={guiaObjetivo} tareas={tareasFuerza} />
+                      </div>
+                    )}
                     {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
