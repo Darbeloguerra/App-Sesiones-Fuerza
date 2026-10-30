@@ -38,7 +38,8 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
-import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, aplicarSugerencia, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { objetivoDeTexto, evaluarTarea, tiraReferencia, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, FlechasTarea } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -620,7 +621,7 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
   );
 }
 
-function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio, onSubir, onBajar, onEliminar, evalGuia = null }) {
+function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materialesDisponibles, onAgregarMaterial, referenciasPorEjercicio, onSubir, onBajar, onEliminar, evalGuia = null, conTipo = false }) {
   const ancho = useAnchoVentana();
   const lateral = ancho >= 700;
   const modosDisponibles = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -679,19 +680,13 @@ function HojaEdicionTareaReal({ tarea, onCambiar, onCerrar, mostrarCarga, materi
           {mostrarCarga && (
             <>
               {/* RIR o % del 1RM estimado: el RIR deja de ser fiable con cargas ligeras (series largas), ahí conviene pautar por %1RM. */}
-              <SegmentadoDiseno etiqueta="Carga por" valor={tarea.modoCarga === "pct1rm" ? "pct1rm" : "rir"} onCambiar={(v) => onCambiar({ ...tarea, modoCarga: v })} opciones={[{ v: "rir", t: "RIR" }, { v: "pct1rm", t: "% 1RM" }]} />
-              {tarea.modoCarga === "pct1rm" ? (
-                <>
-                  <StepperDiseno etiqueta="% 1RM" valor={tarea.pct1rm ?? ""} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} min={1} max={100} paso={5} inicio={70} />
-                  {tarea.pct1rmOrigen != null && !tarea.mantenerCarga && String(tarea.pct1rm) !== String(tarea.pct1rmOrigen) && (
-                    <button type="button" onClick={() => onCambiar({ ...tarea, pct1rm: tarea.pct1rmOrigen, mantenerCarga: true })} style={{ alignSelf: "flex-start", minHeight: 40, fontFamily: dsF.mono, fontSize: 12, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "0 12px", cursor: "pointer" }}>
-                      ↑ desde {tarea.pct1rmOrigen} % · mantener
-                    </button>
-                  )}
-                </>
-              ) : (
-                // Un RIR de dos cifras casi seguro es un %1RM tecleado sin cambiar de modo: se avisa en rojo.
-                <StepperDiseno etiqueta="RIR" valor={tarea.rir} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} min={0} max={99} inicio={2} alerta={rirAlto} ayuda={rirAlto ? "¿%1RM?" : undefined} />
+              {conTipo && <SegmentadoDiseno etiqueta="Tipo de movimiento" valor={tarea.tipoMov === "pliometrico" ? "pliometrico" : "nopliometrico"} onCambiar={(v) => onCambiar({ ...tarea, tipoMov: v })} opciones={[{ v: "nopliometrico", t: "No pliométrico" }, { v: "pliometrico", t: "Pliométrico" }]} />}
+              <StepperDiseno etiqueta="RIR" valor={tarea.rir} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} min={0} max={99} inicio={2} alerta={rirAlto} ayuda={rirAlto ? "¿%1RM?" : undefined} />
+              <StepperDiseno etiqueta="% 1RM" valor={tarea.pct1rm ?? ""} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} min={1} max={100} paso={5} inicio={70} />
+              {tarea.pct1rmOrigen != null && !tarea.mantenerCarga && String(tarea.pct1rm) !== String(tarea.pct1rmOrigen) && (
+                <button type="button" onClick={() => onCambiar({ ...tarea, pct1rm: tarea.pct1rmOrigen, mantenerCarga: true })} style={{ alignSelf: "flex-start", minHeight: 40, fontFamily: dsF.mono, fontSize: 12, color: ds.accent, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "0 12px", cursor: "pointer" }}>
+                  ↑ desde {tarea.pct1rmOrigen} % · mantener
+                </button>
               )}
             </>
           )}
@@ -790,17 +785,16 @@ function BannerGuiaObjetivo({ objetivo }) {
 // Encabezado de columnas de la tabla (iPad horizontal): las columnas tienen los
 // mismos anchos que las celdas de FilaTareaReal para que queden alineadas.
 function EncabezadoTablaTareas({ mostrarCarga }) {
-  const col = (t, w) => <span style={{ width: w, flexShrink: 0, textAlign: "center", fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.02em", color: ds.inkMuted, textTransform: "uppercase" }}>{t}</span>;
+  const col = (t) => <span key={t} style={{ width: ANCHO_COL, flexShrink: 0, textAlign: "center", fontFamily: dsF.sans, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, whiteSpace: "nowrap" }}>{t}</span>;
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 9px 0 11px" }}>
-      <span style={{ flex: 1, minWidth: 0, fontFamily: dsF.mono, fontSize: 9.5, letterSpacing: "0.04em", color: ds.inkMuted, textTransform: "uppercase" }}>Ejercicio</span>
-      {col("Series", 44)}
-      {col("Reps", 44)}
-      {mostrarCarga && col("RIR / %1RM", 76)}
-      {col("Recup.", 50)}
-      {col("Lado", 60)}
-      {col("Material", 92)}
-      <span style={{ width: 32, flexShrink: 0 }} />
+    <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 9px 0 13px" }}>
+      <span style={{ flex: 1, minWidth: 0, fontFamily: dsF.sans, fontSize: 10, fontWeight: 600, color: ds.inkMuted }}>Ejercicio</span>
+      {col("Series")}
+      {col("Repeticiones")}
+      {mostrarCarga && col("RIR")}
+      {mostrarCarga && col("%1RM")}
+      {col("Recuperación")}
+      <span style={{ width: ANCHO_FLECHAS, flexShrink: 0 }} />
     </div>
   );
 }
@@ -815,6 +809,68 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
       <input aria-label={etiqueta} value={valor ?? ""} inputMode="numeric" onChange={(e) => onCambiar(e.target.value.replace(/[^0-9]/g, ""))} placeholder={placeholder} style={{ ...estiloCeldaTabla(false), ...(resaltarSiTiene && tiene ? { borderColor: ds.accent, color: ds.accent } : null) }} />
       {unidad && tiene && <span style={{ position: "absolute", right: 6, bottom: 3, fontSize: 9, color: ds.inkMuted, pointerEvents: "none" }}>{unidad}</span>}
     </div>
+  );
+}
+
+// Contenido de la fila en modo tabla (iPad horizontal): nombre con etiquetas
+// (tipo, material, nota, aviso), cinco cajones iguales con desplegable y flechas.
+function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, evalGuia, fueraRango, orden, superserie, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial }) {
+  const modo = tarea.modo || "reps";
+  const enSuper = !!superserie && (superserie.conAnt || superserie.conSig);
+  const modos = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
+  const etqModo = { reps: "Repeticiones", tiempo: "Segundos", minutos: "Minutos", metros: "Metros" };
+  const unidad = ({ reps: "", tiempo: "s", minutos: "min", metros: "m" })[modo] || "";
+  const nums = (arr) => arr.map((v) => ({ v: String(v), t: String(v) }));
+  const valoresCant = { reps: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15], tiempo: [10, 15, 20, 30, 40, 45, 60, 90, 120], minutos: [1, 2, 3, 5, 8, 10, 15, 20, 30], metros: [10, 20, 30, 40, 50, 100, 200, 400] }[modo] || [];
+  const conGuia = !!objetivoGuia && mostrarCarga && modo === "reps";
+  const sug = conGuia ? sugerirCarga(objetivoGuia, tarea.cantidad, tarea.tipoMov) : null;
+  const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null;
+  const zr = conGuia ? zonaRir(objetivoGuia) : null;
+  const zp = conGuia ? zonaPct(objetivoGuia, { reps: tarea.cantidad, tipoMov: tarea.tipoMov }) : null;
+  const rirOpc = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: v === 6 ? "6 o más" : String(v), zona: !!zr && v >= zr.min && (zr.max == null || v <= zr.max), nota: !!zr && v >= zr.min && (zr.max == null || v <= zr.max) ? "zona" : "" }));
+  const pctOpc = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map((v) => { const z = !!zp && v >= zp.min && v <= zp.max; return { v: String(v), t: `${v} %`, zona: z, nota: z ? "zona" : "" }; });
+  const textoZonaPct = zp ? (zp.min === 0 ? `≤${zp.max}` : `${zp.min}–${zp.max}`) : "";
+  const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
+  const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
+  const autoRec = Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—";
+  const claseLetra = enSuper ? { background: ds.accent, color: ds.accentInk } : { background: ds.border, color: ds.accent };
+  return (
+    <>
+      <div style={{ flex: 1, minWidth: 0, display: "flex", alignItems: "center", gap: 6 }}>
+        {orden != null && (
+          <span style={{ minWidth: 26, height: 26, padding: "0 5px", boxSizing: "border-box", borderRadius: 8, ...claseLetra, fontFamily: dsF.mono, fontSize: 11.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{orden}</span>
+        )}
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
+          <span style={{ color: ds.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflowWrap: "break-word" }}>{tarea.nombre}</span>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+            {tarea.lateralidad === "unilateral" && <EtiquetaFija texto="Unilateral" />}
+            {mostrarCarga && objetivoGuia?.zonas && <EtiquetaTipo tarea={tarea} onCambiar={onCambiar} />}
+            <EtiquetaMaterial tarea={tarea} onCambiar={onCambiar} disponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} />
+            <EtiquetaNota tarea={tarea} onCambiar={onCambiar} />
+            {fueraRango && <EtiquetaAviso mensaje={evalGuia.mensaje} />}
+          </div>
+        </div>
+      </div>
+      <CeldaDesplegable etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />
+      <CeldaDesplegable etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo="por serie" valor={tarea.cantidad} sufijo={unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={nums(valoresCant)}
+        extra={(
+          <div style={{ display: "flex", gap: 8 }}>
+            <CampoSelect etiqueta="Medido en" valor={modo} onCambiar={(v) => onCambiar({ ...tarea, modo: v })} opciones={modos.map((m) => ({ v: m, t: etqModo[m] }))} />
+            <CampoSelect etiqueta="Lado" valor={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"} onCambiar={(v) => onCambiar({ ...tarea, lateralidad: v })} opciones={[{ v: "bilateral", t: "Bilateral" }, { v: "unilateral", t: "Unilateral" }]} />
+          </div>
+        )}
+        pie={mostrarCarga && modo === "reps" ? <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={sug ? `Rellena RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null} /> : null} />
+      {mostrarCarga && (
+        <>
+          <CeldaDesplegable etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc}
+            pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />
+          <CeldaDesplegable etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc}
+            pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />
+        </>
+      )}
+      <CeldaDesplegable etiqueta="Recuperación" titulo="Recuperación" subtitulo="segundos entre series" valor={tarea.descanso} placeholder={autoRec} apagada={Number(tarea.series) <= 1} resaltar onCambiar={(v) => onCambiar({ ...tarea, descanso: v })} autoOpcion={`Automático (${autoRec} s)`} opciones={nums([30, 45, 60, 90, 120, 150, 180, 240, 300])} />
+      <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />
+    </>
   );
 }
 
@@ -833,7 +889,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
     let t = nuevo;
     const editoCarga = String(nuevo.rir ?? "") !== String(tarea.rir ?? "") || String(nuevo.pct1rm ?? "") !== String(tarea.pct1rm ?? "");
     if (editoCarga) t = { ...t, cargaAuto: false };
-    else if (objetivoGuia && mostrarCarga && String(nuevo.cantidad ?? "") !== String(tarea.cantidad ?? "")) t = aplicarSugerencia(objetivoGuia, t);
+    else if (objetivoGuia && mostrarCarga && (String(nuevo.cantidad ?? "") !== String(tarea.cantidad ?? "") || String(nuevo.tipoMov ?? "") !== String(tarea.tipoMov ?? ""))) t = aplicarSugerencia(objetivoGuia, t);
+    // Sin selector "Carga por": si hay %1RM manda el % (el jugador ve además el RIR); si no, el RIR.
+    if (mostrarCarga && (editoCarga || t !== nuevo)) t = { ...t, modoCarga: Number(t.pct1rm) > 0 ? "pct1rm" : "rir" };
     cambiarOriginal(t);
   };
   const tieneVideoJugable = tarea.gif && (extractYouTubeId(tarea.gif) || esVideoDirecto(tarea.gif));
@@ -868,7 +926,8 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
   const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
   return (
     <>
-    <div style={{ padding: enSuperserie ? "6px 8px 6px 7px" : "6px 8px 6px 10px", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
+    <div style={{ padding: tabla ? (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px") : enSuperserie ? "6px 8px 6px 7px" : "6px 8px 6px 10px", minHeight: tabla ? 56 : undefined, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
+      {!tabla && (
       <div
         role="button"
         tabIndex={0}
@@ -913,28 +972,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         </div>
         {!tabla && <ChevronDown size={16} color={ds.inkMuted} style={{ transform: "rotate(-90deg)", flexShrink: 0 }} />}
       </div>
+      )}
       {tabla && (
-        <>
-          {celdaTabla("Series", tarea.series, (v) => onCambiar({ ...tarea, series: v }), "—", 44)}
-          {celdaTabla("Repeticiones", tarea.cantidad, (v) => onCambiar({ ...tarea, cantidad: v }), "—", 44, ({ reps: "", tiempo: "s", minutos: "min", metros: "m" })[tarea.modo] || "")}
-          {mostrarCarga && (
-            <div style={{ display: "flex", gap: 3, width: 76, flexShrink: 0 }}>
-              <button type="button" aria-label="Cambiar entre RIR y % del 1RM" title="Cambiar entre RIR y % del 1RM" onClick={() => onCambiar({ ...tarea, modoCarga: tarea.modoCarga === "pct1rm" ? "rir" : "pct1rm" })} style={{ width: 30, height: 34, flexShrink: 0, borderRadius: 8, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, cursor: "pointer", padding: 0 }}>
-                {tarea.modoCarga === "pct1rm" ? "%" : "RIR"}
-              </button>
-              {tarea.modoCarga === "pct1rm"
-                ? <input aria-label="Porcentaje del 1RM" value={tarea.pct1rm ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, pct1rm: e.target.value.replace(/[^0-9]/g, ""), pct1rmOrigen: undefined })} placeholder="—" style={{ ...estiloCeldaTabla(false), flex: 1, minWidth: 0 }} />
-                : <input aria-label="RIR" value={tarea.rir ?? ""} inputMode="numeric" onChange={(e) => onCambiar({ ...tarea, rir: e.target.value.replace(/[^0-9]/g, "") })} placeholder="—" style={{ ...estiloCeldaTabla(tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10), flex: 1, minWidth: 0 }} />}
-            </div>
-          )}
-          {/* Recuperación: en gris el valor automático recomendado; si escribes uno, pasa a manual (ámbar). Borrarlo vuelve al automático. */}
-          {celdaTabla("Recuperación (s)", tarea.descanso, (v) => onCambiar({ ...tarea, descanso: v }), Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—", 50, "", Number(tarea.series) <= 1, true)}
-          <button type="button" aria-label="Lado" title="Bilateral: las dos piernas/brazos a la vez. Unilateral: se repite cada lado. Toca para cambiar." onClick={() => onCambiar({ ...tarea, lateralidad: tarea.lateralidad === "unilateral" ? "bilateral" : "unilateral" })} style={{ width: 60, height: 34, flexShrink: 0, borderRadius: 8, border: `1px solid ${tarea.lateralidad === "unilateral" ? ds.accent : ds.border}`, background: tarea.lateralidad === "unilateral" ? ds.accentSubtle : ds.surface, color: tarea.lateralidad === "unilateral" ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontSize: 11, fontWeight: 700, cursor: "pointer", padding: 0 }}>
-            {tarea.lateralidad === "unilateral" ? "Unilat." : "Bilat."}
-          </button>
-          <SelectorMaterialReal compacto seleccionados={tarea.materiales || []} disponibles={materialesDisponibles} onCambiar={(nuevos) => onCambiar({ ...tarea, materiales: nuevos })} onAgregarMaterial={onAgregarMaterial} />
-          <button type="button" aria-label="Más opciones" title={fueraRango ? evalGuia.mensaje : "Más opciones: unidad de medida, tipo de resistencia, nota, mover, quitar"} onClick={abrir} style={{ ...botonMiniStyleDiseno, width: 32, height: 34, fontSize: 16, flexShrink: 0, ...(fueraRango ? { borderColor: ds.accent, color: ds.accent, background: ds.accentSubtle } : null) }}>{fueraRango ? "⚠" : "⋯"}</button>
-        </>
+        <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} evalGuia={evalGuia} fueraRango={fueraRango} orden={orden} superserie={superserie} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} />
       )}
       {!tabla && onSubir && (
         <button onClick={onSubir} style={{ ...botonMiniStyleDiseno, width: 32, height: 32 }} title="Mover antes">
@@ -952,7 +992,7 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
         </button>
       )}
       {abierta && (
-        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} evalGuia={evalGuia} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />
+        <HojaEdicionTareaReal tarea={tarea} onCambiar={onCambiar} onCerrar={cerrar} mostrarCarga={mostrarCarga} evalGuia={evalGuia} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} referenciasPorEjercicio={referenciasPorEjercicio} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} conTipo={!!objetivoGuia?.zonas && mostrarCarga} />
       )}
     </div>
     {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
