@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ChevronLeft, Heart, Play, Plus, Trash2, Dumbbell, Target, Zap, RefreshCw, Activity, TrendingUp, ClipboardList } from "lucide-react";
 import { ds, dsF, dsR, dsSh, DsButton, DsInput } from "../core/designSystem.jsx";
 import { useAnchoVentana } from "../core/layout.jsx";
-import { LoadingBlock, VideoEmbed, TagChipReal, campoSelectReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, TAGS_MOVILIDAD, tagsParaBloque } from "../core/components.jsx";
+import { LoadingBlock, VideoEmbed, TagChipReal, campoSelectReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, TAGS_MOVILIDAD, SelectorZonaRegion, zonaDeTags, regionDeTags, tagsDeZonaRegion } from "../core/components.jsx";
 import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
 import {
   useCategoriasPreventivas,
@@ -282,7 +282,10 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   // Selección única: con "Global" cubriendo el caso de superior+inferior a
   // la vez, cada ejercicio pertenece a una sola zona corporal — ya no tiene
   // sentido dejar marcar varias a la vez como antes.
-  const seleccionarZona = (t) => setTagsSel([t]);
+  const zonaSelEd = zonaDeTags(tagsSel);
+  const regionSelEd = regionDeTags(tagsSel);
+  const seleccionarZona = (t) => setTagsSel(tagsDeZonaRegion(t, bloque === "Movilidad" ? regionSelEd : ""));
+  const seleccionarRegion = (r) => setTagsSel(tagsDeZonaRegion(zonaSelEd, r));
   const videoIdValido = extractYouTubeId(videoUrl);
   const esDirectoValido = esVideoDirecto(videoUrl);
   const enlaceReconocido = !!videoIdValido || esDirectoValido;
@@ -374,7 +377,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BLOQUE (único, obligatorio)</span>
-          <select value={bloque} onChange={(e) => { setBloque(e.target.value); setTagsSel((prev) => prev.filter((t) => tagsParaBloque(e.target.value).includes(t))); }} style={campoSelectReal()}>
+          <select value={bloque} onChange={(e) => { setBloque(e.target.value); if (e.target.value !== "Movilidad") setTagsSel((prev) => prev.filter((t) => !TAGS_MOVILIDAD.includes(t))); }} style={campoSelectReal()}>
             {BLOQUES_BIBLIOTECA.map((b) => (
               <option key={b} value={b}>
                 {b}
@@ -426,11 +429,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {tagsParaBloque(bloque).map((t) => (
-              <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => seleccionarZona(t)} />
-            ))}
-          </div>
+          <SelectorZonaRegion bloque={bloque} zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} />
         </div>
         <div onClick={() => setSinLateralidad((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <span
@@ -550,7 +549,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           <DsButton
             disabled={guardando}
             onClick={async () => {
-              if (!nombre.trim() || tagsSel.length === 0) return;
+              if (!nombre.trim() || !zonaSelEd) return;
               setGuardando(true);
               await onGuardar({
                 id: ejercicioEditar?.id,
@@ -558,7 +557,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                 bloque,
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
                 ejercicio_base_id: ejercicioBaseId || "",
-                tags_descriptivos: tagsSel,
+                tags_descriptivos: tagsDeZonaRegion(zonaSelEd, bloque === "Movilidad" ? regionSelEd : ""),
                 sin_lateralidad: sinLateralidad ? "si" : "",
                 naturaleza: bloque === "Fuerza" ? naturaleza || null : null,
                 lateralidad: lateralidad || null,
@@ -951,6 +950,7 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [bloqueFiltro, setBloqueFiltro] = useState("Todos");
   const [zonaFiltro, setZonaFiltro] = useState("Todas");
+  const [regionFiltro, setRegionFiltro] = useState("Todas");
   const [categoriaFiltro, setCategoriaFiltro] = useState("Todas");
   const [naturalezaFiltro, setNaturalezaFiltro] = useState("Todas");
   const [lateralidadFiltro, setLateralidadFiltro] = useState("Todas");
@@ -972,11 +972,12 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
   const hayFiltrosActivos =
-    bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || categoriaFiltro !== "Todas" || naturalezaFiltro !== "Todas" || lateralidadFiltro !== "Todas";
+    bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || (bloqueFiltro === "Movilidad" && regionFiltro !== "Todas") || categoriaFiltro !== "Todas" || naturalezaFiltro !== "Todas" || lateralidadFiltro !== "Todas";
 
   const visibles = ejercicios
     .filter((e) => (bloqueFiltro === "Todos" ? true : e.bloque === bloqueFiltro))
     .filter((e) => (zonaFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(zonaFiltro)))
+    .filter((e) => (bloqueFiltro !== "Movilidad" || regionFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(regionFiltro)))
     .filter((e) => (categoriaFiltro === "Todas" ? true : e.categoria_preventiva_id === categoriaFiltro))
     .filter((e) => (naturalezaFiltro === "Todas" ? true : e.naturaleza === naturalezaFiltro))
     .filter((e) => (lateralidadFiltro === "Todas" ? true : e.lateralidad === lateralidadFiltro))
@@ -1215,13 +1216,22 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
                       <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Zona corporal</span>
                       <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} style={campoSelectReal()}>
                         <option value="Todas">Todas</option>
-                        {(bloqueFiltro === "Movilidad" ? tagsParaBloque("Movilidad") : bloqueFiltro === "Todos" ? [...TAGS_DESCRIPTIVOS_BIBLIOTECA, ...TAGS_MOVILIDAD] : TAGS_DESCRIPTIVOS_BIBLIOTECA).map((t) => (
+                        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
                           <option key={t} value={t}>
                             {t}
                           </option>
                         ))}
                       </select>
                     </label>
+                    {bloqueFiltro === "Movilidad" && (
+                      <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                        <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Región</span>
+                        <select value={regionFiltro} onChange={(e) => setRegionFiltro(e.target.value)} style={campoSelectReal()}>
+                          <option value="Todas">Todas</option>
+                          {TAGS_MOVILIDAD.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </label>
+                    )}
                     <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.accent, textTransform: "uppercase", letterSpacing: "0.05em" }}>
                         Naturaleza <span style={{ color: ds.inkMuted, textTransform: "none", letterSpacing: 0 }}>(solo Fuerza)</span>
