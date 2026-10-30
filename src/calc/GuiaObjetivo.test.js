@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
+import { sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
 
 const fuerza = objetivoDeTexto("Fuerza");
 const hiper = objetivoDeTexto("hipertrofia");
@@ -84,5 +84,28 @@ test("potencia: RIR 1 -> bajo; RIR 3 y RIR 8 -> dentro (no hay techo)", () => {
   assert.equal(evaluarTarea(pot, { reps: 3, rir: 8, modoCarga: "rir" }).estado, "dentro");
   const r = evaluarTarea(pot, { reps: 3, pct1rm: 90, modoCarga: "pct1rm" });
   assert.equal(r.estado, "bajo");
-  assert.match(r.mensaje, /hasta 85 %/);
+  assert.doesNotMatch(r.mensaje, /hasta/);
+  assert.equal(pot.zonas.length, 3);
+});
+
+test("sugerirCarga: fuerza 4 reps -> RIR 4 y 80 % (RTF 8); 7 reps -> RIR 4 sin %; potencia solo RIR", () => {
+  assert.deepEqual(sugerirCarga(fuerza, 4), { rir: 4, pct1rm: 80 });
+  assert.deepEqual(sugerirCarga(fuerza, 7), { rir: 4, pct1rm: null });
+  assert.deepEqual(sugerirCarga(hiper, 8), { rir: 2, pct1rm: 75 });
+  assert.deepEqual(sugerirCarga(pot, 3), { rir: 3, pct1rm: null });
+  assert.equal(sugerirCarga(fuerza, ""), null);
+});
+
+test("aplicarSugerencia: rellena vacíos, se actualiza si fue automático, nunca pisa lo manual", () => {
+  const vacia = { modo: "reps", cantidad: "4", rir: "", pct1rm: "" };
+  const a = aplicarSugerencia(fuerza, vacia);
+  assert.deepEqual([a.rir, a.pct1rm, a.cargaAuto], ["4", "80", true]);
+  const b = aplicarSugerencia(fuerza, { ...a, cantidad: "3" });
+  assert.deepEqual([b.rir, b.pct1rm], ["4", "83"]);
+  const c = aplicarSugerencia(hiper, { ...a, cantidad: "8" });
+  assert.equal(c.rir, "2");
+  const manual = { ...a, rir: "1", cargaAuto: false };
+
+  assert.equal(aplicarSugerencia(fuerza, { ...manual, cantidad: "3" }).rir, "1");
+  assert.equal(aplicarSugerencia(fuerza, { modo: "tiempo", cantidad: "30", rir: "", pct1rm: "" }).rir, "");
 });
