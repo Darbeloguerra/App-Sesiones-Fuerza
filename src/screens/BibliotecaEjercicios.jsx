@@ -284,7 +284,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   // sentido dejar marcar varias a la vez como antes.
   const zonaSelEd = zonaDeTags(tagsSel);
   const regionSelEd = regionDeTags(tagsSel);
-  const seleccionarZona = (t) => setTagsSel(tagsDeZonaRegion(t, bloque === "Movilidad" ? regionSelEd : ""));
+  const seleccionarZona = (t) => setTagsSel(tagsDeZonaRegion(t, t === "Movilidad" ? regionSelEd : ""));
   const seleccionarRegion = (r) => setTagsSel(tagsDeZonaRegion(zonaSelEd, r));
   const videoIdValido = extractYouTubeId(videoUrl);
   const esDirectoValido = esVideoDirecto(videoUrl);
@@ -377,7 +377,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BLOQUE (único, obligatorio)</span>
-          <select value={bloque} onChange={(e) => { setBloque(e.target.value); if (e.target.value !== "Movilidad") setTagsSel((prev) => prev.filter((t) => !TAGS_MOVILIDAD.includes(t))); }} style={campoSelectReal()}>
+          <select value={bloque} onChange={(e) => setBloque(e.target.value)} style={campoSelectReal()}>
             {BLOQUES_BIBLIOTECA.map((b) => (
               <option key={b} value={b}>
                 {b}
@@ -429,7 +429,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
-          <SelectorZonaRegion bloque={bloque} zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} />
+          <SelectorZonaRegion zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} />
         </div>
         <div onClick={() => setSinLateralidad((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
           <span
@@ -557,7 +557,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                 bloque,
                 categoria_preventiva_id: esPreventivo ? categoriaId : "",
                 ejercicio_base_id: ejercicioBaseId || "",
-                tags_descriptivos: tagsDeZonaRegion(zonaSelEd, bloque === "Movilidad" ? regionSelEd : ""),
+                tags_descriptivos: tagsDeZonaRegion(zonaSelEd, regionSelEd),
                 sin_lateralidad: sinLateralidad ? "si" : "",
                 naturaleza: bloque === "Fuerza" ? naturaleza || null : null,
                 lateralidad: lateralidad || null,
@@ -972,12 +972,12 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
   if (!ejerciciosLoaded || !categoriasLoaded) return <LoadingBlock />;
 
   const hayFiltrosActivos =
-    bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || (bloqueFiltro === "Movilidad" && regionFiltro !== "Todas") || categoriaFiltro !== "Todas" || naturalezaFiltro !== "Todas" || lateralidadFiltro !== "Todas";
+    bloqueFiltro !== "Todos" || zonaFiltro !== "Todas" || (zonaFiltro === "Movilidad" && regionFiltro !== "Todas") || categoriaFiltro !== "Todas" || naturalezaFiltro !== "Todas" || lateralidadFiltro !== "Todas";
 
   const visibles = ejercicios
     .filter((e) => (bloqueFiltro === "Todos" ? true : e.bloque === bloqueFiltro))
     .filter((e) => (zonaFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(zonaFiltro)))
-    .filter((e) => (bloqueFiltro !== "Movilidad" || regionFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(regionFiltro)))
+    .filter((e) => (zonaFiltro !== "Movilidad" || regionFiltro === "Todas" ? true : (e.tags_descriptivos || []).includes(regionFiltro)))
     .filter((e) => (categoriaFiltro === "Todas" ? true : e.categoria_preventiva_id === categoriaFiltro))
     .filter((e) => (naturalezaFiltro === "Todas" ? true : e.naturaleza === naturalezaFiltro))
     .filter((e) => (lateralidadFiltro === "Todas" ? true : e.lateralidad === lateralidadFiltro))
@@ -1214,7 +1214,7 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
                     </label>
                     <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                       <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Zona corporal</span>
-                      <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} style={campoSelectReal()}>
+                      <select value={zonaFiltro} onChange={(e) => { setZonaFiltro(e.target.value); setRegionFiltro("Todas"); }} style={campoSelectReal()}>
                         <option value="Todas">Todas</option>
                         {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
                           <option key={t} value={t}>
@@ -1223,7 +1223,7 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
                         ))}
                       </select>
                     </label>
-                    {bloqueFiltro === "Movilidad" && (
+                    {zonaFiltro === "Movilidad" && (
                       <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                         <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Región</span>
                         <select value={regionFiltro} onChange={(e) => setRegionFiltro(e.target.value)} style={campoSelectReal()}>
