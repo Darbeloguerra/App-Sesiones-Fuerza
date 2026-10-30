@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { ChevronLeft, Heart, Play, Plus, Trash2, Dumbbell, Target, Zap, RefreshCw, Activity, TrendingUp, ClipboardList } from "lucide-react";
 import { ds, dsF, dsR, dsSh, DsButton, DsInput } from "../core/designSystem.jsx";
 import { useAnchoVentana } from "../core/layout.jsx";
-import { LoadingBlock, VideoEmbed, TagChipReal, campoSelectReal, TAGS_DESCRIPTIVOS_BIBLIOTECA } from "../core/components.jsx";
+import { LoadingBlock, VideoEmbed, TagChipReal, campoSelectReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, TAGS_MOVILIDAD, tagsParaBloque } from "../core/components.jsx";
 import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
 import {
   useCategoriasPreventivas,
@@ -374,7 +374,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         </label>
         <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BLOQUE (único, obligatorio)</span>
-          <select value={bloque} onChange={(e) => setBloque(e.target.value)} style={campoSelectReal()}>
+          <select value={bloque} onChange={(e) => { setBloque(e.target.value); setTagsSel((prev) => prev.filter((t) => tagsParaBloque(e.target.value).includes(t))); }} style={campoSelectReal()}>
             {BLOQUES_BIBLIOTECA.map((b) => (
               <option key={b} value={b}>
                 {b}
@@ -427,7 +427,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
+            {tagsParaBloque(bloque).map((t) => (
               <TagChipReal key={t} tag={t} activo={tagsSel.includes(t)} onClick={() => seleccionarZona(t)} />
             ))}
           </div>
@@ -1215,7 +1215,7 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
                       <span style={{ fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em" }}>Zona corporal</span>
                       <select value={zonaFiltro} onChange={(e) => setZonaFiltro(e.target.value)} style={campoSelectReal()}>
                         <option value="Todas">Todas</option>
-                        {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => (
+                        {(bloqueFiltro === "Movilidad" ? tagsParaBloque("Movilidad") : bloqueFiltro === "Todos" ? [...TAGS_DESCRIPTIVOS_BIBLIOTECA, ...TAGS_MOVILIDAD] : TAGS_DESCRIPTIVOS_BIBLIOTECA).map((t) => (
                           <option key={t} value={t}>
                             {t}
                           </option>
