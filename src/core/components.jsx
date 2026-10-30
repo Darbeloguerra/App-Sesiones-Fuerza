@@ -112,6 +112,10 @@ export function ChipReal({ children, tono = "neutro" }) {
 }
 
 export const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior", "Zona media", "Global"];
+// Etiquetas propias del trabajo de movilidad (región o articulación trabajada).
+export const TAGS_MOVILIDAD = ["Cadera", "Rodilla", "Tobillo", "Columna lumbar", "Columna torácica", "Hombro"];
+// Etiquetas disponibles según el bloque: movilidad añade sus regiones a las zonas generales.
+export const tagsParaBloque = (bloque) => (bloque === "Movilidad" ? [...TAGS_MOVILIDAD, ...TAGS_DESCRIPTIVOS_BIBLIOTECA] : TAGS_DESCRIPTIVOS_BIBLIOTECA);
 
 export function TagChipReal({ tag, activo, onClick }) {
   return (
