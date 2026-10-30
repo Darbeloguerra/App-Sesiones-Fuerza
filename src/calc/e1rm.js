@@ -421,7 +421,20 @@ export function fatigaTarea(it) {
 // y, para fuerza, no hace falta acabar cerca del fallo (Robinson 2024).
 export function interpretarFatiga(f) {
   if (!f) return null;
-  if (f.nivel === "alta") return "Fatiga alta: acabaste muy cansado. Si buscas fuerza o potencia, más fatiga no suma más ganancia; revisa el descanso entre series o la carga.";
-  if (f.nivel === "moderada") return "Fatiga moderada: es normal en series de trabajo. Bajaste algo, pero sin vaciarte.";
-  return "Fatiga baja: mantuviste el rendimiento de la primera a la última serie. Si te sobró margen, la próxima vez puedes subir un poco la carga.";
+  if (f.nivel === "alta") return "Acabaste muy cansado. Si buscas fuerza o potencia, más fatiga no suma más ganancia: revisa el descanso entre series o la carga.";
+  if (f.nivel === "moderada") return "Es normal en series de trabajo: bajaste algo, sin vaciarte.";
+  return "Si te sobró margen, puedes subir un poco la carga la próxima vez.";
+}
+
+// Frase única para el jugador, con UN solo porcentaje fácil de leer: cuánto
+// peor rindió su última serie respecto a la mejor (es la caída del e1RM, que
+// recoge tanto reps perdidas como menos reserva). Las reps perdidas se dicen
+// en llano, sin segundo porcentaje.
+export function resumenFatiga(f) {
+  if (!f) return null;
+  const pct = Math.round(f.caidaPct);
+  const extra = f.repsPerdidas > 0 ? ` (${f.repsPerdidas} rep${f.repsPerdidas === 1 ? "" : "s"} menos)` : f.soloRir ? " (con menos reserva)" : "";
+  const nombre = f.nivel === "alta" ? "Fatiga alta" : f.nivel === "moderada" ? "Fatiga moderada" : "Fatiga baja";
+  const hecho = f.caidaPct <= 0 ? "Mantuviste el rendimiento hasta la última serie." : `Tu última serie rindió un ${Math.max(1, pct)} % menos que la mejor${extra}.`;
+  return { nombre, texto: `${hecho} ${interpretarFatiga(f)}` };
 }
