@@ -1682,10 +1682,22 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
 // que toca esta vez. El pool debe venir ya ordenado por orden_rotacion.
 async function elegirSiguienteRotacion(claveCategoria, poolOrdenado) {
   if (!poolOrdenado.length) return null;
-  const actual = await api.rotacion(claveCategoria);
-  const punteroActual = actual ? Number(actual.puntero_actual) || 0 : 0;
+  // Si la tabla de rotación no responde (no existe, permisos, clave no
+  // válida...) no se bloquea el guardado de la sesión: se elige por el
+  // primer ejercicio del pool y se intenta guardar el puntero sin romper.
+  let punteroActual = 0;
+  try {
+    const actual = await api.rotacion(claveCategoria);
+    punteroActual = actual ? Number(actual.puntero_actual) || 0 : 0;
+  } catch (e) {
+    console.warn("rotacion: no se pudo leer el puntero", e);
+  }
   const elegido = poolOrdenado[punteroActual % poolOrdenado.length];
-  await api.setRotacion(claveCategoria, punteroActual + 1);
+  try {
+    await api.setRotacion(claveCategoria, punteroActual + 1);
+  } catch (e) {
+    console.warn("rotacion: no se pudo guardar el puntero", e);
+  }
   return elegido;
 }
 
@@ -2995,7 +3007,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       setError(
         e?.message === "FALTA_SQL_PARA_JUGADORES"
           ? "Para dar Preventivo distinto a cada categoría hay que ejecutar antes sql/add_para_jugadores.sql en Supabase. No se ha publicado la sesión."
-          : "No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo."
+          : `No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.${e?.message ? ` (Detalle: ${e.message})` : ""}`
       );
     } finally {
       setGuardando(false);
