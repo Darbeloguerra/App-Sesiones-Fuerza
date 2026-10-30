@@ -320,14 +320,15 @@ export function EtiquetaNota({ tarea, onCambiar }) {
 
 export function EtiquetaAviso({ aviso, objetivo, onAplicar, onIgnorar }) {
   const rojo = aviso.estado === "inconsistente";
+  const info = aviso.estado === "info";
   const sug = aviso.sugerido ? `RIR ${aviso.sugerido.rir}${aviso.sugerido.pct1rm != null ? ` · ${aviso.sugerido.pct1rm} %` : ""}` : "";
   const botonBase = { height: 34, borderRadius: 9, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" };
   return (
-    <EtiquetaDesplegable rotulo={`⚠ ${aviso.corto} ▾`} tono={rojo ? "peligro" : "activo"} ancho={330} ariaLabel="Aviso de carga">
+    <EtiquetaDesplegable rotulo={`${info ? "ℹ" : "⚠"} ${aviso.corto} ▾`} tono={rojo ? "peligro" : info ? "normal" : "activo"} ancho={330} ariaLabel="Aviso de carga">
       {(cerrar) => (
         <>
           <Cabecera titulo="Guía del objetivo" subtitulo={objetivo ? `${objetivo.etiqueta} · ${objetivo.rir.max == null ? `RIR ${objetivo.rir.min}+` : `RIR ${objetivo.rir.min}–${objetivo.rir.max}`}` : ""} />
-          <div style={{ border: `1px solid ${rojo ? ds.danger : ds.accentBorderSubtle}`, background: rojo ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
+          <div style={{ border: `1px solid ${rojo ? ds.danger : info ? ds.border : ds.accentBorderSubtle}`, background: rojo || info ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
             <span>{aviso.mensaje}</span>
             {sug && onAplicar && <button type="button" onClick={() => { onAplicar(); cerrar(); }} style={{ ...botonBase, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700 }}>Aplicar sugerido: {sug}</button>}
             {onIgnorar && <button type="button" onClick={() => { onIgnorar(); cerrar(); }} style={{ ...botonBase, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontWeight: 600 }}>Dejarlo así, es intencionado</button>}
