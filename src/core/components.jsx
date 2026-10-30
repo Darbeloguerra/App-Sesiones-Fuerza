@@ -112,10 +112,35 @@ export function ChipReal({ children, tono = "neutro" }) {
 }
 
 export const TAGS_DESCRIPTIVOS_BIBLIOTECA = ["Miembro superior", "Miembro inferior", "Zona media", "Global"];
-// Etiquetas propias del trabajo de movilidad (región o articulación trabajada).
+// Subetiquetas del trabajo de movilidad (región o articulación). Solo se piden
+// cuando el bloque es Movilidad y se guardan detrás de la zona: [zona, región].
 export const TAGS_MOVILIDAD = ["Cadera", "Rodilla", "Tobillo", "Columna lumbar", "Columna torácica", "Hombro"];
-// Etiquetas disponibles según el bloque: movilidad añade sus regiones a las zonas generales.
-export const tagsParaBloque = (bloque) => (bloque === "Movilidad" ? [...TAGS_MOVILIDAD, ...TAGS_DESCRIPTIVOS_BIBLIOTECA] : TAGS_DESCRIPTIVOS_BIBLIOTECA);
+export const zonaDeTags = (tags) => (tags || []).find((t) => TAGS_DESCRIPTIVOS_BIBLIOTECA.includes(t)) || "";
+export const regionDeTags = (tags) => (tags || []).find((t) => TAGS_MOVILIDAD.includes(t)) || "";
+export const tagsDeZonaRegion = (zona, region) => [zona, region].filter(Boolean);
+
+// Desplegable compacto con título pequeño encima.
+export function SelectCompacto({ etiqueta, valor, onCambiar, opciones, vacio, tituloVisible = true }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0, flex: "1 1 150px" }}>
+      {tituloVisible && <span style={{ fontSize: 10, fontWeight: 600, color: ds.inkSecondary, paddingLeft: 2 }}>{etiqueta}</span>}
+      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: valor ? ds.ink : ds.inkMuted, fontSize: 16, fontWeight: 600, fontFamily: dsF.sans }}>
+        <option value="">{vacio}</option>
+        {opciones.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
+  );
+}
+
+// Zona corporal y, en movilidad, su región: dos desplegables.
+export function SelectorZonaRegion({ bloque, zona, region, onZona, onRegion }) {
+  return (
+    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+      <SelectCompacto etiqueta="Zona corporal" valor={zona} onCambiar={onZona} opciones={TAGS_DESCRIPTIVOS_BIBLIOTECA} vacio="Elige la zona…" />
+      {bloque === "Movilidad" && <SelectCompacto etiqueta="Región (opcional)" valor={region} onCambiar={onRegion} opciones={TAGS_MOVILIDAD} vacio="Sin región" />}
+    </div>
+  );
+}
 
 export function TagChipReal({ tag, activo, onClick }) {
   return (
