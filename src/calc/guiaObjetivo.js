@@ -24,8 +24,15 @@ import { TABLA_PCT_1RM_POR_RTF, pct1RMporRTF } from "./e1rm.js";
 
 export const RTF_TABLA_MAX = 10;
 export const OBJETIVOS_SESION = [
-  { id: "fuerza", etiqueta: "Fuerza", rir: { min: 3, max: 5 }, fuente: "Robinson et al., 2024" },
-  { id: "hipertrofia", etiqueta: "Hipertrofia", rir: { min: 0, max: 5 }, fuente: "Robinson et al., 2024" },
+  {
+    id: "fuerza", etiqueta: "Fuerza", rir: { min: 3, max: 5 }, fuente: "Robinson et al., 2024",
+    reps: { max: 8, suave: true, fuente: "López et al., 2021" },
+    repsTexto: "Repeticiones: hasta 8 como referencia (carga alta, López et al., 2021). Por encima es un aviso informativo.",
+  },
+  {
+    id: "hipertrofia", etiqueta: "Hipertrofia", rir: { min: 0, max: 5 }, fuente: "Robinson et al., 2024",
+    repsTexto: "Repeticiones: sin límite fijo; con series cerca del fallo, un rango amplio de cargas da hipertrofia similar (López et al., 2021; Schoenfeld et al., 2021).",
+  },
   {
     id: "potencia",
     etiqueta: "Potencia",
@@ -37,6 +44,8 @@ export const OBJETIVOS_SESION = [
       { id: "nopliometrico", tipo: "No pliométrico", ejemplos: "sentadilla, press, peso muerto…", rango: "30–70 %" },
     ],
     fuenteZonas: "Soriano et al., 2015 y 2017",
+    reps: { max: 6, suave: false, fuente: "Criterio de la app: la pérdida de velocidad crece con las repeticiones hechas (Rodríguez-Rosell et al., 2020)" },
+    repsTexto: "Repeticiones: hasta 6 (criterio de la app: la velocidad cae al acumular repeticiones, Rodríguez-Rosell et al., 2020).",
   },
 ];
 
@@ -232,7 +241,15 @@ export function evaluarCarga(objetivo, { reps, rir, pct1rm, tipoMov } = {}) {
   const tieneRir = rir !== "" && rir != null && Number.isFinite(Number(rir));
   const p = Number(pct1rm);
   const tienePct = pct1rm !== "" && pct1rm != null && Number.isFinite(p) && p > 0;
-  if (!tieneRir && !tienePct) return null;
+  const avisoReps = () => {
+    const lim = objetivo.reps;
+    if (!lim || n <= lim.max) return null;
+    if (lim.suave) {
+      return { estado: "info", campo: "reps", corto: `${n} reps: cargas ligeras para ${objetivo.etiqueta.toLowerCase()}`, mensaje: `${n} repeticiones por serie: para ${objetivo.etiqueta.toLowerCase()}, más de ${lim.max} reps implican cargas más ligeras, que dan menos ganancia de fuerza que las cargas altas y moderadas. Es una referencia, no un error.`, sugerido: null, fuente: lim.fuente };
+    }
+    return { estado: "fuera", campo: "reps", corto: `${n} reps: muchas para ${objetivo.etiqueta.toLowerCase()}`, mensaje: `${n} repeticiones por serie: en ${objetivo.etiqueta.toLowerCase()} la pérdida de velocidad crece con las repeticiones hechas, así que las series cortas (hasta ${lim.max}) la mantienen. Es un criterio de la app, no una cifra publicada.`, sugerido: null, fuente: lim.fuente };
+  };
+  if (!tieneRir && !tienePct) return avisoReps();
   const r = tieneRir ? Number(rir) : null;
   const rtf = tienePct ? rtfDePct(p) : null;
   const rirDePct = rtf != null ? rtf - n : null;
@@ -269,7 +286,7 @@ export function evaluarCarga(objetivo, { reps, rir, pct1rm, tipoMov } = {}) {
     if (p > zp.max + 1) return res("fuera", "pct", `${Math.round(p)} %: por encima de la zona`, `${Math.round(p)} % queda por encima de la zona de ${objetivo.etiqueta.toLowerCase()} ${donde} (${txt}).${fraseSug}`, objetivo.fuenteZonas);
     if (p < zp.min - 1) return res("fuera", "pct", `${Math.round(p)} %: por debajo de la zona`, `${Math.round(p)} % queda por debajo de la zona de ${objetivo.etiqueta.toLowerCase()} ${donde} (${txt}).${fraseSug}`, objetivo.fuenteZonas);
   }
-  return { estado: "dentro", campo: null, corto: "", mensaje: "", sugerido, fuente };
+  return avisoReps() || { estado: "dentro", campo: null, corto: "", mensaje: "", sugerido, fuente };
 }
 
 // Marca de carga: si coincide con tarea.avisoOk, el aviso se silencia ("dejarlo así").
