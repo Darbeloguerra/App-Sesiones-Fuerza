@@ -38,8 +38,9 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
-import { objetivoDeTexto, avisoDeTarea, firmaCarga, textoSugerido, tiraReferencia, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
-import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, EtiquetaDesplegable, FlechasTarea } from "./ControlesTarea.jsx";
+import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, rtfDePct, sugerenciasPorObjetivo, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { ajustarRecuperaciones, aplicarDescansos, formatearMinutosDiseno } from "../calc/tiempoDisponible.js";
+import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueSugerencias, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -619,20 +620,25 @@ function SegmentadoDiseno({ etiqueta, opciones, valor, onCambiar }) {
   );
 }
 
-// Resumen sobre la lista de fuerza: cuántas tareas tienen la carga fuera de la zona.
-function ResumenAvisosCarga({ objetivo, tareas }) {
-  if (!objetivo) return null;
-  const n = tareas.filter((t) => { const a = avisoDeTarea(objetivo, t); return a && a.estado !== "info"; }).length;
+// Objetivo de cada tarea (se elige en RIR, Repeticiones o %1RM; no hay objetivo de sesión).
+const objetivoDeTarea = (t) => OBJETIVOS_SESION.find((o) => o.id === t.objetivo) || null;
+
+// Resumen sobre la lista de fuerza: cuántas tareas tienen la carga fuera de la zona
+// de SU objetivo (solo cuentan las que tienen objetivo elegido).
+function ResumenAvisosCarga({ tareas }) {
+  const n = tareas.filter((t) => { const o = objetivoDeTarea(t); const a = o ? avisoDeTarea(o, t) : null; return a && a.estado !== "info"; }).length;
   if (!n) return null;
   return (
     <div role="status" style={{ flex: "1 1 260px", minWidth: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "5px 10px", background: ds.bgElevated, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 10, fontSize: 12, lineHeight: 1.4, color: ds.inkSecondary }}>
       <span style={{ color: ds.accent, fontWeight: 700 }}>⚠ {n === 1 ? "1 tarea" : `${n} de ${tareas.length} tareas`}</span>
-      <span>con la carga fuera de la zona de {objetivo.etiqueta}. Toca la etiqueta de cada tarea para ver el motivo.</span>
+      <span>con la carga fuera de la zona de su objetivo. Toca la etiqueta de cada tarea para ver el motivo.</span>
     </div>
   );
 }
 
-function datosSuperserie(tareas) {
+// Numeración de los ejercicios: 1, 2, 3… y, si dos van en superserie, 1a y 1b.
+// ahorroSeg: tiempo que se ahorraría uniendo este ejercicio con el siguiente.
+function datosSuperserie(tareas, bloque = "Fuerza") {
   let grupo = 0;
   let dentro = 0;
   return tareas.map((t, i) => {
@@ -645,41 +651,75 @@ function datosSuperserie(tareas) {
       grupo += 1;
       dentro = 1;
     }
-    const letra = String.fromCharCode(65 + ((grupo - 1) % 26));
-    return { etiqueta: conAnt || conSig ? `${letra}${dentro}` : letra, conAnt, conSig, puedeEnlazar: !!sig && !!t.ejercicioId && !!sig.ejercicioId };
+    const puedeEnlazar = !!sig && !!t.ejercicioId && !!sig.ejercicioId;
+    const ahorroSeg = puedeEnlazar && !conSig && !conAnt ? Math.max(0, estimarTareaSeg(t, bloque) + estimarTareaSeg(sig, bloque) - estimarParSeg(t, sig, bloque)) : 0;
+    return { etiqueta: conAnt || conSig ? `${grupo}${String.fromCharCode(96 + dentro)}` : String(grupo), conAnt, conSig, puedeEnlazar, ahorroSeg };
   });
 }
 
-// Guía por objetivo de la sesión: rango de RIR y, para cada nº de repeticiones,
-// el %1RM que lo deja (ver calc/guiaObjetivo.js para la base científica).
-function BannerGuiaObjetivo({ objetivo }) {
-  const tira = tiraReferencia(objetivo, 6);
-  const chip = { fontFamily: dsF.mono, fontSize: 10.5, color: ds.inkSecondary, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "1px 8px", whiteSpace: "nowrap" };
+// Tiempo disponible del bloque de Fuerza: el entrenador indica los minutos que
+// tiene y ve cuánto se pasa. "Ajustar" propone recortar recuperaciones (con un
+// mínimo de 60 s) o alternar ejercicios. Es una ayuda de diseño: no se guarda.
+const MINUTOS_DISPONIBLES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90];
+function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, alternancias, onAlternar, onAplicarDescansos }) {
+  const objetivoSeg = (Number(minutos) || 0) * 60;
+  const est = estimarBloqueTareasSeg(tareas, circuitos, "Fuerza");
+  if (!est && !objetivoSeg) return null;
+  const pasa = objetivoSeg > 0 && est > objetivoSeg;
+  const pct = objetivoSeg > 0 ? Math.min(100, Math.round((est / objetivoSeg) * 100)) : 0;
+  const nombrePorKey = new Map(tareas.map((t) => [t.key, t.nombre]));
+  const cambiadas = ajuste ? Object.entries(ajuste.descansos) : [];
   return (
-    <div style={{ background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "5px 10px", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11.5, color: ds.ink }}>
-      <span style={{ whiteSpace: "nowrap" }}>
-        <b>{objetivo.etiqueta}</b> · <b style={{ color: ds.accent }}>{etiquetaRir(objetivo)}</b>
-      </span>
-      {!objetivo.zonas && tira.map((x) => (
-        <span key={x.reps} style={chip}>{x.reps} rep{x.reps === 1 ? "" : "s"} <b style={{ color: ds.ink }}>{x.texto}</b></span>
-      ))}
-      {objetivo.zonas && objetivo.zonas.map((z) => (
-        <span key={z.tipo} title={z.ejemplos} style={chip}>{z.tipo} <b style={{ color: ds.ink }}>{z.rango}</b></span>
-      ))}
-      <span style={{ fontSize: 10, color: ds.inkMuted, flex: "1 1 160px", minWidth: 0 }} title={objetivo.nota || ""}>
-        {objetivo.zonas ? "% del 1RM. " : "% del 1RM que deja ese RIR. "}{objetivo.fuenteZonas || objetivo.fuente}
-      </span>
-      {objetivo.repsTexto && <span style={{ fontSize: 11, color: ds.inkSecondary, flex: "1 1 100%" }}>{objetivo.repsTexto}</span>}
+    <div style={{ display: "flex", flexDirection: "column", gap: 7, background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 10, padding: "9px 12px" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 13, color: ds.ink }}>
+        <span>Tiempo disponible</span>
+        <EtiquetaDesplegable rotulo={`${minutos ? `${minutos} min` : "Sin fijar"} ▾`} ariaLabel="Tiempo disponible del bloque" tono={minutos ? "activo" : "vacio"} ancho={220}>
+          {(cerrar) => (
+            <>
+              <Cabecera titulo="Tiempo del bloque" subtitulo="solo para diseñar" />
+              <ListaOpciones etiqueta="Tiempo disponible" valor={String(minutos || "")} onElegir={(v) => { onMinutos(v); cerrar(); }} opciones={[{ v: "", t: "Sin fijar", tenue: true }, ...MINUTOS_DISPONIBLES.map((m) => ({ v: String(m), t: `${m} min` }))]} />
+            </>
+          )}
+        </EtiquetaDesplegable>
+        {est > 0 && <span>Estimado <b>{formatearMinutosDiseno(est)}</b></span>}
+        {pasa && (
+          <EtiquetaDesplegable rotulo="Ajustar ▾" ariaLabel="Ajustar al tiempo disponible" tono="activo" ancho={340}>
+            {(cerrar) => (
+              <>
+                <Cabecera titulo={`Cómo ganar ${formatearMinutosDiseno(est - objetivoSeg)}`} />
+                {ajuste && cambiadas.length > 0 && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4, border: `1px solid ${ds.border}`, background: ds.surface, borderRadius: 10, padding: "8px 10px" }}>
+                    <b style={{ fontSize: 12.5 }}>Acortar recuperaciones (mínimo 60 s)</b>
+                    <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>
+                      {cambiadas.map(([k, seg]) => { const t = tareas.find((x) => String(x.key) === String(k)); return `${nombrePorKey.get(t?.key) || "Tarea"}: ${descansoEfectivoSeg(t, "Fuerza")} → ${seg} s`; }).join(" · ")}. Quedaría en {formatearMinutosDiseno(ajuste.totalSeg)}{ajuste.alcanza ? "." : " y aun así no llega: habría que quitar series o ejercicios."}
+                    </span>
+                    <button type="button" onClick={() => { onAplicarDescansos(ajuste.descansos); cerrar(); }} style={{ height: 36, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>Aplicar</button>
+                  </div>
+                )}
+                {alternancias.map(({ a, b, ahorro }) => (
+                  <div key={`${a.key}-${b.key}`} style={{ display: "flex", flexDirection: "column", gap: 4, border: `1px solid ${ds.border}`, background: ds.surface, borderRadius: 10, padding: "8px 10px" }}>
+                    <b style={{ fontSize: 12.5 }}>Superserie {a.nombre} + {b.nombre}</b>
+                    <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>Zonas distintas. Ahorra {formatearMinutosDiseno(ahorro)} sin recortar descansos.</span>
+                    <button type="button" onClick={() => { onAlternar(a, b, "Fuerza"); cerrar(); }} style={{ height: 36, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>Unir en superserie</button>
+                  </div>
+                ))}
+                <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Menos recuperación suele bajar las repeticiones de las series siguientes. El tiempo disponible es solo una ayuda de diseño: no se guarda en la sesión.</span>
+              </>
+            )}
+          </EtiquetaDesplegable>
+        )}
+      </div>
+      {objetivoSeg > 0 && (
+        <>
+          <div aria-hidden="true" style={{ height: 8, borderRadius: 6, background: ds.border, overflow: "hidden" }}>
+            <div style={{ width: `${pct}%`, height: "100%", borderRadius: 6, background: pasa ? ds.danger : ds.accent }} />
+          </div>
+          <span role="status" style={{ fontSize: 12, color: pasa ? ds.danger : ds.inkSecondary, fontWeight: pasa ? 600 : 400 }}>
+            {pasa ? `Te pasas ${formatearMinutosDiseno(est - objetivoSeg)} de los ${minutos} min. Las recuperaciones recomendadas no caben.` : `Cabe: sobran ${formatearMinutosDiseno(objetivoSeg - est)}.`}
+          </span>
+        </>
+      )}
     </div>
-  );
-}
-
-// Chip "Guía" que sustituye a la franja fija: abre la misma información bajo demanda.
-function GuiaChip({ objetivo }) {
-  return (
-    <EtiquetaDesplegable rotulo={`Guía de ${objetivo.etiqueta.toLowerCase()} ▾`} ariaLabel="Guía del objetivo" ancho={420}>
-      {() => <BannerGuiaObjetivo objetivo={objetivo} />}
-    </EtiquetaDesplegable>
   );
 }
 
@@ -691,9 +731,9 @@ function EncabezadoTablaTareas({ mostrarCarga }) {
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 9px 0 13px" }}>
       <span style={{ flex: 1, minWidth: 0, fontFamily: dsF.sans, fontSize: 10, fontWeight: 600, color: ds.inkMuted }}>Ejercicio</span>
       {col("Series")}
-      {col("Repeticiones")}
-      {mostrarCarga && col("RIR")}
       {mostrarCarga && col("%1RM")}
+      {mostrarCarga && col("RIR")}
+      {col("Repeticiones")}
       {col("Recuperación")}
       <span style={{ width: ANCHO_FLECHAS, flexShrink: 0 }} />
     </div>
@@ -714,8 +754,10 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
 }
 
 // Contenido de la fila en modo tabla (iPad horizontal): nombre con etiquetas
-// (tipo, material, nota, aviso), cinco cajones iguales con desplegable y flechas.
-function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null }) {
+// (lado, superserie, tipo, material, nota, objetivo, aviso), cinco cajones iguales
+// con desplegable y flechas. Orden de trabajo: series, carga (%1RM, RIR) y, con la
+// carga elegida, repeticiones.
+function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onAlternarEnlace = null, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null, descansoAjustado = null }) {
   const modo = tarea.modo || "reps";
   const enSuper = !!superserie && (superserie.conAnt || superserie.conSig);
   const modos = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -724,6 +766,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const nums = (arr) => arr.map((v) => ({ v: String(v), t: String(v) }));
   const valoresCant = { reps: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15], tiempo: [10, 15, 20, 30, 40, 45, 60, 90, 120], minutos: [1, 2, 3, 5, 8, 10, 15, 20, 30], metros: [10, 20, 30, 40, 50, 100, 200, 400] }[modo] || [];
   const conGuia = !!objetivoGuia && mostrarCarga && modo === "reps";
+  const conSugerencias = mostrarCarga && modo === "reps";
   const sug = conGuia ? sugerirCarga(objetivoGuia, tarea.cantidad, tarea.tipoMov) : null;
   const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null;
   const zr = conGuia ? zonaRir(objetivoGuia) : null;
@@ -733,12 +776,34 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const textoZonaPct = zp ? (zp.min === 0 ? `≤${zp.max}` : `${zp.min}–${zp.max}`) : "";
   const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
   const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
-  const autoRec = Number(tarea.series) > 1 ? String(Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || "—") : "—";
+  const autoRecNum = Number(tarea.series) > 1 ? Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || 0 : 0;
+  const autoRec = autoRecNum ? String(autoRecNum) : "—";
   const avRir = aviso && (aviso.campo === "rir" || aviso.campo === "ambos") ? aviso.estado : null;
   const avPct = aviso && (aviso.campo === "pct" || aviso.campo === "ambos") ? aviso.estado : null;
   const avReps = aviso && aviso.campo === "reps" && aviso.estado === "fuera" ? "fuera" : null;
   const textoBoton = aviso && aviso.sugerido ? `Usar lo sugerido: ${textoSugerido(aviso.sugerido)}` : null;
   const infoAviso = aviso ? { mensaje: aviso.mensaje, textoBoton, onAplicar: onAplicarSugerido } : null;
+  // Sugerencias por objetivo: un toque rellena los campos de la fila elegida y
+  // marca ese objetivo en ESTA tarea (no hay objetivo de sesión).
+  const aplicarFila = (f) => {
+    const a = f.aplicar || {};
+    onCambiar({ ...tarea, ...(a.rir != null ? { rir: a.rir } : null), ...(a.pct1rm != null ? { pct1rm: a.pct1rm, pct1rmOrigen: undefined } : null), ...(a.cantidad != null ? { cantidad: a.cantidad } : null), objetivo: f.id });
+  };
+  const rtfElegida = Number(tarea.pct1rm) > 0 ? rtfDePct(Number(tarea.pct1rm)) : null;
+  const resumenSug = rtfElegida != null ? `a ${Math.round(Number(tarea.pct1rm))} % el máximo ronda ${Math.round(rtfElegida)} reps` : "";
+  const bloqueSug = (campo) => (cerrar) => <BloqueSugerencias filas={sugerenciasPorObjetivo(tarea, campo)} resumen={resumenSug} onElegir={aplicarFila} cerrar={cerrar} />;
+  const opcRec = nums([30, 45, 60, 90, 120, 150, 180, 240, 300]);
+  if (descansoAjustado && descansoAjustado !== autoRecNum) {
+    const i = opcRec.findIndex((o) => o.v === String(descansoAjustado));
+    if (i >= 0) opcRec[i] = { ...opcRec[i], zona: true, nota: "ajustada" };
+    else opcRec.unshift({ v: String(descansoAjustado), t: `Ajustada a tu tiempo (${descansoAjustado} s)`, zona: true });
+  }
+  const pieRec = (
+    <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>
+      {descansoAjustado && descansoAjustado !== autoRecNum ? `Con tu tiempo disponible la recomendada (${autoRecNum} s) no cabe: ajustada serían ${descansoAjustado} s. ` : ""}
+      {enSuper ? "En superserie, esta pausa es la que haces tras completar A y B." : "Menos recuperación suele bajar las repeticiones de las series siguientes. Una superserie recorta tiempo sin acortar el descanso de cada músculo."}
+    </span>
+  );
   const claseLetra = enSuper ? { background: ds.accent, color: ds.accentInk } : { background: ds.border, color: ds.accent };
   const letra = orden != null && (
     <span style={{ minWidth: 26, height: 26, padding: "0 5px", boxSizing: "border-box", borderRadius: 8, ...claseLetra, fontFamily: dsF.mono, fontSize: 11.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{orden}</span>
@@ -746,36 +811,37 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const nombre = <span style={{ color: ds.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflowWrap: "break-word" }}>{tarea.nombre}</span>;
   const etiquetas = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-      {tarea.lateralidad === "unilateral" && <EtiquetaFija texto="Unilateral" />}
+      <EtiquetaLado tarea={tarea} onCambiar={onCambiar} />
+      <EtiquetaSuperserie superserie={superserie} onAlternar={onAlternarEnlace} />
       {mostrarCarga && objetivoGuia?.zonas && <EtiquetaTipo tarea={tarea} onCambiar={onCambiar} />}
       <EtiquetaMaterial tarea={tarea} onCambiar={onCambiar} disponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} />
       <EtiquetaNota tarea={tarea} onCambiar={onCambiar} />
       {onVerVideo && <EtiquetaAccion texto="▶ Vídeo" ariaLabel="Ver vídeo" onClick={onVerVideo} />}
+      {conSugerencias && <EtiquetaObjetivo objetivo={objetivoGuia} onCambiar={(id) => onCambiar({ ...tarea, objetivo: id })} />}
       {aviso && <EtiquetaAviso aviso={aviso} objetivo={objetivoGuia} onAplicar={onAplicarSugerido} onIgnorar={onIgnorarAviso} />}
     </div>
   );
   const flechas = <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />;
-  const celdas = (
-    <>
-      <CeldaDesplegable movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />
-      <CeldaDesplegable movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), fuera: conGuia && !!objetivoGuia.reps && !objetivoGuia.reps.suave && v > objetivoGuia.reps.max }))}
-        extra={(
+  const celdaSeries = <CeldaDesplegable key="series" movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />;
+  const celdaReps = (
+    <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), fuera: conGuia && !!objetivoGuia.reps && !objetivoGuia.reps.suave && v > objetivoGuia.reps.max }))}
+      extra={(cerrar) => (
+        <>
+          {conSugerencias && bloqueSug("reps")(cerrar)}
           <div style={{ display: "flex", gap: 8 }}>
             <CampoSelect etiqueta="Medido en" valor={modo} onCambiar={(v) => onCambiar({ ...tarea, modo: v })} opciones={modos.map((m) => ({ v: m, t: etqModo[m] }))} />
-            <CampoSelect etiqueta="Lado" valor={tarea.lateralidad === "unilateral" ? "unilateral" : "bilateral"} onCambiar={(v) => onCambiar({ ...tarea, lateralidad: v })} opciones={[{ v: "bilateral", t: "Bilateral" }, { v: "unilateral", t: "Unilateral" }]} />
           </div>
-        )}
-        pie={mostrarCarga && modo === "reps" ? <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={sug ? `Rellena RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null} /> : null} />
-      {mostrarCarga && (
-        <>
-          <CeldaDesplegable movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc}
-            pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />
-          <CeldaDesplegable movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc}
-            pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />
         </>
       )}
-      <CeldaDesplegable movil={movil} etiqueta="Recuperación" titulo="Recuperación" subtitulo="segundos entre series" valor={tarea.descanso} placeholder={autoRec} apagada={Number(tarea.series) <= 1} resaltar onCambiar={(v) => onCambiar({ ...tarea, descanso: v })} autoOpcion={`Automático (${autoRec} s)`} opciones={nums([30, 45, 60, 90, 120, 150, 180, 240, 300])} />
-    </>
+      pie={conSugerencias ? <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={null} /> : null} />
+  );
+  const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc} extra={conSugerencias ? bloqueSug("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
+  const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc} extra={conSugerencias ? bloqueSug("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
+  const celdaRec = <CeldaDesplegable key="rec" movil={movil} etiqueta="Recuperación" titulo="Recuperación" subtitulo="segundos entre series" valor={tarea.descanso} placeholder={autoRec} apagada={Number(tarea.series) <= 1} resaltar onCambiar={(v) => onCambiar({ ...tarea, descanso: v })} autoOpcion={`Recomendada (${autoRec} s)`} opciones={opcRec} pie={pieRec} />;
+  const celdas = mostrarCarga ? (
+    <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}{celdaRec}</>
+  ) : (
+    <>{celdaSeries}{celdaReps}{celdaRec}</>
   );
   if (movil) {
     return (
@@ -805,22 +871,23 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, objetivoGuia = null }) {
+function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null }) {
   // Una sola fila para todos los tamaños: en pantalla ancha todo en una línea;
   // en móvil, en dos niveles. Siempre con los mismos desplegables.
   const movil = useAnchoVentana() < ANCHO_MIN_TABLA;
-  // Veredicto frente al objetivo de la sesión (solo fuerza con repeticiones).
-  const aviso = objetivoGuia && mostrarCarga ? avisoDeTarea(objetivoGuia, tarea) : null;
-  // Con objetivo de sesión, RIR y %1RM se rellenan solos al poner las repeticiones.
-  // Si el entrenador escribe RIR o % a mano, deja de actualizarse (cargaAuto=false).
+  // El objetivo es de la tarea (se elige en las sugerencias de RIR, Repeticiones o
+  // %1RM), no de la sesión: solo esa tarea avisa si se sale de su zona. No se guarda
+  // en la base de datos: al reabrir la sesión se conserva la carga, no la etiqueta.
+  const objetivoGuia = mostrarCarga ? objetivoDeTarea(tarea) : null;
+  const aviso = objetivoGuia ? avisoDeTarea(objetivoGuia, tarea) : null;
+  // Si el entrenador cambia RIR o % a mano, deja de actualizarse (cargaAuto=false).
   const cambiarOriginal = onCambiar;
   onCambiar = (nuevo) => {
     let t = nuevo;
     const editoCarga = String(nuevo.rir ?? "") !== String(tarea.rir ?? "") || String(nuevo.pct1rm ?? "") !== String(tarea.pct1rm ?? "");
     if (editoCarga) t = { ...t, cargaAuto: false };
-    else if (objetivoGuia && mostrarCarga && (String(nuevo.cantidad ?? "") !== String(tarea.cantidad ?? "") || String(nuevo.tipoMov ?? "") !== String(tarea.tipoMov ?? ""))) t = aplicarSugerencia(objetivoGuia, t);
     // Sin selector "Carga por": si hay %1RM manda el % (el jugador ve además el RIR); si no, el RIR.
-    if (mostrarCarga && (editoCarga || t !== nuevo)) t = { ...t, modoCarga: Number(t.pct1rm) > 0 ? "pct1rm" : "rir" };
+    if (mostrarCarga && editoCarga) t = { ...t, modoCarga: Number(t.pct1rm) > 0 ? "pct1rm" : "rir" };
     cambiarOriginal(t);
   };
   const aplicarSugerido = () => {
@@ -840,21 +907,9 @@ function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesD
 
   const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
   return (
-    <>
     <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto || aviso ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
-      <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
+      <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onAlternarEnlace={onAlternarEnlace} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} descansoAjustado={descansoAjustado} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
     </div>
-    {onAlternarEnlace && superserie && superserie.puedeEnlazar && (
-      <button
-        type="button"
-        onClick={onAlternarEnlace}
-        title={superserie.conSig ? "Separar estos dos ejercicios" : "Unir este ejercicio con el siguiente en una superserie (alternan en el descanso)"}
-        style={{ alignSelf: "center", minHeight: 36, padding: "0 14px", borderRadius: 999, border: `1px ${superserie.conSig ? "solid" : "dashed"} ${superserie.conSig ? ds.accent : ds.border}`, background: superserie.conSig ? ds.accentSubtle : "transparent", color: superserie.conSig ? ds.accent : ds.inkMuted, fontFamily: dsF.sans, fontSize: 12.5, fontWeight: 600, cursor: "pointer", touchAction: "manipulation", WebkitTapHighlightColor: "transparent" }}
-      >
-        {superserie.conSig ? "⛓ Superserie · separar" : "⛓ Unir con el siguiente"}
-      </button>
-    )}
-    </>
   );
 }
 
@@ -1677,6 +1732,17 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
   };
 }
 
+// La tarea nueva sale ya rellena con los valores de la anterior (series, repeticiones,
+// recuperación y, en Fuerza, la carga y el objetivo) para cambiar solo lo que sea
+// distinto. Lo propio del ejercicio (lado, material, nota, superserie) no se copia.
+function heredarDeAnterior(nueva, anterior, conCarga) {
+  if (!anterior || (anterior.modo || "reps") !== "reps") return nueva;
+  const vacia = (v) => v === "" || v == null;
+  const base = { ...nueva, series: anterior.series ?? "", cantidad: anterior.cantidad ?? "", descanso: anterior.descanso ?? "" };
+  if (!conCarga) return base;
+  return { ...base, rir: anterior.rir ?? "", pct1rm: anterior.pct1rm ?? "", modoCarga: !vacia(anterior.pct1rm) && Number(anterior.pct1rm) > 0 ? "pct1rm" : "rir", objetivo: anterior.objetivo || undefined, tipoMov: anterior.tipoMov || undefined };
+}
+
 // Avanza el puntero de rotación de una categoría (o del pool global de
 // Movilidad, con la clave reservada "movilidad") y devuelve el ejercicio
 // que toca esta vez. El pool debe venir ya ordenado por orden_rotacion.
@@ -2277,15 +2343,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   const [tareasResistencia, setTareasResistencia] = useState([]);
   const [circuitosResistencia, setCircuitosResistencia] = useState([]);
   const [tareasFuerza, setTareasFuerza] = useState([]);
-  // Al elegir o cambiar el objetivo se rellenan RIR y %1RM de las tareas de fuerza
-  // que estén vacías o rellenadas automáticamente (nunca las escritas a mano).
-  const objetivoActivo = objetivoDeTexto(objetivo);
-  const objetivoPrevioRef = useRef(objetivoActivo?.id);
-  useEffect(() => {
-    if (objetivoPrevioRef.current === objetivoActivo?.id) return;
-    objetivoPrevioRef.current = objetivoActivo?.id;
-    if (objetivoActivo) setTareasFuerza((prev) => prev.map((t) => aplicarSugerencia(objetivoActivo, t)));
-  }, [objetivoActivo?.id]);
+  // Tiempo disponible del bloque de Fuerza (minutos, "" = sin fijar). Es una ayuda
+  // de diseño: no se guarda en la sesión.
+  const [tiempoFuerzaMin, setTiempoFuerzaMin] = useState("");
   // Progresión de carga al reutilizar una sesión: puntos de %1RM que se suben
   // a las tareas de Fuerza pautadas por %1RM. "0" = mantener todas.
   const [pasoProgresion, setPasoProgresion] = useState(sinProgresion ? "0" : "2");
@@ -2579,7 +2639,8 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         return;
       }
     }
-    bloqueSetter((prev) => [...prev, nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl })]);
+    const conCarga = bloqueSetter === setTareasFuerza;
+    bloqueSetter((prev) => [...prev, heredarDeAnterior(nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl }), prev[prev.length - 1], conCarga)]);
   };
 
   // Igual que en Resistencia: la modalidad ES la elección de "qué
@@ -3085,6 +3146,8 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     if (bloque === "Fuerza") setTareasFuerza(marcar);
     else setTareasCore(marcar);
   };
+  const minutosFuerza = Number(tiempoFuerzaMin) || 0;
+  const ajusteFuerza = minutosFuerza ? ajustarRecuperaciones(tareasFuerza, circuitosFuerza, minutosFuerza * 60, "Fuerza") : null;
   const resumenDiseno = (() => {
     const segActivacion = activacionActiva ? aSegundosDiseno(duracionActivacion, unidadActivacion === "minutos" ? "min" : "seg") : 0;
     const segMovilidad = modoMovilidad === "no_incluir" ? 0 : modoMovilidad === "automatico" ? 300 : tareaMovilidadManual ? 300 : 0;
@@ -3219,7 +3282,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     { id: "core", nombre: "Core", onAdd: (...a) => { setBloqueActivo("core"); return agregarTarea(setTareasCore)(...a); } },
     ...(modoPreventivo === "manual" ? [{ id: "preventivo", nombre: "Preventivo", onAdd: (...a) => { setBloqueActivo("preventivo"); return agregarTarea(setTareasPreventivoManual)(...a); } }] : []),
   ];
-  const guiaObjetivo = objetivoDeTexto(objetivo);
   const destinoActual = destinosBiblio.find((d) => d.id === destinoBiblio) || destinosBiblio[0];
 
   return (
@@ -3277,19 +3339,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                   <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>Objetivo (opcional)</span>
                   <input value={objetivo} onChange={(e) => setObjetivo(e.target.value)} style={{ minHeight: 46, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, padding: "0 12px" }} />
                 </label>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {OBJETIVOS_SESION.map((o) => {
-                      const activo = guiaObjetivo?.id === o.id;
-                      return (
-                        <button key={o.id} type="button" onClick={() => setObjetivo(activo ? "" : o.etiqueta)} style={{ minHeight: 44, padding: "0 16px", borderRadius: 999, cursor: "pointer", border: `1px solid ${activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: activo ? ds.accent : ds.ink, fontWeight: 600 }}>
-                          {o.etiqueta}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <span style={{ fontSize: 11.5, color: ds.inkMuted, lineHeight: 1.4 }}>Con «Fuerza» o «Hipertrofia» el diseñador te muestra el rango de RIR y el %1RM adecuados y avisa si una tarea se sale. Un objetivo escrito a mano no activa la guía.</span>
-                </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, textTransform: "uppercase", letterSpacing: "0.05em" }}>¿Para quién es?</span>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
@@ -3625,8 +3674,8 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                       <FilaTareaReal
                         key={t.key}
                         tarea={t}
-                        orden={datosSuperserie(tareasCore)[i].etiqueta}
-                        superserie={datosSuperserie(tareasCore)[i]}
+                        orden={datosSuperserie(tareasCore, "Core")[i].etiqueta}
+                        superserie={datosSuperserie(tareasCore, "Core")[i]}
                         onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasCore, i, tareasCore)}
                         mostrarCarga={false}
                         materialesDisponibles={materialesDisponibles}
@@ -3748,22 +3797,29 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                 {bloqueActivo === "fuerza" && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
-                    {guiaObjetivo && (
-                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                        <GuiaChip objetivo={guiaObjetivo} />
-                        <ResumenAvisosCarga objetivo={guiaObjetivo} tareas={tareasFuerza} />
-                      </div>
+                    {!readOnly && (
+                      <PanelTiempoDisponible
+                        tareas={tareasFuerza}
+                        circuitos={circuitosFuerza}
+                        minutos={tiempoFuerzaMin}
+                        onMinutos={setTiempoFuerzaMin}
+                        ajuste={ajusteFuerza}
+                        alternancias={resumenDiseno.sugerencias.filter((x) => x.bloque === "Fuerza")}
+                        onAlternar={aplicarAlternancia}
+                        onAplicarDescansos={(mapa) => setTareasFuerza((prev) => aplicarDescansos(prev, mapa))}
+                      />
                     )}
+                    <ResumenAvisosCarga tareas={tareasFuerza} />
                     {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {tareasFuerza.map((t, i) => (
                       <FilaTareaReal
                         key={t.key}
                         tarea={t}
-                        orden={datosSuperserie(tareasFuerza)[i].etiqueta}
-                        superserie={datosSuperserie(tareasFuerza)[i]}
+                        orden={datosSuperserie(tareasFuerza, "Fuerza")[i].etiqueta}
+                        superserie={datosSuperserie(tareasFuerza, "Fuerza")[i]}
+                        descansoAjustado={ajusteFuerza ? ajusteFuerza.descansos[t.key] ?? null : null}
                         onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasFuerza, i, tareasFuerza)}
                         mostrarCarga={true}
-                        objetivoGuia={guiaObjetivo}
                         materialesDisponibles={materialesDisponibles}
                         onAgregarMaterial={agregarMaterial}
                         referenciasPorEjercicio={referenciasPorEjercicio}
