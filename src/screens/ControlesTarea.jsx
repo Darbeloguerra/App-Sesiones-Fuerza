@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ds, dsF } from "../core/designSystem.jsx";
+import { OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 
 export const ANCHO_COL = 66;
 export const ANCHO_FLECHAS = 92;
@@ -78,7 +79,7 @@ export function Desplegable({ ancla, onCerrar, ancho = 320, children }) {
   );
 }
 
-function Cabecera({ titulo, subtitulo }) {
+export function Cabecera({ titulo, subtitulo }) {
   return (
     <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "0 4px" }}>
       <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{titulo}</span>
@@ -87,7 +88,7 @@ function Cabecera({ titulo, subtitulo }) {
   );
 }
 
-function ListaOpciones({ opciones, valor, onElegir, etiqueta, altoMax = 260 }) {
+export function ListaOpciones({ opciones, valor, onElegir, etiqueta, altoMax = 260 }) {
   const selRef = useRef(null);
   // Al abrir, la opción elegida queda a la vista aunque la lista tenga scroll.
   useEffect(() => {
@@ -139,6 +140,31 @@ export function Implicaciones({ datos, sugerencia }) {
   );
 }
 
+// Sugerencias por objetivo dentro de un desplegable (RIR, repeticiones o %1RM).
+// Cada fila es de un objetivo (Fuerza, Hipertrofia, Potencia); un toque rellena
+// los campos que indique y marca ese objetivo en la tarea. Sin objetivo de sesión.
+export function BloqueSugerencias({ filas, resumen, onElegir, cerrar }) {
+  if (!filas || !filas.length) return null;
+  return (
+    <div style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 10, padding: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+      <div style={{ fontSize: 11.5, color: ds.inkSecondary, padding: "2px 6px 0", lineHeight: 1.35 }}>
+        <b style={{ color: ds.ink }}>Sugerido por objetivo</b>{resumen ? ` · ${resumen}` : ""}
+      </div>
+      {filas.map((f) => {
+        const accion = !f.bloqueado && f.aplicar;
+        return (
+          <button key={f.id} type="button" disabled={!accion} onClick={() => { onElegir(f); cerrar(); }} aria-label={`${f.etiqueta}: ${f.texto}`}
+            style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 46, width: "100%", boxSizing: "border-box", textAlign: "left", padding: "5px 10px", borderRadius: 8, background: ds.surface, color: ds.ink, fontFamily: dsF.sans, cursor: accion ? "pointer" : "default", opacity: f.bloqueado ? 0.65 : 1, border: `1px solid ${f.activo ? ds.accent : ds.border}` }}>
+            <span style={{ flexShrink: 0, width: 84, fontWeight: 700, fontSize: 12.5 }}>{f.etiqueta}</span>
+            <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 1.3, color: ds.inkSecondary }}>{f.texto}</span>
+            {accion && f.boton && <span style={{ flexShrink: 0, fontFamily: dsF.mono, fontSize: 12, fontWeight: 600, color: ds.accent, textAlign: "right" }}>{f.boton}</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
   return (
     <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
@@ -184,7 +210,7 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
         <Desplegable ancla={ref} onCerrar={cerrar} ancho={330}>
           <Cabecera titulo={titulo || etiqueta} subtitulo={subtitulo} />
           {avisoInfo && !teclado && <BloqueAviso info={{ ...avisoInfo, estado: aviso }} cerrar={cerrar} />}
-          {extra}
+          {typeof extra === "function" ? extra(cerrar) : extra}
           {teclado ? (
             <div style={{ display: "flex", gap: 8 }}>
               <input autoFocus aria-label={`${etiqueta}: otro valor`} inputMode="numeric" value={borrador} onChange={(e) => setBorrador(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={(e) => { if (e.key === "Enter") confirmarTeclado(); }}
@@ -194,7 +220,7 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
           ) : (
             <ListaOpciones opciones={todas} valor={valor} onElegir={elegir} etiqueta={etiqueta} />
           )}
-          {pie}
+          {typeof pie === "function" ? pie(cerrar) : pie}
         </Desplegable>
       )}
     </div>
@@ -221,6 +247,64 @@ export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, aria
       </button>
       {abierto && <Desplegable ancla={ref} onCerrar={() => setAbierto(false)} ancho={ancho}>{children(() => setAbierto(false))}</Desplegable>}
     </>
+  );
+}
+
+// Lado visible en la línea de etiquetas (antes estaba dentro de Repeticiones).
+export function EtiquetaLado({ tarea, onCambiar }) {
+  const uni = tarea.lateralidad === "unilateral";
+  return (
+    <EtiquetaDesplegable rotulo={`${uni ? "Unilateral" : "Bilateral"} ▾`} ariaLabel="Lado" tono={uni ? "activo" : "normal"} ancho={250}>
+      {(cerrar) => (
+        <>
+          <Cabecera titulo="Lado" subtitulo="cómo se ejecuta" />
+          <ListaOpciones etiqueta="Lado" valor={uni ? "unilateral" : "bilateral"} onElegir={(v) => { onCambiar({ ...tarea, lateralidad: v }); cerrar(); }} opciones={[{ v: "bilateral", t: "Bilateral" }, { v: "unilateral", t: "Unilateral" }]} />
+          <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>En unilateral, las repeticiones son por lado.</span>
+        </>
+      )}
+    </EtiquetaDesplegable>
+  );
+}
+
+// Superserie a la vista: une o separa con el siguiente ejercicio.
+export function EtiquetaSuperserie({ superserie, onAlternar }) {
+  if (!superserie || !onAlternar || !(superserie.puedeEnlazar || superserie.conAnt || superserie.conSig)) return null;
+  const unida = superserie.conAnt || superserie.conSig;
+  const rotulo = unida ? `⛓ Superserie ${superserie.conSig ? "con el siguiente" : "con el anterior"} ▾` : "⛓ Superserie ▾";
+  const ahorro = superserie.ahorroSeg > 0 ? `${Math.round(superserie.ahorroSeg / 6) / 10} min`.replace(".", ",") : "";
+  return (
+    <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Superserie" tono={unida ? "activo" : "vacio"} ancho={300}>
+      {(cerrar) => (
+        <>
+          <Cabecera titulo="Superserie" subtitulo="alternan en la pausa" />
+          {superserie.conAnt && !superserie.conSig ? (
+            <span style={{ fontSize: 12, color: ds.inkSecondary, padding: "0 4px", lineHeight: 1.4 }}>Este ejercicio forma superserie con el anterior. Para separarlos, usa la etiqueta del primero.</span>
+          ) : (
+            <button type="button" onClick={() => { onAlternar(); cerrar(); }} style={{ minHeight: 44, borderRadius: 10, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontWeight: 700, fontSize: 13.5, fontFamily: dsF.sans, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 12px" }}>
+              <span>{superserie.conSig ? "Separar los dos ejercicios" : "Unir con el siguiente"}</span>
+              {!superserie.conSig && ahorro && <small style={{ fontWeight: 500, fontSize: 11 }}>ahorra {ahorro}</small>}
+            </button>
+          )}
+          <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Hacéis A, pausa corta, B, y volvéis a A: el descanso de uno lo cubre el trabajo del otro. Funciona mejor con ejercicios de zonas distintas.</span>
+        </>
+      )}
+    </EtiquetaDesplegable>
+  );
+}
+
+// Objetivo de esta tarea. Solo aparece cuando se ha elegido una fila de
+// sugerencias por objetivo; desde aquí se cambia o se quita.
+export function EtiquetaObjetivo({ objetivo, onCambiar }) {
+  if (!objetivo) return null;
+  return (
+    <EtiquetaDesplegable rotulo={`${objetivo.etiqueta} ▾`} ariaLabel="Objetivo de la tarea" tono="activo" ancho={260}>
+      {(cerrar) => (
+        <>
+          <Cabecera titulo="Objetivo de esta tarea" subtitulo="solo avisa esta tarea" />
+          <ListaOpciones etiqueta="Objetivo" valor={objetivo.id} onElegir={(v) => { onCambiar(v); cerrar(); }} opciones={[...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta })), { v: "", t: "Quitar objetivo", tenue: true }]} />
+        </>
+      )}
+    </EtiquetaDesplegable>
   );
 }
 
