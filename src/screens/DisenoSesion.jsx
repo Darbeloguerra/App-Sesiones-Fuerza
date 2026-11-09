@@ -825,15 +825,15 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const celdaSeries = <CeldaDesplegable key="series" movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />;
   const celdaReps = (
     <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), fuera: conGuia && !!objetivoGuia.reps && !objetivoGuia.reps.suave && v > objetivoGuia.reps.max }))}
-      extra={(cerrar) => (
+      extra={conSugerencias ? bloqueSug("reps") : null}
+      pie={() => (
         <>
-          {conSugerencias && bloqueSug("reps")(cerrar)}
           <div style={{ display: "flex", gap: 8 }}>
             <CampoSelect etiqueta="Medido en" valor={modo} onCambiar={(v) => onCambiar({ ...tarea, modo: v })} opciones={modos.map((m) => ({ v: m, t: etqModo[m] }))} />
           </div>
+          {conSugerencias && <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={null} />}
         </>
-      )}
-      pie={conSugerencias ? <Implicaciones datos={implicaciones("reps", objetivoGuia)} sugerencia={null} /> : null} />
+      )} />
   );
   const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc} extra={conSugerencias ? bloqueSug("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
   const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc} extra={conSugerencias ? bloqueSug("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
