@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Loader2, Play, AlertTriangle } from "lucide-react";
 import { ds, dsF, dsR, DsButton } from "./designSystem.jsx";
-import { extractYouTubeId, esVideoDirecto, miniaturaTarea, parseMateriales, formatearDetalleTareaCoach } from "./hooks.js";
+import { extractYouTubeId, extractDriveId, esVideoDirecto, miniaturaTarea, parseMateriales, formatearDetalleTareaCoach } from "./hooks.js";
 import { fmtDateLabel, fmtDateShort } from "../calc/fechas.js";
 
 // Reproductor incrustado. Tres casos:
@@ -25,6 +25,21 @@ export function VideoEmbed({ url }) {
           src={`https://www.youtube.com/embed/${videoId}?rel=0&modestbranding=1&playsinline=1`}
           title="Demostración del ejercicio"
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
+        />
+      </div>
+    );
+  }
+
+  const driveId = extractDriveId(url);
+  if (driveId) {
+    return (
+      <div style={{ marginTop: 8, position: "relative", width: "100%", paddingTop: "56.25%", borderRadius: 8, overflow: "hidden", background: "#000" }} onClick={(e) => e.stopPropagation()}>
+        <iframe
+          src={`https://drive.google.com/file/d/${driveId}/preview`}
+          title="Demostración del ejercicio"
+          allow="autoplay; fullscreen"
           allowFullScreen
           style={{ position: "absolute", top: 0, left: 0, width: "100%", height: "100%", border: "none" }}
         />
