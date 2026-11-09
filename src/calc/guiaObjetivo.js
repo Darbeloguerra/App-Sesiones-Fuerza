@@ -301,3 +301,71 @@ export function avisoDeTarea(objetivo, t) {
   const e = evaluarCarga(objetivo, { reps: t.cantidad, rir: t.rir, pct1rm: t.pct1rm, tipoMov: t.tipoMov });
   return e && e.estado !== "dentro" ? e : null;
 }
+
+// ---------------------------------------------------------------------------
+// Sugerencias por objetivo para UNA tarea (sin objetivo de sesión).
+// Al abrir RIR, Repeticiones o %1RM, cada objetivo propone su valor según lo
+// que ya se haya elegido. El orden de trabajo es carga -> RIR -> repeticiones:
+// con el % elegido, la tabla RTF fija las repeticiones máximas y el RIR dice
+// cuántas quedan (reps = RTF - RIR).
+//
+// campo: "rir" | "reps" | "pct". Devuelve una fila por objetivo:
+//   { id, etiqueta, texto, boton, aplicar, bloqueado, activo }
+// `aplicar` = campos de la tarea que rellena la fila ({ rir, cantidad,
+// pct1rm }, siempre como texto); null si la fila solo informa.
+// ---------------------------------------------------------------------------
+const rangoTxt = (a, b) => (a === b ? String(a) : `${a}–${b}`);
+const plural = (n) => `rep${n === 1 ? "" : "s"}`;
+export const REPS_MAX_POTENCIA = 6;
+
+export function sugerenciasPorObjetivo(t, campo) {
+  const p = Number(t.pct1rm);
+  const tienePct = t.pct1rm !== "" && t.pct1rm != null && Number.isFinite(p) && p > 0;
+  const R = tienePct ? rtfDePct(p) : null; // reps máximas al %; null por debajo del 75 %
+  const rirNum = Number(t.rir);
+  const tieneRir = t.rir !== "" && t.rir != null && Number.isFinite(rirNum);
+  const plio = t.tipoMov === "pliometrico";
+  const zonaPot = plio ? { min: 0, max: 30 } : { min: 30, max: 70 };
+  const potFuera = tienePct && (p > zonaPot.max + 1 || p < zonaPot.min - 1);
+
+  return OBJETIVOS_SESION.map((o) => {
+    const pot = !!o.zonas;
+    const base = { id: o.id, etiqueta: o.etiqueta, activo: t.objetivo === o.id, bloqueado: false, aplicar: null, boton: "", texto: "" };
+    const rirTxt = textoRir(o);
+    if (pot && potFuera) {
+      return { ...base, bloqueado: true, texto: `${Math.round(p)} % queda ${p > zonaPot.max ? "por encima" : "por debajo"} de la zona de potencia (${zonaPot.min === 0 ? `hasta ${zonaPot.max}` : `${zonaPot.min}–${zonaPot.max}`} %).` };
+    }
+    if (campo === "pct") {
+      let zona;
+      if (pot) zona = zonaPot.min === 0 ? `hasta ${zonaPot.max} %` : `${zonaPot.min}–${zonaPot.max} %`;
+      else if (o.id === "fuerza") zona = `${Math.round(TABLA_PCT_1RM_POR_RTF[RTF_TABLA_MAX] * 100)}–${Math.round(pct1RMporRTF(1 + o.rir.min) * 100)} %`;
+      else zona = `sin rango fijo (la tabla cubre ${Math.round(TABLA_PCT_1RM_POR_RTF[RTF_TABLA_MAX] * 100)}–100 %)`;
+      return { ...base, texto: `${rirTxt}. Carga habitual: ${zona}.`, aplicar: {} };
+    }
+    if (campo === "rir") {
+      if (R != null) {
+        const hi = Math.max(1, Math.round(R - o.rir.min));
+        const lo = o.rir.max == null ? 1 : Math.max(1, Math.round(R - o.rir.max));
+        const encaja = tieneRir && rirNum >= o.rir.min && (o.rir.max == null || rirNum <= o.rir.max);
+        const rir = encaja ? rirNum : RIR_DEFECTO[o.id];
+        return { ...base, texto: `${rirTxt}: a ${Math.round(p)} % harías ${rangoTxt(lo, hi)} reps.${encaja ? " Tu RIR encaja." : ""}`, boton: `RIR ${rir}`, aplicar: { rir: String(rir) } };
+      }
+      return { ...base, texto: `${rirTxt}${pot ? ", lejos del fallo y a máxima velocidad" : ""}. Elige un % desde 75 para ver las repeticiones.`, boton: `RIR ${RIR_DEFECTO[o.id]}`, aplicar: { rir: String(RIR_DEFECTO[o.id]) } };
+    }
+    // campo === "reps": recomendación por objetivo según el % (no depende del
+    // RIR ya elegido). Al aplicarla, repeticiones y RIR quedan coherentes con el %.
+    if (R != null) {
+      const hi = Math.max(1, Math.round(R - o.rir.min));
+      const lo = o.rir.max == null ? 1 : Math.max(1, Math.round(R - o.rir.max));
+      const tope = pot ? Math.min(hi, REPS_MAX_POTENCIA) : hi;
+      const sug = Math.max(1, Math.round(R - RIR_DEFECTO[o.id]));
+      const reps = pot ? Math.min(sug, REPS_MAX_POTENCIA) : sug;
+      const rir = Math.max(0, Math.round(R - reps));
+      const conRir = tieneRir ? ` Con tu RIR ${rirNum} serían ${Math.max(1, Math.round(R - rirNum))}.` : "";
+      return { ...base, texto: `${rirTxt}: a ${Math.round(p)} % son ${rangoTxt(Math.min(lo, tope), tope)} reps.${conRir}`, boton: `${reps} ${plural(reps)} · RIR ${rir}`, aplicar: { cantidad: String(reps), rir: String(rir) } };
+    }
+    const general = o.reps ? (o.reps.suave ? `hasta ${o.reps.max} reps (referencia)` : `hasta ${o.reps.max} reps`) : "sin límite de reps";
+    const nota = tienePct && p < 75 ? " Por debajo del 75 % no calculo repeticiones exactas." : " Elige un % desde 75 para calcularlas.";
+    return { ...base, texto: `${rirTxt}: ${general}.${nota}` };
+  });
+}
