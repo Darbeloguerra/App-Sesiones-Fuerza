@@ -2228,7 +2228,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // PantallaEntrenadorAncha para el resto de pantallas "anchas" de la app.
   const ancho = useAnchoVentana();
   const anchoDesktop = ancho >= 900;
-  const lateralBloques = ancho >= 1100;
+  const lateralBloques = ancho >= 1320;
   const [slotBiblio, setSlotBiblio] = useState(null);
   const [destinoBiblio, setDestinoBiblio] = useState("fuerza");
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
@@ -3448,7 +3448,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
 
           <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
-          {lateralBloques && <div ref={setSlotBiblio} style={{ width: 330, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
+          {lateralBloques && <div ref={setSlotBiblio} style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
           {lateralBloques && !readOnly && <SelectorEjercicioReal panelFijo ejercicios={ejercicios} bloque={destinoActual.nombre} onAdd={destinoActual.onAdd} onAsignarZona={asignarZonaYActualizar} destinos={destinosBiblio} destinoId={destinoActual.id} onCambiarDestino={setDestinoBiblio} />}
           <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
           {/* Constructor: una tarjeta desplegable por bloque. */}
