@@ -197,3 +197,73 @@ test("evaluarCarga reps: sin RIR ni % también avisa por repeticiones", () => {
   assert.equal(evaluarCarga(fuerza, { reps: 10, rir: "", pct1rm: "" }).campo, "reps");
   assert.equal(evaluarCarga(fuerza, { reps: 5, rir: "", pct1rm: "" }), null);
 });
+
+// ---------------------------------------------------------------------------
+// sugerenciasPorObjetivo: recomendaciones por objetivo en la propia tarea
+// ---------------------------------------------------------------------------
+import { sugerenciasPorObjetivo } from "./guiaObjetivo.js";
+
+test("reps con 80 %: cada objetivo propone sus repeticiones y su RIR", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "80", rir: "", cantidad: "" }, "reps");
+  const [fu, hi, po] = f;
+  assert.equal(fu.id, "fuerza");
+  assert.deepEqual(fu.aplicar, { cantidad: "4", rir: "4" });
+  assert.match(fu.texto, /3–5 reps/);
+  assert.deepEqual(hi.aplicar, { cantidad: "6", rir: "2" });
+  assert.match(hi.texto, /3–8 reps/);
+  assert.equal(po.bloqueado, true); // 80 % fuera de la zona de potencia
+  assert.equal(po.aplicar, null);
+});
+
+test("reps con 75 %: no depende del RIR ya elegido, que solo se menciona", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "75", rir: "2", cantidad: "" }, "reps");
+  assert.deepEqual(f[0].aplicar, { cantidad: "6", rir: "4" });
+  assert.deepEqual(f[1].aplicar, { cantidad: "8", rir: "2" });
+  assert.match(f[0].texto, /Con tu RIR 2 serían 8/);
+});
+
+test("reps por debajo del 75 %: solo criterio por objetivo, sin cifras exactas", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "60", rir: "", cantidad: "" }, "reps");
+  assert.equal(f[0].aplicar, null);
+  assert.match(f[0].texto, /hasta 8 reps/);
+  assert.match(f[1].texto, /sin límite/);
+  assert.match(f[2].texto, /hasta 6 reps/);
+  assert.match(f[1].texto, /Por debajo del 75 %/);
+});
+
+test("potencia dentro de su zona: tope de 6 repeticiones", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "75", rir: "", cantidad: "", tipoMov: "pliometrico" }, "reps");
+  assert.equal(f[2].bloqueado, true); // 75 % queda por encima de ≤30 %
+  const g = sugerenciasPorObjetivo({ pct1rm: "", rir: "", cantidad: "" }, "reps");
+  assert.equal(g[2].aplicar, null);
+});
+
+test("rir con 75 %: rango de reps por objetivo y RIR por defecto", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "75", rir: "", cantidad: "" }, "rir");
+  assert.deepEqual(f[0].aplicar, { rir: "4" });
+  assert.match(f[0].texto, /5–7 reps/);
+  assert.deepEqual(f[1].aplicar, { rir: "2" });
+  assert.match(f[1].texto, /5–10 reps/);
+});
+
+test("rir: si el RIR elegido ya encaja en el rango del objetivo, se conserva", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "75", rir: "3", cantidad: "" }, "rir");
+  assert.deepEqual(f[0].aplicar, { rir: "3" });
+  assert.match(f[0].texto, /Tu RIR encaja/);
+  assert.deepEqual(f[1].aplicar, { rir: "3" });
+});
+
+test("rir sin %: propone el RIR por defecto y pide un % desde 75", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "", rir: "", cantidad: "" }, "rir");
+  assert.deepEqual(f.map((x) => x.aplicar.rir), ["4", "2", "3"]);
+  assert.match(f[0].texto, /desde 75/);
+});
+
+test("pct: solo informa de la carga habitual y marca el objetivo activo", () => {
+  const f = sugerenciasPorObjetivo({ pct1rm: "", rir: "", cantidad: "", objetivo: "hipertrofia" }, "pct");
+  assert.match(f[0].texto, /75–90 %/);
+  assert.match(f[1].texto, /sin rango fijo/);
+  assert.match(f[2].texto, /30–70 %/);
+  assert.deepEqual(f.map((x) => x.activo), [false, true, false]);
+  assert.deepEqual(f[0].aplicar, {});
+});
