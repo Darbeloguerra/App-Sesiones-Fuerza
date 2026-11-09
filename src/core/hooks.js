@@ -551,8 +551,17 @@ export function extractYouTubeId(url) {
 // de vídeo reproducible por <video> nativo — es lo que da Cloudflare R2 (o
 // cualquier bucket de objetos): la URL pública del archivo tal cual, sin
 // intermediario de por medio.
+// Enlace de Google Drive a un archivo (drive.google.com/file/d/ID/view...).
+// Se reproduce con el visor de Drive incrustado (/preview). Solo funciona si
+// el archivo está compartido como "Cualquier persona con el enlace".
+export function extractDriveId(url) {
+  if (!url) return null;
+  const m = url.match(/drive\.google\.com\/file\/d\/([\w-]{10,})/);
+  return m ? m[1] : null;
+}
+
 export function esVideoDirecto(url) {
-  return !!url && /\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url.trim());
+  return !!url && (/\.(mp4|webm|mov|m4v)(\?.*)?$/i.test(url.trim()) || !!extractDriveId(url));
 }
 
 // Miniatura para las tarjetas de tarea/biblioteca: si es un vídeo de YouTube,
