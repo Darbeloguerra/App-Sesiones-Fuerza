@@ -145,6 +145,15 @@ export function Implicaciones({ datos, sugerencia }) {
 // los campos que indique y marca ese objetivo en la tarea. Sin objetivo de sesión.
 export function BloqueSugerencias({ filas, resumen, onElegir, cerrar }) {
   if (!filas || !filas.length) return null;
+  // Sin datos para calcular (p. ej. aún no hay %1RM): una sola línea, para no
+  // empujar las opciones numéricas fuera de la vista.
+  if (filas.every((f) => !f.aplicar)) {
+    return (
+      <div style={{ border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "7px 10px", fontSize: 11.5, lineHeight: 1.35, color: ds.inkSecondary }}>
+        <b style={{ color: ds.ink }}>Sugerido por objetivo</b> · {resumen || "elige antes un %1RM (desde 75 %) y aparecerán aquí."}
+      </div>
+    );
+  }
   return (
     <div style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 10, padding: 6, display: "flex", flexDirection: "column", gap: 4 }}>
       <div style={{ fontSize: 11.5, color: ds.inkSecondary, padding: "2px 6px 0", lineHeight: 1.35 }}>
