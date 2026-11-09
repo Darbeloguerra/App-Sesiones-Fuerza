@@ -461,7 +461,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
             style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? ds.danger : undefined }}
           />
           {enlaceNoReconocido && (
-            <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace — debe ser de YouTube o terminar en .mp4/.webm/.mov.</span>
+            <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace — debe ser de YouTube, de Google Drive (drive.google.com/file/d/…) o terminar en .mp4/.webm/.mov.</span>
           )}
           {enlaceReconocido && <VideoEmbed url={videoUrl} />}
         </label>
