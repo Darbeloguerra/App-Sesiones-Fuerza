@@ -38,9 +38,10 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtDateShort, diasEntreFechas } from "../calc/fechas.js";
 import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
-import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, rtfDePct, sugerenciasPorObjetivo, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, rtfDePct, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { aplicarObjetivo, ligarCampo, derivaDeObjetivo, objetivosQueEncajan, objetivosEnZona, textoZonaObjetivo, leerTipicos, guardarTipicos, normalizarTipicos, VALORES_TIPICOS_INICIALES } from "../calc/objetivoTarea.js";
 import { ajustarRecuperaciones, aplicarDescansos, formatearMinutosDiseno } from "../calc/tiempoDisponible.js";
-import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaAviso, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueSugerencias, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
+import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueObjetivo, BotonValoresTipicos, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -661,7 +662,7 @@ function datosSuperserie(tareas, bloque = "Fuerza") {
 // tiene y ve cuánto se pasa. "Ajustar" propone recortar recuperaciones (con un
 // mínimo de 60 s) o alternar ejercicios. Es una ayuda de diseño: no se guarda.
 const MINUTOS_DISPONIBLES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90];
-function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, alternancias, onAlternar, onAplicarDescansos }) {
+function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, alternancias, onAlternar, onAplicarDescansos, tipicos, onTipico, onRestablecerTipicos }) {
   const objetivoSeg = (Number(minutos) || 0) * 60;
   const est = estimarBloqueTareasSeg(tareas, circuitos, "Fuerza");
   if (!est && !objetivoSeg) return null;
@@ -682,6 +683,7 @@ function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, 
           )}
         </EtiquetaDesplegable>
         {est > 0 && <span>Estimado <b>{formatearMinutosDiseno(est)}</b></span>}
+        {tipicos && <span style={{ marginLeft: "auto" }}><BotonValoresTipicos tipicos={tipicos} onCambiar={onTipico} onRestablecer={onRestablecerTipicos} /></span>}
         {pasa && (
           <EtiquetaDesplegable rotulo="Ajustar ▾" ariaLabel="Ajustar al tiempo disponible" tono="activo" ancho={340}>
             {(cerrar) => (
@@ -758,6 +760,7 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
 // con desplegable y flechas. Orden de trabajo: series, carga (%1RM, RIR) y, con la
 // carga elegida, repeticiones.
 function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onAlternarEnlace = null, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null, descansoAjustado = null }) {
+  const [ajuste, setAjuste] = useState(null);
   const modo = tarea.modo || "reps";
   const enSuper = !!superserie && (superserie.conAnt || superserie.conSig);
   const modos = mostrarCarga ? ["reps", "tiempo", "minutos", "metros"] : ["reps", "tiempo", "minutos"];
@@ -771,8 +774,9 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null;
   const zr = conGuia ? zonaRir(objetivoGuia) : null;
   const zp = conGuia ? zonaPct(objetivoGuia, { reps: tarea.cantidad, tipoMov: tarea.tipoMov }) : null;
-  const rirOpc = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: v === 6 ? "6 o más" : String(v), zona: !!zr && v >= zr.min && (zr.max == null || v <= zr.max), fuera: !!zr && !(v >= zr.min && (zr.max == null || v <= zr.max)), nota: !!zr && v >= zr.min && (zr.max == null || v <= zr.max) ? "zona" : "" }));
-  const pctOpc = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map((v) => { const z = !!zp && v >= zp.min && v <= zp.max; return { v: String(v), t: `${v} %`, zona: z, fuera: !!zp && !z, nota: z ? "zona" : "" }; });
+  const quienes = (campo, v) => objetivosEnZona(campo, v, tarea).map((id) => OBJETIVOS_SESION.find((o) => o.id === id).etiqueta).join(" · ");
+  const rirOpc = [0, 1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: v === 6 ? "6 o más" : String(v), zona: !!zr && v >= zr.min && (zr.max == null || v <= zr.max), nota: conSugerencias ? quienes("rir", v) : "" }));
+  const pctOpc = [30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100].map((v) => ({ v: String(v), t: `${v} %`, zona: !!objetivoGuia && objetivosEnZona("pct", v, tarea).includes(objetivoGuia.id), nota: conSugerencias ? quienes("pct", v) : "" }));
   const textoZonaPct = zp ? (zp.min === 0 ? `≤${zp.max}` : `${zp.min}–${zp.max}`) : "";
   const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
   const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
@@ -783,15 +787,17 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const avReps = aviso && aviso.campo === "reps" && aviso.estado === "fuera" ? "fuera" : null;
   const textoBoton = aviso && aviso.sugerido ? `Usar lo sugerido: ${textoSugerido(aviso.sugerido)}` : null;
   const infoAviso = aviso ? { mensaje: aviso.mensaje, textoBoton, onAplicar: onAplicarSugerido } : null;
-  // Sugerencias por objetivo: un toque rellena los campos de la fila elegida y
-  // marca ese objetivo en ESTA tarea (no hay objetivo de sesión).
-  const aplicarFila = (f) => {
-    const a = f.aplicar || {};
-    onCambiar({ ...tarea, ...(a.rir != null ? { rir: a.rir } : null), ...(a.pct1rm != null ? { pct1rm: a.pct1rm, pct1rmOrigen: undefined } : null), ...(a.cantidad != null ? { cantidad: a.cantidad } : null), objetivo: f.id });
-  };
-  const rtfElegida = Number(tarea.pct1rm) > 0 ? rtfDePct(Number(tarea.pct1rm)) : null;
-  const resumenSug = rtfElegida != null ? `a ${Math.round(Number(tarea.pct1rm))} % el máximo ronda ${Math.round(rtfElegida)} reps` : "";
-  const bloqueSug = (campo) => (cerrar) => <BloqueSugerencias filas={sugerenciasPorObjetivo(tarea, campo)} resumen={resumenSug} onElegir={aplicarFila} cerrar={cerrar} />;
+  // Objetivo de ESTA tarea (no hay objetivo de sesión). Elegirlo rellena RIR y
+  // repeticiones (y el % si falta); un % concreto rellena RIR y repeticiones
+  // para ese objetivo; cambiar RIR o repeticiones ajusta la otra cifra.
+  const aplicarCambio = ({ tarea: t, mensaje }) => { onCambiar(t); setAjuste(mensaje); };
+  const elegirObjetivo = (id) => aplicarCambio(aplicarObjetivo(tarea, id, leerTipicos()));
+  const adoptarObjetivo = (id) => { onCambiar({ ...tarea, objetivo: id }); setAjuste(`Objetivo de la tarea: ${OBJETIVOS_SESION.find((o) => o.id === id).etiqueta}. Los valores no se han tocado.`); };
+  const cambiarCampo = (campo) => (v) => (conSugerencias ? aplicarCambio(ligarCampo(tarea, campo, v, leerTipicos())) : onCambiar({ ...tarea, [campo]: v }));
+  const bloqueObj = (campo) => (cerrar) => <BloqueObjetivo objetivo={objetivoGuia} textoZona={textoZonaObjetivo(objetivoGuia, campo, tarea)} onElegirObjetivo={elegirObjetivo} cerrar={cerrar} />;
+  const encajan = objetivosQueEncajan(tarea);
+  const deriva = derivaDeObjetivo(tarea);
+  const hayValores = Number(tarea.pct1rm) > 0 || (tarea.rir !== "" && tarea.rir != null) || (tarea.cantidad !== "" && tarea.cantidad != null);
   const opcRec = nums([30, 45, 60, 90, 120, 150, 180, 240, 300]);
   if (descansoAjustado && descansoAjustado !== autoRecNum) {
     const i = opcRec.findIndex((o) => o.v === String(descansoAjustado));
@@ -811,21 +817,21 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const nombre = <span style={{ color: ds.ink, fontSize: 14, fontWeight: 600, lineHeight: 1.25, overflowWrap: "break-word" }}>{tarea.nombre}</span>;
   const etiquetas = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
+      {conSugerencias && <EtiquetaObjetivo objetivo={objetivoGuia} deriva={deriva} encajan={encajan} hayValores={hayValores} onElegir={elegirObjetivo} onAdoptar={adoptarObjetivo} />}
       <EtiquetaLado tarea={tarea} onCambiar={onCambiar} />
       <EtiquetaSuperserie superserie={superserie} onAlternar={onAlternarEnlace} />
       {mostrarCarga && objetivoGuia?.zonas && <EtiquetaTipo tarea={tarea} onCambiar={onCambiar} />}
       <EtiquetaMaterial tarea={tarea} onCambiar={onCambiar} disponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} />
       <EtiquetaNota tarea={tarea} onCambiar={onCambiar} />
       {onVerVideo && <EtiquetaAccion texto="▶ Vídeo" ariaLabel="Ver vídeo" onClick={onVerVideo} />}
-      {conSugerencias && <EtiquetaObjetivo objetivo={objetivoGuia} onCambiar={(id) => onCambiar({ ...tarea, objetivo: id })} />}
-      {aviso && <EtiquetaAviso aviso={aviso} objetivo={objetivoGuia} onAplicar={onAplicarSugerido} onIgnorar={onIgnorarAviso} />}
     </div>
   );
+  const lineaAjuste = ajuste ? <span role="status" style={{ fontSize: 11.5, lineHeight: 1.35, color: ds.accent }}>↳ {ajuste}</span> : null;
   const flechas = <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />;
   const celdaSeries = <CeldaDesplegable key="series" movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />;
   const celdaReps = (
-    <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={(v) => onCambiar({ ...tarea, cantidad: v })} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), fuera: conGuia && !!objetivoGuia.reps && !objetivoGuia.reps.suave && v > objetivoGuia.reps.max }))}
-      extra={conSugerencias ? bloqueSug("reps") : null}
+    <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={cambiarCampo("cantidad")} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), zona: conSugerencias && !!objetivoGuia && objetivosEnZona("reps", v, tarea).includes(objetivoGuia.id), nota: conSugerencias ? quienes("reps", v) : "" }))}
+      extra={conSugerencias ? bloqueObj("reps") : null}
       pie={() => (
         <>
           <div style={{ display: "flex", gap: 8 }}>
@@ -835,8 +841,8 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
         </>
       )} />
   );
-  const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, pct1rm: v, pct1rmOrigen: undefined })} opciones={pctOpc} extra={conSugerencias ? bloqueSug("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
-  const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={(v) => onCambiar({ ...tarea, rir: v })} opciones={rirOpc} extra={conSugerencias ? bloqueSug("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
+  const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={cambiarCampo("pct1rm")} opciones={pctOpc} extra={conSugerencias ? bloqueObj("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
+  const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={cambiarCampo("rir")} opciones={rirOpc} extra={conSugerencias ? bloqueObj("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
   const celdaRec = <CeldaDesplegable key="rec" movil={movil} etiqueta="Recuperación" titulo="Recuperación" subtitulo="segundos entre series" valor={tarea.descanso} placeholder={autoRec} apagada={Number(tarea.series) <= 1} resaltar onCambiar={(v) => onCambiar({ ...tarea, descanso: v })} autoOpcion={`Recomendada (${autoRec} s)`} opciones={opcRec} pie={pieRec} />;
   const celdas = mostrarCarga ? (
     <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}{celdaRec}</>
@@ -852,6 +858,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
           {flechas}
         </div>
         {etiquetas}
+        {lineaAjuste}
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${mostrarCarga ? 5 : 3}, minmax(0, 1fr))`, gap: 4 }}>{celdas}</div>
       </div>
     );
@@ -863,6 +870,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 5 }}>
           {nombre}
           {etiquetas}
+          {lineaAjuste}
         </div>
       </div>
       {celdas}
@@ -2346,6 +2354,10 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // Tiempo disponible del bloque de Fuerza (minutos, "" = sin fijar). Es una ayuda
   // de diseño: no se guarda en la sesión.
   const [tiempoFuerzaMin, setTiempoFuerzaMin] = useState("");
+  // Valores típicos por objetivo (editables; se guardan en este dispositivo).
+  const [tipicos, setTipicos] = useState(() => leerTipicos());
+  const cambiarTipico = (id, campo, valor) => setTipicos((prev) => { const n = normalizarTipicos({ ...prev, [id]: { ...prev[id], [campo]: valor } }); guardarTipicos(n); return n; });
+  const restablecerTipicos = () => { const n = normalizarTipicos(VALORES_TIPICOS_INICIALES); guardarTipicos(n); setTipicos(n); };
   // Progresión de carga al reutilizar una sesión: puntos de %1RM que se suben
   // a las tareas de Fuerza pautadas por %1RM. "0" = mantener todas.
   const [pasoProgresion, setPasoProgresion] = useState(sinProgresion ? "0" : "2");
@@ -3803,6 +3815,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                         circuitos={circuitosFuerza}
                         minutos={tiempoFuerzaMin}
                         onMinutos={setTiempoFuerzaMin}
+                        tipicos={tipicos}
+                        onTipico={cambiarTipico}
+                        onRestablecerTipicos={restablecerTipicos}
                         ajuste={ajusteFuerza}
                         alternancias={resumenDiseno.sugerencias.filter((x) => x.bloque === "Fuerza")}
                         onAlternar={aplicarAlternancia}
