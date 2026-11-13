@@ -140,36 +140,26 @@ export function Implicaciones({ datos, sugerencia }) {
   );
 }
 
-// Sugerencias por objetivo dentro de un desplegable (RIR, repeticiones o %1RM).
-// Cada fila es de un objetivo (Fuerza, Hipertrofia, Potencia); un toque rellena
-// los campos que indique y marca ese objetivo en la tarea. Sin objetivo de sesión.
-export function BloqueSugerencias({ filas, resumen, onElegir, cerrar }) {
-  if (!filas || !filas.length) return null;
-  // Sin datos para calcular (p. ej. aún no hay %1RM): una sola línea, para no
-  // empujar las opciones numéricas fuera de la vista.
-  if (filas.every((f) => !f.aplicar)) {
+// Línea de orientación dentro de un desplegable (%1RM, RIR o repeticiones).
+// Con objetivo en la tarea: dice cuál es la zona. Sin objetivo: un toque en
+// Fuerza, Hipertrofia o Potencia lo fija y rellena RIR y repeticiones.
+export function BloqueObjetivo({ objetivo, textoZona, onElegirObjetivo, cerrar }) {
+  if (objetivo) {
     return (
-      <div style={{ border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "7px 10px", fontSize: 11.5, lineHeight: 1.35, color: ds.inkSecondary }}>
-        <b style={{ color: ds.ink }}>Sugerido por objetivo</b> · {resumen || "elige antes un %1RM (desde 75 %) y aparecerán aquí."}
+      <div style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 10, padding: "7px 10px", fontSize: 11.5, lineHeight: 1.4, color: ds.inkSecondary }}>
+        <b style={{ color: ds.ink }}>{objetivo.etiqueta}</b> · {textoZona} Lo resaltado está en su zona; a la derecha ves en qué objetivos encaja cada valor.
       </div>
     );
   }
   return (
-    <div style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 10, padding: 6, display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ fontSize: 11.5, color: ds.inkSecondary, padding: "2px 6px 0", lineHeight: 1.35 }}>
-        <b style={{ color: ds.ink }}>Sugerido por objetivo</b>{resumen ? ` · ${resumen}` : ""}
+    <div style={{ border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "7px 10px", display: "flex", flexDirection: "column", gap: 7, fontSize: 11.5, lineHeight: 1.4, color: ds.inkSecondary }}>
+      <span><b style={{ color: ds.ink }}>Esta tarea no tiene objetivo.</b> Elígelo y se rellenan RIR y repeticiones. A la derecha de cada valor ves en qué objetivos encaja.</span>
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+        {OBJETIVOS_SESION.map((o) => (
+          <button key={o.id} type="button" onClick={() => { onElegirObjetivo(o.id); cerrar(); }}
+            style={{ height: 32, padding: "0 12px", borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 12, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer" }}>{o.etiqueta}</button>
+        ))}
       </div>
-      {filas.map((f) => {
-        const accion = !f.bloqueado && f.aplicar;
-        return (
-          <button key={f.id} type="button" disabled={!accion} onClick={() => { onElegir(f); cerrar(); }} aria-label={`${f.etiqueta}: ${f.texto}`}
-            style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 46, width: "100%", boxSizing: "border-box", textAlign: "left", padding: "5px 10px", borderRadius: 8, background: ds.surface, color: ds.ink, fontFamily: dsF.sans, cursor: accion ? "pointer" : "default", opacity: f.bloqueado ? 0.65 : 1, border: `1px solid ${f.activo ? ds.accent : ds.border}` }}>
-            <span style={{ flexShrink: 0, width: 84, fontWeight: 700, fontSize: 12.5 }}>{f.etiqueta}</span>
-            <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 1.3, color: ds.inkSecondary }}>{f.texto}</span>
-            {accion && f.boton && <span style={{ flexShrink: 0, fontFamily: dsF.mono, fontSize: 12, fontWeight: 600, color: ds.accent, textAlign: "right" }}>{f.boton}</span>}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -301,16 +291,72 @@ export function EtiquetaSuperserie({ superserie, onAlternar }) {
   );
 }
 
-// Objetivo de esta tarea. Solo aparece cuando se ha elegido una fila de
-// sugerencias por objetivo; desde aquí se cambia o se quita.
-export function EtiquetaObjetivo({ objetivo, onCambiar }) {
-  if (!objetivo) return null;
+// Objetivo de esta tarea: siempre visible, primera etiqueta de la línea. Si los
+// valores se salen de su zona muestra hacia dónde derivan ("Fuerza → Hipertrofia")
+// y ofrece adoptar ese objetivo sin tocar los valores.
+//   objetivo: objetivo elegido o null; deriva: null (encaja) o ids con los que
+//   encajan ahora; hayValores: si la tarea ya tiene %, RIR o repeticiones.
+export function EtiquetaObjetivo({ objetivo, deriva = null, encajan = [], hayValores = false, onElegir, onAdoptar }) {
+  const nom = (id) => (OBJETIVOS_SESION.find((o) => o.id === id) || { etiqueta: id }).etiqueta;
+  const alejada = !!objetivo && !!deriva;
+  const rotulo = !objetivo ? "Objetivo ▾" : alejada ? `${objetivo.etiqueta} → ${deriva.length ? deriva.map(nom).join(" / ") : "sin objetivo claro"} ▾` : `${objetivo.etiqueta} ▾`;
   return (
-    <EtiquetaDesplegable rotulo={`${objetivo.etiqueta} ▾`} ariaLabel="Objetivo de la tarea" tono="activo" ancho={260}>
+    <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Objetivo de la tarea" tono={!objetivo ? "vacio" : alejada ? "peligro" : "activo"} ancho={300}>
       {(cerrar) => (
         <>
-          <Cabecera titulo="Objetivo de esta tarea" subtitulo="solo avisa esta tarea" />
-          <ListaOpciones etiqueta="Objetivo" valor={objetivo.id} onElegir={(v) => { onCambiar(v); cerrar(); }} opciones={[...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta })), { v: "", t: "Quitar objetivo", tenue: true }]} />
+          <Cabecera titulo="Objetivo de esta tarea" subtitulo="rellena RIR y repeticiones" />
+          {hayValores && alejada && (
+            <div style={{ border: `1px solid ${ds.danger}`, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
+              <span><b>Tus valores ya no son de {objetivo.etiqueta.toLowerCase()}.</b> {deriva.length ? `Encajan con ${deriva.map(nom).join(" o ")}.` : "No encajan con ningún objetivo: revisa %, RIR y repeticiones."}</span>
+              {deriva.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {deriva.map((id) => (
+                    <button key={id} type="button" onClick={() => { onAdoptar(id); cerrar(); }} style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontSize: 12.5, fontWeight: 700, fontFamily: dsF.sans, cursor: "pointer" }}>Pasar a {nom(id)}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {hayValores && !alejada && encajan.length > 0 && (
+            <span style={{ fontSize: 11.5, color: ds.inkSecondary, padding: "0 4px" }}>Tus valores encajan con {encajan.map(nom).join(" y ")}.</span>
+          )}
+          <ListaOpciones etiqueta="Objetivo" valor={objetivo ? objetivo.id : ""} onElegir={(v) => { onElegir(v); cerrar(); }}
+            opciones={[...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta, nota: etiquetaRirCorta(o) })), { v: "", t: "Sin objetivo", tenue: true }]} />
+          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Al elegirlo se rellenan RIR y repeticiones. Si ya hay un %, se respeta.</span>
+        </>
+      )}
+    </EtiquetaDesplegable>
+  );
+}
+
+const etiquetaRirCorta = (o) => (o.rir.max == null ? `RIR ≥${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
+
+// Valores típicos que se rellenan al elegir un objetivo. Son criterio de la
+// app, no datos científicos: los edita el entrenador y se guardan en el dispositivo.
+export function BotonValoresTipicos({ tipicos, onCambiar, onRestablecer }) {
+  const pcts = [30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100].map((v) => ({ v: String(v), t: `${v} %` }));
+  const rirs = [0, 1, 2, 3, 4, 5].map((v) => ({ v: String(v), t: String(v) }));
+  const reps = [1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: String(v) }));
+  return (
+    <EtiquetaDesplegable rotulo="Valores típicos ▾" ariaLabel="Valores típicos por objetivo" ancho={340}>
+      {() => (
+        <>
+          <Cabecera titulo="Valores típicos por objetivo" subtitulo="se rellenan al elegir el objetivo" />
+          {OBJETIVOS_SESION.map((o) => {
+            const d = tipicos[o.id];
+            return (
+              <div key={o.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <b style={{ fontSize: 12.5, color: ds.ink }}>{o.etiqueta}</b>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <CampoSelect etiqueta="%1RM" valor={String(d.pct)} opciones={pcts} onCambiar={(v) => onCambiar(o.id, "pct", Number(v))} />
+                  <CampoSelect etiqueta="RIR" valor={String(d.rir)} opciones={rirs} onCambiar={(v) => onCambiar(o.id, "rir", Number(v))} />
+                  {o.zonas && <CampoSelect etiqueta="Repeticiones" valor={String(d.reps ?? 4)} opciones={reps} onCambiar={(v) => onCambiar(o.id, "reps", Number(v))} />}
+                </div>
+              </div>
+            );
+          })}
+          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Son un punto de partida de la app, no un dato científico. En fuerza e hipertrofia las repeticiones salen de la tabla (desde 75 %); en potencia las eliges tú. Se guardan en este dispositivo.</span>
+          <button type="button" onClick={onRestablecer} style={{ height: 34, borderRadius: 9, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer" }}>Restablecer valores iniciales</button>
         </>
       )}
     </EtiquetaDesplegable>
