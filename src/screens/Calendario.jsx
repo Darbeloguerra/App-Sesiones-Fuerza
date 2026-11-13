@@ -30,6 +30,8 @@ import {
 } from "../core/hooks.js";
 import { DisenoSesionReal } from "./DisenoSesion.jsx";
 import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
+import PlanJugadores from "./PlanJugadores.jsx";
+import { agruparPendientes, asignarCeldas, filasEfectivas, anadirFilas, resumenPublicacion, cumplimientoDeEstados, claveCelda } from "../calc/planJugadores.js";
 
 // destinatariosEfectivosSesion y etiquetaDestinoSesion ahora en
 // src/core/hooks.js — importadas arriba.
@@ -169,6 +171,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   const [lunesRef, setLunesRef] = useState(() => inicioSemanaCalendario(todayStr()));
   const [modoPlan, setModoPlan] = useState(false);
   const [asignadas, setAsignadas] = useState({}); // fecha -> id de sesión de partida
+  // Vista «Jugadores»: filas elegidas a mano ({ scopeId, ids } | null = las del ámbito)
+  // y cambios pendientes de publicar ({ "<jugadorId>::<fecha>": sesionId }).
+  const [filasJ, setFilasJ] = useState(null);
+  const [pendJ, setPendJ] = useState({});
   const { todos: microTodos, loaded: microLoaded, error: microError, guardar: guardarMicro, borrar: borrarMicro } = useMicrociclosTipo();
   const { todos: partidosTodos, loaded: partidosLoaded, error: partidosError, guardar: guardarPartido, borrar: borrarPartido } = usePartidos();
   const [nuevoPartido, setNuevoPartido] = useState({ fecha: "", rival: "", local: true });
@@ -466,6 +472,55 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
     const hechas = pasadas.filter((i) => i.e === "hecho").length;
     return { n: items.length, pasadas: pasadas.length, hechas, pct: pasadas.length ? Math.round((hechas / pasadas.length) * 100) : null };
   };
+  // ----- Vista «Jugadores» editable -----
+  const idsAmbitoJ = jugadoresMatriz.map((p) => p.id);
+  const idsFilasJ = filasEfectivas(filasJ, scopeId, idsAmbitoJ).filter((id) => activos.some((p) => p.id === id));
+  const jugadoresFilasJ = idsFilasJ.map((id) => activos.find((p) => p.id === id)).filter(Boolean);
+  // Todo lo que tiene un jugador un día (publicado o en borrador), para que no se duplique.
+  const sesionesCeldaJ = (p, f) =>
+    conTareas
+      .filter((x) => (x.fechas || []).includes(f) && destinatariosEfectivosSesion(x, activos).includes(p.id))
+      .map((x) => ({
+        id: x.id,
+        nombre: x.nombre,
+        estado: x.enviada ? estadoJugadorSesion(x, f, p) : "borrador",
+        individual: !!(x.jugadores_destino && x.jugadores_destino.length === 1 && x.jugadores_destino[0] === p.id),
+      }));
+  const resumenFilaJ = (p) => {
+    const estados = diasSemana.flatMap((f) => sesionesCeldaJ(p, f).filter((x) => x.estado !== "borrador").map((x) => x.estado));
+    return { n: estados.length, pct: cumplimientoDeEstados(estados) };
+  };
+  const asignarJ = (ids, fechas, sesionId) => {
+    const porId = new Map(activos.map((p) => [p.id, p]));
+    setPendJ((prev) => asignarCeldas(prev, ids, fechas, sesionId, (j, f) => f >= hoy && !!porId.get(j) && sesionesCeldaJ(porId.get(j), f).length === 0));
+  };
+  const disenarJ = (ids, fecha) => {
+    setPlantillaSesion(null);
+    setEditingSesion(null);
+    setFechasParaEditor([fecha]);
+    setDestinatariosParaEditor(ids);
+    setShowEditor(true);
+  };
+  const copiarSemanaJ = () => {
+    const nuevo = { ...pendJ };
+    jugadoresFilasJ.forEach((p) => {
+      diasSemana.forEach((f) => {
+        const destino = sumarDiasFecha(f, 7);
+        if (destino < hoy || nuevo[claveCelda(p.id, destino)] || sesionesCeldaJ(p, destino).length) return;
+        const origen = sesionesCeldaJ(p, f).map((x) => sesionPorId.get(x.id)).find((x) => x && (x.tareas || []).length);
+        if (origen) nuevo[claveCelda(p.id, destino)] = origen.id;
+      });
+    });
+    setPendJ(nuevo);
+    setLunesRef(sumarDiasFecha(lunesRef, 7));
+    setDiaSel(sumarDiasFecha(diaSel, 7));
+  };
+  const publicarJ = () => {
+    const items = agruparPendientes(pendJ)
+      .map((g) => ({ fecha: g.fecha, sesion: sesionPorId.get(g.sesionId), destinos: g.jugadores, md: mdDe(g.fecha) || undefined }))
+      .filter((i) => i.sesion);
+    if (items.length) lanzarCola(items);
+  };
   const cumplimientoSemana = (() => {
     const lista = diasSemana.flatMap((f) => sesionesEnFecha(f).map((x) => cumplimientoSesion(x, f))).filter(Boolean);
     if (!lista.length) return null;
@@ -483,7 +538,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
   // diseñador (montado oculto): sortea movilidad/preventivo por fecha, copia
   // tareas y circuitos... y nunca toca la carga (sin progresión).
   const lanzarCola = (items) => {
-    if (destinoScope === null && grupos.length > 1) {
+    if (destinoScope === null && grupos.length > 1 && items.some((i) => !i.destinos)) {
       if (!window.confirm(`Esto se enviará a los ${activos.length} jugadores activos de todos los equipos. ¿Continuar?\n\nSi es solo para un equipo, cámbialo arriba a ese grupo.`)) return;
     }
     setFallosCola([]);
@@ -498,6 +553,7 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
       const n = cola.length - nFallos;
       setCola(null);
       setAsignadas({});
+      setPendJ({});
       setResultadoCola(`${n} día${n === 1 ? "" : "s"} publicado${n === 1 ? "" : "s"}${nFallos ? ` · ${nFallos} con error` : ""}.`);
       invalidateEntityCache("sesiones");
       invalidateEntityCache("tareas");
@@ -930,57 +986,40 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
         )}
 
         {vista === "jugadores" && (
-          <div style={{ marginBottom: 16 }}>
-            <div style={{ fontSize: 12.5, color: ds.inkSecondary, marginBottom: 10 }}>
-              Quién tiene qué esta semana — {scope.label}. Pulsa un nombre para abrir su semana.
-            </div>
-            <div style={{ overflowX: "auto", border: `1px solid ${ds.border}`, borderRadius: 14, background: ds.surface }}>
-              <div style={{ minWidth: 760 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "170px repeat(7, minmax(0, 1fr)) 62px", borderBottom: `1px solid ${ds.border}`, background: ds.surfaceRaised }}>
-                  <div style={{ padding: "8px 12px", fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>JUGADOR</div>
-                  {diasSemana.map((f, i) => (
-                    <div key={f} style={{ padding: "8px 6px", textAlign: "center", fontSize: 11.5, fontWeight: 700, color: f === hoy ? ds.accent : ds.inkSecondary }}>
-                      {NOMBRES_DIA[i]} {Number(f.slice(8))}
-                    </div>
-                  ))}
-                  <div style={{ padding: "8px 6px", textAlign: "center", fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>CUMPL.</div>
-                </div>
-                {jugadoresMatriz.length === 0 && <div style={{ padding: 16, fontSize: 13, color: ds.inkMuted }}>No hay jugadores activos en este ámbito.</div>}
-                {jugadoresMatriz.map((p) => {
-                  const r = resumenJugadorSemana(p);
-                  return (
-                    <div key={p.id} style={{ display: "grid", gridTemplateColumns: "170px repeat(7, minmax(0, 1fr)) 62px", borderBottom: `1px solid ${ds.border}`, alignItems: "stretch" }}>
-                      <button type="button" onClick={() => { setScopeId(`j:${p.id}`); setVista("semana"); }} style={{ textAlign: "left", background: "transparent", border: "none", padding: "10px 12px", cursor: "pointer", color: ds.ink, fontSize: 13, fontWeight: 600 }}>
-                        {p.name}
-                        <span style={{ display: "block", fontSize: 10.5, color: ds.inkMuted, fontWeight: 400 }}>{r.n} sesión{r.n === 1 ? "" : "es"} esta semana</span>
-                      </button>
-                      {diasSemana.map((f) => {
-                        const ses = sesionesDeJugadorEnFecha(p, f);
-                        return (
-                          <div key={f} style={{ padding: 4, display: "flex", flexDirection: "column", gap: 3, justifyContent: "center", background: f === hoy ? `${ds.accent}0d` : "transparent" }}>
-                            {ses.map((x) => {
-                              const e = estadoJugadorSesion(x, f, p);
-                              const col = e === "hecho" ? ds.success : e === "parcial" ? ds.warning : e === "falta" ? ds.danger : e === "hoy" ? ds.accent : ds.inkMuted;
-                              const marca = e === "hecho" ? "✓" : e === "parcial" ? "~" : e === "falta" ? "✕" : "·";
-                              return (
-                                <button key={x.id} type="button" title={`${x.nombre || "Sesión"} — ${e === "hecho" ? "completada" : e === "parcial" ? "parcial" : e === "falta" ? "sin enviar" : e === "hoy" ? "toca hoy" : "pendiente"}`} onClick={() => { setScopeId(`j:${p.id}`); setVista("semana"); setDiaSel(f); }} style={{ textAlign: "left", fontSize: 10.5, color: col, background: `${col}14`, border: `1px solid ${col}55`, borderRadius: 6, padding: "3px 5px", cursor: "pointer", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  {marca} {x.nombre || "Sesión"}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        );
-                      })}
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 700, color: r.pct === null ? ds.inkMuted : r.pct >= 80 ? ds.success : r.pct >= 50 ? ds.warning : ds.danger }}>{r.pct === null ? "—" : `${r.pct} %`}</div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", marginTop: 10, fontSize: 11.5, color: ds.inkSecondary }}>
-              <span style={{ color: ds.success }}>✓ completada</span><span style={{ color: ds.warning }}>~ parcial</span><span style={{ color: ds.danger }}>✕ sin enviar</span><span style={{ color: ds.accent }}>· toca hoy</span><span>· pendiente</span>
-            </div>
-          </div>
+          <>
+          {resultadoCola && <div style={{ marginBottom: 10, fontSize: 13, color: ds.success }}>{resultadoCola}</div>}
+          {fallosCola.length > 0 && !cola && <div style={{ marginBottom: 10, fontSize: 12.5, color: ds.danger }}>{fallosCola.join(" · ")}</div>}
+          <PlanJugadores
+            jugadores={jugadoresFilasJ}
+            dias={diasSemana}
+            hoy={hoy}
+            ancho={anchoVentanaCal}
+            diaSel={diaSel}
+            setDiaSel={setDiaSel}
+            etiquetaDia={etiquetaDiaLarga}
+            partidoEnFecha={(f) => partidoPorFecha.has(f)}
+            sesionesCelda={sesionesCeldaJ}
+            resumenFila={resumenFilaJ}
+            pend={pendJ}
+            biblioteca={opcionesBiblioteca.map((o) => ({ id: o.id, nombre: o.nombre, detalle: `${(o.tareas || []).length} ejerc.` }))}
+            nombreSesion={(id) => sesionPorId.get(id)?.nombre || "Sesión"}
+            activos={activos}
+            grupos={gruposOrdenados}
+            manualActivo={!!filasJ && filasJ.scopeId === scopeId}
+            onRestablecer={() => setFilasJ(null)}
+            onAsignar={asignarJ}
+            onDisenar={disenarJ}
+            onAbrirSesion={(id) => { const x = sesionPorId.get(id); if (x) editar(x); }}
+            onPersonalizar={(id, jid, f) => { const x = sesionPorId.get(id); if (x) personalizarParaJugador(x, jid, f); }}
+            onQuitarFila={(id) => setFilasJ({ scopeId, ids: idsFilasJ.filter((x) => x !== id) })}
+            onAnadir={(ids) => setFilasJ({ scopeId, ids: anadirFilas(idsFilasJ, ids.filter((id) => activos.some((p) => p.id === id))) })}
+            onCopiarSemana={copiarSemanaJ}
+            onPublicar={publicarJ}
+            onDescartar={() => setPendJ({})}
+            publicando={!!cola}
+            resumenPub={resumenPublicacion(pendJ)}
+          />
+          </>
         )}
 
         {vista === "mes" && (
@@ -1133,10 +1172,10 @@ function CalendarioReal({ players, grupos, onAbrirModulo, onCerrarSesion, scopeI
           </div>
           <div style={{ display: "none" }}>
             <DisenoSesionReal
-              key={actualCola.fecha}
+              key={`${idxCola}-${actualCola.fecha}`}
               plantilla={actualCola.sesion}
               fechasSugeridas={[actualCola.fecha]}
-              destinatariosSugeridos={destinoScope}
+              destinatariosSugeridos={actualCola.destinos || destinoScope}
               forzarDestino
               sinProgresion
               autoEnviar
