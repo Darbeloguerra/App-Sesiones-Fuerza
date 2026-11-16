@@ -262,6 +262,14 @@ export const api = {
       ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinPara, { onConflict: "id" }).select().maybeSingle());
     }
     throwIfError(error);
+    // Jugadores: el trigger hash_pin_jugador cifra el PIN en pin_hash y vacía pin.
+    // Con upsert, la parte INSERT ya borró el PIN antes de aplicar la actualización,
+    // así que un PIN nuevo no llegaba a cifrarse. Un UPDATE directo sí dispara el trigger.
+    if (entity === "jugadores" && toSave.pin != null && String(toSave.pin).trim() !== "") {
+      const res = await supabase.from(ENTITY_TABLE[entity]).update({ pin: String(toSave.pin).trim() }).eq("id", toSave.id).select().maybeSingle();
+      throwIfError(res.error);
+      if (res.data) data = res.data;
+    }
     return transformFromDb(entity, data);
   },
   delete: async (entity, id) => {
