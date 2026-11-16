@@ -578,6 +578,41 @@ function PanelAltaReal({ pinsExistentes, onGuardar, onCerrar }) {
   );
 }
 
+// Elegir jugadores ya existentes para meterlos en un equipo.
+function PanelAnadirExistentesReal({ grupo, candidatos, onGuardar, onCerrar }) {
+  const [sel, setSel] = useState([]);
+  const [q, setQ] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const lista = candidatos.filter((p) => (p.name || "").toLowerCase().includes(q.trim().toLowerCase()));
+  const alternar = (id) => setSel((v) => (v.includes(id) ? v.filter((x) => x !== id) : [...v, id]));
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "flex-end", justifyContent: "center", zIndex: 30 }} onClick={onCerrar}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "100%", maxWidth: 480, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: "16px 16px 0 0", padding: 18, display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>Añadir a {grupo.nombre}</div>
+        <DsInput value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar jugador" />
+        <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 300, overflowY: "auto" }}>
+          {lista.length === 0 && <div style={{ fontSize: 12.5, color: ds.inkMuted }}>No hay jugadores para añadir.</div>}
+          {lista.map((p) => {
+            const on = sel.includes(p.id);
+            return (
+              <button key={p.id} type="button" onClick={() => alternar(p.id)} aria-pressed={on} style={{ display: "flex", alignItems: "center", gap: 10, textAlign: "left", background: on ? ds.accentSubtle : ds.bgElevated, border: `1px solid ${on ? ds.accent : ds.border}`, borderRadius: dsR.md, padding: "10px 12px", cursor: "pointer", color: ds.ink, fontSize: 13 }}>
+                <span style={{ width: 16, height: 16, borderRadius: 4, border: `1px solid ${on ? ds.accent : ds.border}`, background: on ? ds.accent : "transparent", flexShrink: 0 }} />
+                <span style={{ flex: 1 }}>{p.name}</span>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
+          <DsButton disabled={!sel.length || guardando} onClick={async () => { setGuardando(true); await onGuardar(sel); setGuardando(false); }}>
+            {guardando ? "Guardando..." : sel.length ? `Añadir (${sel.length})` : "Añadir"}
+          </DsButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // Crear y borrar grupos — panel mínimo, mismo estilo que PanelAltaReal.
 // Renombrar un grupo no hace falta todavía: se borra y se crea de nuevo si
 // hace falta, dado lo poco que van a cambiar de nombre en la práctica.
@@ -799,6 +834,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
   const [filtro, setFiltro] = useState("todos");
   const [busqueda, setBusqueda] = useState("");
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
+  const [panelExistentesAbierto, setPanelExistentesAbierto] = useState(false);
   const [panelGrupoAbierto, setPanelGrupoAbierto] = useState(false);
   const [errorAccion, setErrorAccion] = useState("");
   const [pinNuevo, setPinNuevo] = useState(null); // { nombre, pin } tras resetear
@@ -915,7 +951,18 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
     if (ok) {
       setPanelAltaAbierto(false);
       setGrupoAltaPreset(null);
+      // El PIN queda cifrado en la base y no se puede volver a ver: se enseña ahora.
+      setPinNuevo({ nombre, pin });
     }
+  };
+
+  // Añadir jugadores que ya existen a un equipo (no crea usuarios nuevos).
+  const anadirAEquipo = async (grupoId, ids) => {
+    setErrorAccion("");
+    const marcados = new Set(ids);
+    const ok = await savePlayers(players.map((p) => (marcados.has(p.id) ? { ...p, gruposIds: [...new Set([...(p.gruposIds || []), grupoId])] } : p)));
+    if (ok) setPanelExistentesAbierto(false);
+    else setErrorAccion("No se pudo añadir al equipo. Comprueba tu conexión e inténtalo de nuevo.");
   };
 
   const cambiarCategorias = async (id, nuevas) => {
@@ -1061,6 +1108,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
               setGrupoAltaPreset(grupoAbierto.id);
               setPanelAltaAbierto(true);
             }}
+            onAddExisting={() => setPanelExistentesAbierto(true)}
             onEditGroup={() => setPanelGrupoAbierto(true)}
           />
         )}
@@ -1108,6 +1156,14 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             setPanelAltaAbierto(false);
             setGrupoAltaPreset(null);
           }}
+        />
+      )}
+      {panelExistentesAbierto && grupoAbierto && (
+        <PanelAnadirExistentesReal
+          grupo={grupoAbierto}
+          candidatos={players.filter((p) => !(p.gruposIds || []).includes(grupoAbierto.id))}
+          onGuardar={(ids) => anadirAEquipo(grupoAbierto.id, ids)}
+          onCerrar={() => setPanelExistentesAbierto(false)}
         />
       )}
       {panelGrupoAbierto && (
@@ -1255,7 +1311,7 @@ function TeamStatsRowReal({ stats }) {
 // agregadas. Reutiliza FilaJugadorReal tal cual (misma edición de
 // categorías/grupos/PIN/menú de acciones que en Usuarios), no una fila
 // nueva — así asignar/quitar del grupo desde aquí sigue funcionando igual.
-function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onCambiarDeportista, onBack, onAddPlayer, onEditGroup }) {
+function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJugador, onAccion, onCambiarCategorias, onCambiarGrupos, onCambiarPosicion, onCambiarDeportista, onBack, onAddPlayer, onAddExisting, onEditGroup }) {
   return (
     <div>
       <button onClick={onBack} style={{ display: "flex", alignItems: "center", gap: 5, background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 12.5, cursor: "pointer", padding: 0, marginBottom: 14 }}>
@@ -1275,7 +1331,8 @@ function DetalleEquipoReal({ grupo, stats, categorias, grupos, adherenciaPorJuga
           >
             <Pencil size={14} />
           </button>
-          <DsButton variant="secondary" onClick={onAddPlayer}>+ Añadir jugador</DsButton>
+          <DsButton variant="secondary" onClick={onAddExisting}>+ Añadir existente</DsButton>
+          <DsButton variant="secondary" onClick={onAddPlayer}>+ Nuevo jugador</DsButton>
         </div>
       </div>
       <TeamStatsRowReal stats={stats} />
