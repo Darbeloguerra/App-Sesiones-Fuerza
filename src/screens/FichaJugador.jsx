@@ -56,6 +56,8 @@ import {
   ESTADO_JUGADOR_META,
   useCarteraEntrenador,
   useDatosDashboardEntrenador,
+  useConfigValue,
+  genUniquePin,
 } from "../core/hooks.js";
 import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "../core/cmjDisplay.jsx";
 import { CmjProximamente } from "./ControlFatiga.jsx";
@@ -616,7 +618,7 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos, onNavigateTab }
           title="Mostrar/ocultar PIN"
           style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "7px 9px" }}
         >
-          {pinVisible ? jugador.pin : "PIN ••••"}
+          {pinVisible ? (jugador.pin || "sin PIN") : "PIN ••••"}
         </button>
       </div>
     </div>
@@ -2374,7 +2376,7 @@ function NotasFichaJugadorReal({ jugador }) {
 // categoría, estado, PIN) + danger zone que llama a las MISMAS acciones que
 // ya expone MenuAccionesReal (onAccion "suspender"/"activar"/"eliminar"),
 // sin duplicar esa lógica aquí.
-function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion }) {
+function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion, pinNuevo = null }) {
   const [pinVisible, setPinVisible] = useState(false);
   const [confirmarEliminar, setConfirmarEliminar] = useState(false);
   const suspendido = jugador.estado === "suspendido";
@@ -2397,11 +2399,19 @@ function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion })
         <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
           <div style={{ font: `600 9px ${dsF.mono}`, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>PIN de acceso</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: ds.ink, display: "flex", alignItems: "center", gap: 8 }}>
-            {pinVisible ? jugador.pin : "••••"}
-            <span onClick={() => setPinVisible((v) => !v)} style={{ color: ds.accent, fontSize: 11, cursor: "pointer", fontWeight: 600 }}>
+            {pinVisible ? (jugador.pin || "sin PIN guardado") : "••••"}
+            <button type="button" onClick={() => setPinVisible((v) => !v)} style={{ color: ds.accent, fontSize: 12, cursor: "pointer", fontWeight: 600, background: "transparent", border: "none", padding: "4px 6px" }}>
               {pinVisible ? "ocultar" : "mostrar"}
-            </span>
+            </button>
+            <button type="button" onClick={() => onAccion(jugador.id, "reset")} style={{ color: ds.inkSecondary, fontSize: 12, cursor: "pointer", fontWeight: 600, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "4px 9px", marginLeft: "auto" }}>
+              Resetear PIN
+            </button>
           </div>
+          {pinNuevo && (
+            <div role="status" style={{ marginTop: 8, fontSize: 12.5, color: ds.inkSecondary }}>
+              Nuevo PIN: <b style={{ fontFamily: dsF.mono, fontSize: 18, letterSpacing: "0.12em", color: ds.accent }}>{pinNuevo}</b>
+            </div>
+          )}
         </div>
       </div>
       <div style={{ maxWidth: 640, border: `1px solid ${ds.dangerBorderSubtle}`, background: `${ds.danger}12`, borderRadius: dsR.lg, padding: "13px 15px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
@@ -2600,6 +2610,8 @@ function FichaAtencionReal({ jugador, onNavigateTab, onAbrirModulo }) {
 
 export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerrarSesion, pestanaInicial }) {
   const [players, savePlayers, playersLoaded] = usePlayers();
+  const [coachPin] = useConfigValue("coach_pin");
+  const [pinNuevo, setPinNuevo] = useState(null);
   const [categorias, categoriasLoaded] = useCategoriasPreventivas();
   const [grupos, , gruposLoaded] = useEntityList("grupos");
   const [pestana, setPestana] = useState(pestanaInicial || "resumen");
@@ -2631,6 +2643,12 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
     else if (accion === "eliminar") {
       ok = await savePlayers(players.filter((p) => p.id !== id));
       if (ok) onBack?.();
+    } else if (accion === "reset") {
+      // El PIN nuevo no puede coincidir con el de otro jugador ni con el código de entrenador.
+      const ocupados = players.filter((p) => p.id !== id).map((p) => p.pin).concat(coachPin != null ? [coachPin] : []);
+      const nuevo = genUniquePin(ocupados);
+      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevo } : p)));
+      if (ok) setPinNuevo({ id, pin: nuevo });
     }
     if (!ok) setErrorAccion("No se pudo completar la acción. Comprueba tu conexión e inténtalo de nuevo.");
   };
@@ -2748,7 +2766,7 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
             ) : (
               <>
                 <FichaSubPestanasReal valor="datos" onChange={setPestana} opciones={[["notas", "Notas"], ["datos", "Datos y accesos"]]} />
-                <DatosAccesosFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onAccion={manejarAccionDatos} />
+                <DatosAccesosFichaJugadorReal jugador={actual} categorias={categorias} grupos={grupos} onAccion={manejarAccionDatos} pinNuevo={pinNuevo && pinNuevo.id === actual.id ? pinNuevo.pin : null} />
               </>
             )}
           </div>
