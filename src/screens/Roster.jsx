@@ -458,7 +458,7 @@ function FilaJugadorReal({ jugador, categorias, grupos, adherencia = null, onAcc
           title="Mostrar/ocultar PIN"
           type="button"
         >
-          {pinVisible ? jugador.pin : "••••"}
+          {pinVisible ? (jugador.pin || (jugador.pinProtegido ? "Protegido" : "Sin PIN")) : "••••"}
           {pinVisible ? <EyeOff size={11} /> : <Eye size={11} />}
         </button>
         <div style={{ position: "relative" }}>
@@ -764,7 +764,7 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
                     onClick={(e) => { e.stopPropagation(); setPinsVisibles((v) => ({ ...v, [p.id]: !v[p.id] })); }}
                     style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 600, color: pinsVisibles[p.id] ? ds.ink : ds.inkSecondary, cursor: "pointer", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "5px 8px", minWidth: 58 }}
                   >
-                    {pinsVisibles[p.id] ? (p.pin || "—") : "••••"}
+                    {pinsVisibles[p.id] ? (p.pin || (p.pinProtegido ? "Protegido" : "Sin PIN")) : "••••"}
                   </button>
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
@@ -894,12 +894,14 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
       ok = await savePlayers(players.filter((p) => p.id !== id));
     } else if (accion === "reset") {
       const nuevoPin = genUniquePin(pinsOcupados(id));
+      const antes = await api.get("jugadores", id).catch(() => null);
       ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevoPin } : p)));
       if (ok) {
-        // Se relee de la base: solo se enseña el PIN si de verdad quedó guardado.
+        // La BD cifra el PIN (pin_hash) y no devuelve el texto: se comprueba que el hash cambió.
         const guardado = await api.get("jugadores", id).catch(() => null);
-        if (guardado && String(guardado.pin) === String(nuevoPin)) setPinNuevo({ nombre: players.find((p) => p.id === id)?.name || "", pin: nuevoPin });
-        else { setErrorAccion("La base de datos no ha guardado el PIN (la columna pin no se actualiza). No se lo des al jugador: avisa para revisar Supabase."); return; }
+        const cifrado = guardado && guardado.pin_hash && (!antes || guardado.pin_hash !== antes.pin_hash);
+        if (cifrado || (guardado && !("pin_hash" in guardado))) setPinNuevo({ nombre: players.find((p) => p.id === id)?.name || "", pin: nuevoPin });
+        else { setErrorAccion("La base de datos no ha guardado el PIN nuevo. No se lo des al jugador: inténtalo de nuevo."); return; }
       }
     } else if (accion === "historial") {
       const jugador = players.find((p) => p.id === id);
