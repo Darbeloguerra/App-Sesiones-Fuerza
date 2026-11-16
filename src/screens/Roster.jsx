@@ -645,6 +645,7 @@ function PanelGestionGruposReal({ grupos, onCrear, onEliminar, onCerrar }) {
 function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAlta, onGrupo, filtro, onFiltroChange }) {
   const [busqueda, setBusqueda] = useState("");
   const [menuId, setMenuId] = useState(null);
+  const [pinsVisibles, setPinsVisibles] = useState({});
   const ancho = useAnchoVentana();
   const estaListo = cartera && cartera.loaded;
   const filaDe = (p) => (estaListo ? cartera.filas.get(p.id) : null);
@@ -671,7 +672,7 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
     ...(suspendidos.length ? [{ id: "suspendidos", label: `Suspendidos (${suspendidos.length})` }] : []),
   ];
   const compacto = ancho < 760;
-  const cols = compacto ? "minmax(120px, 1.6fr) 90px 70px 32px" : "minmax(170px, 1.7fr) 96px minmax(120px, 1.2fr) 110px 70px 32px";
+  const cols = compacto ? "minmax(96px, 1.5fr) 84px 72px 32px" : "minmax(170px, 1.7fr) 96px minmax(120px, 1.2fr) 110px 70px 78px 32px";
   const fmtUlt = (f) => (f.diasSin === null ? "Sin registros" : f.diasSin === 0 ? "Hoy" : f.diasSin === 1 ? "Ayer" : `Hace ${f.diasSin} d`);
   return (
     <div>
@@ -702,7 +703,8 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
           <span>Estado</span>
           {!compacto && <span>Adherencia 4 sem.</span>}
           {!compacto && <span>Última actividad</span>}
-          <span>CMJ</span>
+          {!compacto && <span>CMJ</span>}
+          <span>PIN</span>
           <span />
         </div>
         {lista.map((p) => {
@@ -741,6 +743,7 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
                   </span>
                 )}
                 {!compacto && <span style={{ fontSize: 12.5, color: f && f.diasSin !== null && f.diasSin >= 5 ? ds.warning : ds.inkSecondary }}>{f ? fmtUlt(f) : "…"}</span>}
+                {!compacto && (
                 <span>
                   {cmjMeta ? (
                     <span title={cmjMeta.label} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: cmjMeta.color }}>
@@ -750,6 +753,18 @@ function CarteraUsuariosReal({ players, grupos, cartera, onAbrir, onAccion, onAl
                   ) : (
                     <span style={{ fontSize: 11.5, color: ds.inkMuted }}>—</span>
                   )}
+                </span>
+                )}
+                <span onClick={(e) => e.stopPropagation()}>
+                  <button
+                    type="button"
+                    aria-label={pinsVisibles[p.id] ? `Ocultar PIN de ${p.name}` : `Mostrar PIN de ${p.name}`}
+                    title="Mostrar/ocultar PIN"
+                    onClick={(e) => { e.stopPropagation(); setPinsVisibles((v) => ({ ...v, [p.id]: !v[p.id] })); }}
+                    style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 600, color: pinsVisibles[p.id] ? ds.ink : ds.inkSecondary, cursor: "pointer", background: ds.canvas, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "5px 8px", minWidth: 58 }}
+                  >
+                    {pinsVisibles[p.id] ? (p.pin || "—") : "••••"}
+                  </button>
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 2 }}>
                   <span style={{ position: "relative" }}>
@@ -785,6 +800,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
   const [panelAltaAbierto, setPanelAltaAbierto] = useState(false);
   const [panelGrupoAbierto, setPanelGrupoAbierto] = useState(false);
   const [errorAccion, setErrorAccion] = useState("");
+  const [pinNuevo, setPinNuevo] = useState(null); // { nombre, pin } tras resetear
   // Las tres vistas del mockup de Fase 6 (Equipos y usuarios): Equipos
   // (tarjetas por grupo), Independientes (página propia) y Usuarios (el
   // directorio plano que ya existía, sin tocar su lógica de filtros). Un
@@ -867,6 +883,7 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
 
   const manejarAccion = async (id, accion) => {
     setErrorAccion("");
+    setPinNuevo(null);
     let ok = true;
     if (accion === "suspender") {
       ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, estado: "suspendido" } : p)));
@@ -875,7 +892,9 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
     } else if (accion === "eliminar") {
       ok = await savePlayers(players.filter((p) => p.id !== id));
     } else if (accion === "reset") {
-      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: genUniquePin(pinsOcupados(id)) } : p)));
+      const nuevoPin = genUniquePin(pinsOcupados(id));
+      ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevoPin } : p)));
+      if (ok) setPinNuevo({ nombre: players.find((p) => p.id === id)?.name || "", pin: nuevoPin });
     } else if (accion === "historial") {
       const jugador = players.find((p) => p.id === id);
       onOpenHistory?.(jugador);
@@ -972,6 +991,13 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
             }}
           />
         </div>
+
+        {pinNuevo && (
+          <div role="status" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", fontSize: 13.5, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginBottom: 14 }}>
+            <span>Nuevo PIN de <b>{pinNuevo.nombre}</b>: <b style={{ fontFamily: dsF.mono, fontSize: 18, letterSpacing: "0.12em", color: ds.accent }}>{pinNuevo.pin}</b></span>
+            <button type="button" onClick={() => setPinNuevo(null)} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.md, padding: "5px 10px", cursor: "pointer", fontSize: 12 }}>Entendido</button>
+          </div>
+        )}
 
         {errorAccion && (
           <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "8px 10px", marginBottom: 14 }}>
