@@ -1,3 +1,4 @@
+import { api } from "../core/backend.js";
 import { useState } from "react";
 import { Eye, EyeOff, User, TrendingUp, Zap, Pencil, ChevronRight } from "lucide-react";
 import { ds, dsR, dsSh, dsF, DsButton, DsInput, DsTabSwitcher, DsProgressRing, DsAvatar } from "../core/designSystem.jsx";
@@ -894,7 +895,12 @@ export function GestionRosterReal({ onBack, onOpenHistory, onAbrirModulo, onCerr
     } else if (accion === "reset") {
       const nuevoPin = genUniquePin(pinsOcupados(id));
       ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevoPin } : p)));
-      if (ok) setPinNuevo({ nombre: players.find((p) => p.id === id)?.name || "", pin: nuevoPin });
+      if (ok) {
+        // Se relee de la base: solo se enseña el PIN si de verdad quedó guardado.
+        const guardado = await api.get("jugadores", id).catch(() => null);
+        if (guardado && String(guardado.pin) === String(nuevoPin)) setPinNuevo({ nombre: players.find((p) => p.id === id)?.name || "", pin: nuevoPin });
+        else { setErrorAccion("La base de datos no ha guardado el PIN (la columna pin no se actualiza). No se lo des al jugador: avisa para revisar Supabase."); return; }
+      }
     } else if (accion === "historial") {
       const jugador = players.find((p) => p.id === id);
       onOpenHistory?.(jugador);
