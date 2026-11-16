@@ -469,6 +469,8 @@ export function usePlayers() {
         id: r.id,
         name: r.nombre,
         pin: r.pin,
+        // La BD (trigger hash_pin_jugador) guarda solo pin_hash y deja pin a null.
+        pinProtegido: !!r.pin_hash,
         estado: r.estado || "activo",
         groupIds: Array.isArray(r.categorias_preventivas) ? r.categorias_preventivas : [],
         gruposIds: Array.isArray(r.grupos_ids) ? r.grupos_ids : [],
