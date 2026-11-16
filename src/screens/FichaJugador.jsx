@@ -2648,7 +2648,12 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
       const ocupados = players.filter((p) => p.id !== id).map((p) => p.pin).concat(coachPin != null ? [coachPin] : []);
       const nuevo = genUniquePin(ocupados);
       ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevo } : p)));
-      if (ok) setPinNuevo({ id, pin: nuevo });
+      if (ok) {
+        // Se relee de la base: solo se enseña el PIN si de verdad quedó guardado.
+        const guardado = await api.get("jugadores", id).catch(() => null);
+        if (guardado && String(guardado.pin) === String(nuevo)) setPinNuevo({ id, pin: nuevo });
+        else { setPinNuevo(null); ok = false; setErrorAccion("La base de datos no ha guardado el PIN (la columna pin no se actualiza). No se lo des al jugador: avisa para revisar Supabase."); return; }
+      }
     }
     if (!ok) setErrorAccion("No se pudo completar la acción. Comprueba tu conexión e inténtalo de nuevo.");
   };
