@@ -618,7 +618,7 @@ function CabeceraFichaJugadorReal({ jugador, categorias, grupos, onNavigateTab }
           title="Mostrar/ocultar PIN"
           style={{ display: "flex", alignItems: "center", gap: 5, fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkMuted, cursor: "pointer", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "7px 9px" }}
         >
-          {pinVisible ? (jugador.pin || "sin PIN") : "PIN ••••"}
+          {pinVisible ? (jugador.pin || (jugador.pinProtegido ? "PIN protegido" : "sin PIN")) : "PIN ••••"}
         </button>
       </div>
     </div>
@@ -2399,7 +2399,7 @@ function DatosAccesosFichaJugadorReal({ jugador, categorias, grupos, onAccion, p
         <div style={{ background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "11px 13px" }}>
           <div style={{ font: `600 9px ${dsF.mono}`, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 4 }}>PIN de acceso</div>
           <div style={{ fontSize: 13, fontWeight: 600, color: ds.ink, display: "flex", alignItems: "center", gap: 8 }}>
-            {pinVisible ? (jugador.pin || "sin PIN guardado") : "••••"}
+            {pinVisible ? (jugador.pin || (jugador.pinProtegido ? "Protegido (solo se ve al generarlo)" : "sin PIN")) : "••••"}
             <button type="button" onClick={() => setPinVisible((v) => !v)} style={{ color: ds.accent, fontSize: 12, cursor: "pointer", fontWeight: 600, background: "transparent", border: "none", padding: "4px 6px" }}>
               {pinVisible ? "ocultar" : "mostrar"}
             </button>
@@ -2647,12 +2647,14 @@ export function FichaJugadorModuloReal({ jugador, onBack, onAbrirModulo, onCerra
       // El PIN nuevo no puede coincidir con el de otro jugador ni con el código de entrenador.
       const ocupados = players.filter((p) => p.id !== id).map((p) => p.pin).concat(coachPin != null ? [coachPin] : []);
       const nuevo = genUniquePin(ocupados);
+      const antes = await api.get("jugadores", id).catch(() => null);
       ok = await savePlayers(players.map((p) => (p.id === id ? { ...p, pin: nuevo } : p)));
       if (ok) {
-        // Se relee de la base: solo se enseña el PIN si de verdad quedó guardado.
+        // La BD cifra el PIN (pin_hash) y no devuelve el texto: se comprueba que el hash cambió.
         const guardado = await api.get("jugadores", id).catch(() => null);
-        if (guardado && String(guardado.pin) === String(nuevo)) setPinNuevo({ id, pin: nuevo });
-        else { setPinNuevo(null); ok = false; setErrorAccion("La base de datos no ha guardado el PIN (la columna pin no se actualiza). No se lo des al jugador: avisa para revisar Supabase."); return; }
+        const cifrado = guardado && guardado.pin_hash && (!antes || guardado.pin_hash !== antes.pin_hash);
+        if (cifrado || (guardado && !("pin_hash" in guardado))) setPinNuevo({ id, pin: nuevo });
+        else { setPinNuevo(null); ok = false; setErrorAccion("La base de datos no ha guardado el PIN nuevo. No se lo des al jugador: inténtalo de nuevo."); return; }
       }
     }
     if (!ok) setErrorAccion("No se pudo completar la acción. Comprueba tu conexión e inténtalo de nuevo.");
