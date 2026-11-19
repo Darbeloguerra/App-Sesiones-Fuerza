@@ -170,7 +170,7 @@ async function guardarFilaConParcial(parcial, tabla, rec) {
 // Con opts.nuevo=true se genera una key local nueva y se borra tareaId/
 // circuito_id/orden — así, al guardar, se crea una fila nueva en vez de
 // sobreescribir la tarea original (que sigue intacta en su sesión de origen).
-function tareaADraft(t, ejerciciosById, opts = {}) {
+export function tareaADraft(t, ejerciciosById, opts = {}) {
   const nuevo = !!opts.nuevo;
   let materiales = [];
   try {
@@ -626,7 +626,7 @@ const objetivoDeTarea = (t) => OBJETIVOS_SESION.find((o) => o.id === t.objetivo)
 
 // Resumen sobre la lista de fuerza: cuántas tareas tienen la carga fuera de la zona
 // de SU objetivo (solo cuentan las que tienen objetivo elegido).
-function ResumenAvisosCarga({ tareas }) {
+export function ResumenAvisosCarga({ tareas }) {
   const n = tareas.filter((t) => { const o = objetivoDeTarea(t); const a = o ? avisoDeTarea(o, t) : null; return a && a.estado !== "info"; }).length;
   if (!n) return null;
   return (
@@ -639,7 +639,7 @@ function ResumenAvisosCarga({ tareas }) {
 
 // Numeración de los ejercicios: 1, 2, 3… y, si dos van en superserie, 1a y 1b.
 // ahorroSeg: tiempo que se ahorraría uniendo este ejercicio con el siguiente.
-function datosSuperserie(tareas, bloque = "Fuerza") {
+export function datosSuperserie(tareas, bloque = "Fuerza") {
   let grupo = 0;
   let dentro = 0;
   return tareas.map((t, i) => {
@@ -727,7 +727,7 @@ function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, 
 
 // Encabezado de columnas de la tabla (iPad horizontal): las columnas tienen los
 // mismos anchos que las celdas de FilaTareaReal para que queden alineadas.
-function EncabezadoTablaTareas({ mostrarCarga }) {
+export function EncabezadoTablaTareas({ mostrarCarga }) {
   const col = (t) => <span key={t} style={{ width: ANCHO_COL, flexShrink: 0, textAlign: "center", fontFamily: dsF.sans, fontSize: 9.5, fontWeight: 600, color: ds.inkMuted, whiteSpace: "nowrap" }}>{t}</span>;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "0 9px 0 13px" }}>
@@ -879,7 +879,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
 }
 
-function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null }) {
+export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null }) {
   // Una sola fila para todos los tamaños: en pantalla ancha todo en una línea;
   // en móvil, en dos niveles. Siempre con los mismos desplegables.
   const movil = useAnchoVentana() < ANCHO_MIN_TABLA;
@@ -1303,7 +1303,7 @@ const EnSesionContext = React.createContext(() => 0);
 // Hueco (columna derecha) donde la biblioteca se acopla en iPad horizontal / ordenador.
 const BibliotecaSlotContext = React.createContext(null);
 
-function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
+export function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
   const [zonaFiltro, setZonaFiltro] = useState("");
@@ -1716,7 +1716,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
   );
 }
 
-function nuevaTareaBase(ejercicio, mostrarCarga) {
+export function nuevaTareaBase(ejercicio, mostrarCarga) {
   return {
     key: Date.now() + Math.random(),
     nombre: ejercicio.nombre,
@@ -1743,7 +1743,7 @@ function nuevaTareaBase(ejercicio, mostrarCarga) {
 // La tarea nueva sale ya rellena con los valores de la anterior (series, repeticiones,
 // recuperación y, en Fuerza, la carga y el objetivo) para cambiar solo lo que sea
 // distinto. Lo propio del ejercicio (lado, material, nota, superserie) no se copia.
-function heredarDeAnterior(nueva, anterior, conCarga) {
+export function heredarDeAnterior(nueva, anterior, conCarga) {
   if (!anterior || (anterior.modo || "reps") !== "reps") return nueva;
   const vacia = (v) => v === "" || v == null;
   const base = { ...nueva, series: anterior.series ?? "", cantidad: anterior.cantidad ?? "", descanso: anterior.descanso ?? "" };
@@ -2123,12 +2123,12 @@ function SugerenciasAlternanciaReal({ sugerencias, bloque, onAplicar }) {
 // Paso 2 del diseñador: antes de publicar, el entrenador ve la sesión como la
 // verá el jugador, los avisos pendientes (clicables, llevan al sitio a
 // corregir) y a quién y cuándo llega. Enviar solo ocurre desde aquí.
-const COLOR_BLOQUE_DISENO = { activacion: "#7C6FB0", movilidad: "#5FA87A", preventivo: "#A9B53A", core: "#E08A3C", resistencia: "#B8872B", cmj: "#C25B6B", fuerza: "#5B8DB8" };
+export const COLOR_BLOQUE_DISENO = { activacion: "#7C6FB0", movilidad: "#5FA87A", preventivo: "#A9B53A", core: "#E08A3C", resistencia: "#B8872B", cmj: "#C25B6B", fuerza: "#5B8DB8" };
 
 // Tarjeta desplegable de un bloque del diseñador (estilo del prototipo):
 // barra de color a la izquierda, icono, nombre · resumen, y el contenido
 // del bloque solo cuando está abierta.
-function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children }) {
+export function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children }) {
   const info = BLOQUES_DISENO.find((x) => x.id === id) || { nombre: id };
   return (
     <div style={{ background: abierto ? ds.surfaceRaised : ds.surface, border: `1px solid ${abierto ? color : ds.border}`, borderLeft: `4px solid ${color}`, borderRadius: 12, overflow: "hidden" }}>
@@ -2217,7 +2217,7 @@ function PasoRevisarEnviarReal({ resumen, destinatarios, fechas, md, nombre, onE
 // fecha del día y el destino elegido, y la guarda y publica sola — así se
 // reutiliza TODA la lógica de guardado (movilidad y preventivo por fecha,
 // circuitos, materiales…) sin duplicarla. Nunca aplica progresión de carga.
-export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado, autoEnviar, sinProgresion, forzarDestino, onFallo, mdForzado }) {
+export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, destinatariosSugeridos, onBack, onGuardado, autoEnviar, sinProgresion, forzarDestino, onFallo, mdForzado, autoBorrador, sinFechas }) {
   const [gruposDestino] = useEntityList("grupos");
   const parcialRef = useRef(nuevoEstadoParcial());
   const isEditing = !!sesionExistente;
@@ -2273,7 +2273,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   const estadoCmjDiseno = useEstadoCmjEquipo(players);
   const ventanasDiseno = useMemo(() => cmjVentanasMicrociclo(microciclosDiseno), [microciclosDiseno]);
   const [fechas, setFechas] = useState(
-    sesionExistente?.fechas?.length ? sesionExistente.fechas : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
+    sesionExistente?.fechas?.length ? sesionExistente.fechas : sinFechas ? [] : fechasSugeridas?.length ? fechasSugeridas : [todayStr()]
   );
   const [nuevaFecha, setNuevaFecha] = useState("");
   const [targetPlayerIds, setTargetPlayerIds] = useState(forzarDestino ? destinatariosSugeridos ?? null : base?.jugadores_destino ?? destinatariosSugeridos ?? null);
@@ -3129,13 +3129,15 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
 
   const autoLanzadoRef = useRef(false);
   useEffect(() => {
-    if (!autoEnviar || autoLanzadoRef.current || cargandoExistente || !ejerciciosLoaded) return;
+    if ((!autoEnviar && !autoBorrador) || autoLanzadoRef.current || cargandoExistente || !ejerciciosLoaded) return;
     autoLanzadoRef.current = true;
-    guardar(false);
+    // autoBorrador: la Biblioteca de sesiones guarda una copia nueva como
+    // borrador sin fechas (no se publica ni aparece en el calendario).
+    guardar(!!autoBorrador);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoEnviar, cargandoExistente, ejerciciosLoaded]);
+  }, [autoEnviar, autoBorrador, cargandoExistente, ejerciciosLoaded]);
   useEffect(() => {
-    if (autoEnviar && error && onFallo) onFallo(error);
+    if ((autoEnviar || autoBorrador) && error && onFallo) onFallo(error);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [error]);
 
