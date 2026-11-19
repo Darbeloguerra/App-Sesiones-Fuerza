@@ -22,6 +22,7 @@ import {
 } from "../core/hooks.js";
 import { todayStr, fmtHaceDias } from "../calc/fechas.js";
 import { DisenoSesionReal } from "./DisenoSesion.jsx";
+import { ListaPlantillasReal } from "./BibliotecaSesiones.jsx";
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
 // TAGS_DESCRIPTIVOS_BIBLIOTECA ahora en src/core/components.jsx — importada
@@ -688,7 +689,6 @@ function TarjetaPlantillaBibliotecaReal({ plantilla, onAbrir, grupo }) {
 // flujo nuevo de guardado ni de asignación.
 function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   const { loaded, sesiones, tareas, ejercicios, retry } = useBootstrapProgramacion();
-  const [busqueda, setBusqueda] = useState("");
   const [plantillaSelId, setPlantillaSelId] = useState(null);
   const [modoEditor, setModoEditor] = useState(null); // null | "editar" | "asignar"
   const [playersBib] = usePlayers();
@@ -716,9 +716,6 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   // sesión con nombre puesto por el entrenador es una plantilla, esté o no
   // ya programada/pasada.
   const todasPlantillas = agruparPlantillas(conTareas);
-  const plantillas = todasPlantillas
-    .filter((g) => !busqueda.trim() || g.nombre.toLowerCase().includes(busqueda.trim().toLowerCase()))
-    .sort((a, b) => a.nombre.localeCompare(b.nombre));
 
   const grupoSel = plantillaSelId ? todasPlantillas.find((g) => g.id === plantillaSelId) : null;
   const plantillaSel = grupoSel ? grupoSel.rep : null;
@@ -831,27 +828,18 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
   }
 
   return (
-    <div>
-      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 16 }}>
-        <div>
-          <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "0 0 4px" }}>Sesiones</h1>
-          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>{plantillas.length} plantillas guardadas</div>
-        </div>
-        <DsButton onClick={() => onAbrirModulo && onAbrirModulo("diseno")}>+ Diseñar sesión</DsButton>
-      </div>
-      <DsInput value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Buscar plantilla..." style={{ marginBottom: 14, maxWidth: 320 }} />
-      {plantillas.length === 0 ? (
-        <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>
-          {busqueda ? "Ninguna plantilla coincide con esa búsqueda." : 'Todavía no has puesto nombre a ninguna sesión. Ponle uno al diseñarla (en "Diseñar sesión") para que aparezca aquí.'}
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 12 }}>
-          {plantillas.map((p) => (
-            <TarjetaPlantillaBibliotecaReal key={p.id} plantilla={p.rep} grupo={p} onAbrir={() => setPlantillaSelId(p.id)} />
-          ))}
-        </div>
-      )}
-    </div>
+    <ListaPlantillasReal
+      plantillas={todasPlantillas}
+      players={playersBib}
+      grupos={gruposBib}
+      onDetalle={(id) => setPlantillaSelId(id)}
+      onEditar={(id) => {
+        setPlantillaSelId(id);
+        setModoEditor("editar");
+      }}
+      onNueva={() => onAbrirModulo && onAbrirModulo("diseno")}
+      onRefrescar={retry}
+    />
   );
 }
 
