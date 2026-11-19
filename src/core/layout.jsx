@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useContext } from "react";
 import { ds, dsF, GlobalStyles } from "./designSystem.jsx";
 
 // Paleta pensada para esto en concreto — fútbol, sub-19, sala de
@@ -97,7 +97,13 @@ export function useAlturaVentana() {
   return useViewportVisible().alto;
 }
 
+// Un contenedor estrecho (p. ej. la columna del editor de la Biblioteca de
+// sesiones) puede declarar su ancho real para que los controles que miran
+// «useAnchoVentana» se coloquen según ese ancho y no según el de la ventana.
+export const AnchoForzadoContext = React.createContext(null);
+
 export function useAnchoVentana() {
+  const forzado = useContext(AnchoForzadoContext);
   const medirAhora = () => {
     if (typeof window === "undefined") return 1200;
     return window.innerWidth;
@@ -113,7 +119,7 @@ export function useAnchoVentana() {
       window.removeEventListener("orientationchange", medir);
     };
   }, []);
-  return ancho;
+  return forzado != null ? forzado : ancho;
 }
 
 // Contenedor compartido de cada pantalla. Sustituye a los `minHeight: "100vh"`
