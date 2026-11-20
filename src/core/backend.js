@@ -82,7 +82,7 @@ export const NUMERIC_DEFAULTS = {
   ejercicios: { orden_rotacion: null },
   sesiones: { preventivo_activo: 0 },
   circuitos: { rondas: null },
-  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null, descanso_seg: null },
+  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null, descanso_seg: null, orden: null },
   registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null, ultima_reps: null, ultima_carga_kg: null, ultima_rir: null },
   referenciasFuerza: { carga_kg: null, reps: null, rir: null },
 };
@@ -260,6 +260,24 @@ export const api = {
       if (toSave.para_jugadores) throw new Error("FALTA_SQL_PARA_JUGADORES");
       const { para_jugadores: _omitido, ...sinPara } = toSave;
       ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinPara, { onConflict: "id" }).select().maybeSingle());
+    }
+    // Orden de bloques, partes de Activación y objetivo por tarea
+    // (sql/add_orden_partes_objetivo.sql): sesiones.orden_bloques,
+    // tareas.parte / tareas.orden / tareas.objetivo. Si las columnas aún no
+    // existen: el orden de bloques y la parte de Activación no se pueden
+    // ignorar sin cambiar lo que ve el jugador (se avisa del SQL); orden y
+    // objetivo de la tarea sí se omiten y la sesión se guarda igualmente.
+    const colsNuevas = /orden_bloques|\bparte\b|\borden\b|\bobjetivo\b/;
+    if (error && (entity === "tareas" || entity === "sesiones") && colsNuevas.test(`${error.message || ""} ${error.details || ""}`)) {
+      if (entity === "sesiones" && "orden_bloques" in toSave) {
+        if (toSave.orden_bloques) throw new Error("FALTA_SQL_ORDEN_PARTES");
+        const { orden_bloques: _o, ...sinOrden } = toSave;
+        ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinOrden, { onConflict: "id" }).select().maybeSingle());
+      } else if (entity === "tareas") {
+        if (toSave.parte) throw new Error("FALTA_SQL_ORDEN_PARTES");
+        const { parte: _p, orden: _r, objetivo: _b, ...sinNuevas } = toSave;
+        ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinNuevas, { onConflict: "id" }).select().maybeSingle());
+      }
     }
     throwIfError(error);
     // Jugadores: el trigger hash_pin_jugador cifra el PIN en pin_hash y vacía pin.
