@@ -259,3 +259,38 @@ export function TituloParte({ titulo, minutos, extra }) {
     </div>
   );
 }
+
+// Caja de una parte de bloque (Cardiovascular, Movilidad, Ejercicios…): título,
+// minutos efectivos a la derecha y contenido dentro de un recuadro.
+export function ParteCaja({ titulo, minutos, extra, id, children }) {
+  return (
+    <div id={id} style={{ display: "flex", flexDirection: "column", gap: 8, padding: 10, border: `1px solid ${ds.border}`, borderRadius: 11, background: ds.bgElevated }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <b style={{ fontSize: 13, flex: 1, color: ds.ink, fontFamily: dsF.sans }}>{titulo}</b>
+        {minutos > 0 && <span style={{ fontSize: 12, color: ds.inkSecondary }}>~{minutos} min</span>}
+        {extra}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Tarjeta de bloque del panel derecho: título, resumen a la derecha y flecha.
+// Abierta lleva el borde de acento; solo la enfocada muestra su contenido.
+export function TarjetaBloque({ abierto, onToggle, titulo, resumen, avisos = 0, children }) {
+  return (
+    <section style={{ border: `1px solid ${abierto ? ds.accent : ds.border}`, borderRadius: 13, background: ds.surface }}>
+      <button type="button" onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, width: "100%", minHeight: 50, padding: "0 14px", border: 0, background: "transparent", textAlign: "left", cursor: "pointer", color: ds.ink }}>
+        <span style={{ fontFamily: dsF.display, fontWeight: 800, fontSize: 15, flex: 1 }}>{titulo}</span>
+        <span style={{ fontSize: 12, color: ds.inkSecondary }}>{resumen}</span>
+        {avisos > 0 && <span style={{ fontSize: 12, color: ds.warning || ds.danger, fontWeight: 700, whiteSpace: "nowrap" }}>⚠ {avisos}</span>}
+        <span style={{ fontSize: 13, color: abierto ? ds.accent : ds.inkMuted }}>{abierto ? "▾" : "▸"}</span>
+      </button>
+      {abierto && <div style={{ padding: "2px 14px 14px", display: "flex", flexDirection: "column", gap: 12 }}>{children}</div>}
+    </section>
+  );
+}
+
+export function VacioParte({ children }) {
+  return <div style={{ border: `1px dashed ${ds.border}`, borderRadius: 10, padding: 14, color: ds.inkSecondary, textAlign: "center", fontSize: 13 }}>{children}</div>;
+}
