@@ -18,6 +18,7 @@ import {
 import { formatearDuracionDiseno } from "../calc/duracionTarea.js";
 import { parseResistenciaData, pesoTareaAdherencia, crearFraccionCumplida, tareasHechasPorJugadorFecha } from "../calc/adherencia.js";
 import { cmjDeltaMismoDiaCicloAnterior, CMJ_METRICS, CMJ_METRIC_LIST, cmjBuildPlayers, CMJ_UMBRAL_DEFECTO } from "../calc/cmj.js";
+import { valorarSesionFuerza, ESTADOS } from "../calc/fatigaSesion.js";
 import { e1rmDeValores, EQUIPOS_AMBIGUOS, materialEfectivo, claveDisenoTarea, calcularCargaSugerida, fatigaTarea, resumenFatiga } from "../calc/e1rm.js";
 import { PantallaBase } from "../core/layout.jsx";
 import { VideoEmbed, LoadingBlock, GraficaProgresoCargaReal } from "../core/components.jsx";
@@ -1919,6 +1920,10 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
     const nombre = e.nombre || "";
     return {
       id: t.id,
+      ejercicioId: t.ejercicio_id || "",
+      alternaCon: t.alterna_con || "",
+      objetivoTarea: t.objetivo || "",
+      modoTarea: t.modo || "reps",
       nombre: e.nombre || "(ejercicio eliminado)",
       series: t.series,
       cantidad: t.cantidad,
@@ -2028,10 +2033,16 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
     };
   };
 
+  // El diseñador guarda `orden` (posición dentro de su lista) y `parte` en
+  // Activación (cardio | estir). Sin esos datos (sesiones antiguas) el
+  // orden estable original se mantiene.
   tareas
     .filter((t) => (!t.fecha || t.fecha === date) && sesionActual && t.sesion_id === sesionActual.id)
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => (Number(a.t.orden) || 0) - (Number(b.t.orden) || 0) || a.i - b.i)
+    .map(({ t }) => t)
     .forEach((t) => {
-      const nombreBloque = t.bloque_sesion || "General";
+      const nombreBloque = t.bloque_sesion === "Activación" && t.parte === "estir" ? "Estiramiento dinámico" : (t.bloque_sesion || "General");
       const tareaVisual = construirTareaVisual(t);
       if (t.circuito_id && circuitosById.has(t.circuito_id)) {
         if (!circuitoBuffer[t.circuito_id]) circuitoBuffer[t.circuito_id] = { nombreBloque, tareas: [] };
@@ -2054,6 +2065,29 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
     });
   });
 
+  // Orden de los bloques elegido por el entrenador (sesiones.orden_bloques,
+  // JSON). Activación agrupa sus partes. Lo que no aparezca va al final.
+  const ORDEN_BASE = ["activacion", "preventivo", "core", "resistencia", "cmj", "fuerza"];
+  const SECCIONES = {
+    activacion: { titulo: "Activación", subs: [["Cardiovascular", "Activación"], ["Movilidad", "Movilidad"], ["Estiramiento dinámico", "Estiramiento dinámico"]] },
+    preventivo: { titulo: "Preventivo", subs: [[null, "Preventivo"]] },
+    core: { titulo: "Core", subs: [[null, "Core"]] },
+    resistencia: { titulo: "Resistencia", subs: [[null, "Resistencia"]] },
+    cmj: { titulo: "CMJ", subs: [[null, "CMJ"]] },
+    fuerza: { titulo: "Fuerza", subs: [[null, "Fuerza"]] },
+  };
+  const ordenSesion = (() => {
+    let o = sesionActual?.orden_bloques;
+    if (typeof o === "string") { try { o = JSON.parse(o); } catch { o = []; } }
+    const lim = Array.isArray(o) ? o.filter((x) => ORDEN_BASE.includes(x)) : [];
+    return [...lim, ...ORDEN_BASE.filter((x) => !lim.includes(x))];
+  })();
+  const clavesUsadas = new Set(Object.values(SECCIONES).flatMap((x) => x.subs.map((y) => y[1])));
+  const seccionesRender = [
+    ...ordenSesion.map((id) => ({ id, titulo: SECCIONES[id].titulo, subs: SECCIONES[id].subs.filter(([, k]) => bloques[k]?.length) })).filter((x) => x.subs.length),
+    ...Object.keys(bloques).filter((k) => !clavesUsadas.has(k)).map((k) => ({ id: k, titulo: k, subs: [[null, k]] })),
+  ];
+
   const todasLasTareas = Object.values(bloques)
     .flat()
     .flatMap((item) => (item.tipo === "circuito" ? item.tareas : [item.tarea]));
@@ -2071,6 +2105,81 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
     return { reps: "", carga: "", rir: "", subtipo: t?.subtipoDefault || "", series: "", ultReps: "", ultCarga: "", ultRir: "" };
   };
   const setRegistroDraft = (id, val) => setRegistrosDraft((prev) => ({ ...prev, [id]: val }));
+  // Resumen de la sesión (solo bloque Fuerza, tareas marcadas con datos).
+  const itemsResumen = (bloques["Fuerza"] || [])
+    .flatMap((it) => (it.tipo === "circuito" ? it.tareas : [it.tarea]))
+    .filter((t) => hechoDraft[t.id])
+    .map((t) => {
+      const r = getRegistro(t.id);
+      return { nombre: t.nombre, cargaReal: r.carga, repsReal: r.reps, rirReal: r.rir, ultimaCargaReal: r.ultCarga, ultimaRepsReal: r.ultReps, ultimaRirReal: r.ultRir, seriesHechas: r.series, seriesPautadas: t.series, rirPautado: t.rirObjetivo, objetivo: t.objetivoTarea, modo: t.modoTarea };
+    });
+  const resumenSesion = valorarSesionFuerza(itemsResumen);
+
+  // Filas de un bloque: circuitos, tareas sueltas y superseries (tareas
+  // consecutivas que se alternan) agrupadas en un recuadro "2a / 2b".
+  const filasBloque = (nombreBloque, items) => {
+    const out = [];
+    let n = 0;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      n += 1;
+      if (item.tipo === "circuito") {
+        out.push(
+          <CircuitoJugadorReal
+            key={item.circuitoId}
+            tareas={item.tareas}
+            rondas={item.rondas}
+            nombreGrupo={item.nombreGrupo}
+            esGrupo={item.esGrupo}
+            hechoDraft={hechoDraft}
+            onToggle={toggle}
+            getRegistro={getRegistro}
+            onCambiarRegistro={setRegistroDraft}
+            onAmpliarGif={setGifAmpliado}
+            mostrarRegistro={nombreBloque === "Fuerza"}
+          />
+        );
+        continue;
+      }
+      const grupo = [item];
+      while (i + 1 < items.length) {
+        const ult = grupo[grupo.length - 1];
+        const sig = items[i + 1];
+        if (sig.tipo === "suelta" && ult.tarea.alternaCon && ult.tarea.alternaCon === sig.tarea.ejercicioId) { grupo.push(sig); i += 1; } else break;
+      }
+      const tarjeta = (it, etiqueta) => (
+        <TareaCardReal
+          key={it.tarea.id}
+          tarea={it.tarea}
+          orden={etiqueta}
+          hecho={!!hechoDraft[it.tarea.id]}
+          onToggle={() => toggle(it.tarea)}
+          registro={getRegistro(it.tarea.id)}
+          onCambiarRegistro={(val) => setRegistroDraft(it.tarea.id, val)}
+          onAmpliarGif={() => {
+            const v = videoEfectivoTarea(it.tarea, getRegistro(it.tarea.id));
+            if (v) setGifAmpliado(v);
+          }}
+          mostrarRegistro={nombreBloque === "Fuerza" || nombreBloque === "CMJ"}
+          esRecordNuevo={recordsEnVivoIds.has(it.tarea.id)}
+        />
+      );
+      if (grupo.length === 1) {
+        out.push(tarjeta(item, undefined));
+      } else {
+        const etiquetas = grupo.map((_, k) => `${n}${String.fromCharCode(97 + k)}`);
+        out.push(
+          <div key={`ss-${grupo[0].tarea.id}`} style={{ border: `1px solid ${ds.accentBorderSubtle || ds.accent}`, background: ds.accentSubtle, borderRadius: dsR.lg, padding: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+            <span style={{ fontFamily: dsF.mono, fontSize: 11, fontWeight: 700, letterSpacing: "0.04em", color: ds.accent, textTransform: "uppercase", padding: "2px 4px" }}>
+              Superserie · se alternan {etiquetas.join(" y ")}
+            </span>
+            {grupo.map((it, k) => tarjeta(it, etiquetas[k]))}
+          </div>
+        );
+      }
+    }
+    return out;
+  };
 
   // Qué exige cada tipo de tarea, tal como me lo has descrito:
   // - Resistencia y CMJ tienen su propio registro (no reps/carga) -> fuera de esta comprobación.
@@ -2825,49 +2934,50 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
         ) : (
           <>
             <div style={{ display: "flex", flexDirection: "column", gap: 26 }}>
-              {Object.entries(bloques).map(([nombreBloque, tareasBloque]) => (
-                <div key={nombreBloque}>
+              {seccionesRender.map((sec) => (
+                <div key={sec.id}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12, paddingLeft: 2 }}>
                     <span style={{ width: 5, height: 5, borderRadius: dsR.full, background: ds.accent, flexShrink: 0 }} />
-                    <span style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: ds.inkSecondary, textTransform: "uppercase" }}>{nombreBloque}</span>
+                    <span style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: ds.inkSecondary, textTransform: "uppercase" }}>{sec.titulo}</span>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                    {tareasBloque.map((item, idx) =>
-                      item.tipo === "circuito" ? (
-                        <CircuitoJugadorReal
-                          key={item.circuitoId}
-                          tareas={item.tareas}
-                          rondas={item.rondas}
-                          nombreGrupo={item.nombreGrupo}
-                          esGrupo={item.esGrupo}
-                          hechoDraft={hechoDraft}
-                          onToggle={toggle}
-                          getRegistro={getRegistro}
-                          onCambiarRegistro={setRegistroDraft}
-                          onAmpliarGif={setGifAmpliado}
-                          mostrarRegistro={nombreBloque === "Fuerza"}
-                        />
-                      ) : (
-                        <TareaCardReal
-                          key={item.tarea.id}
-                          tarea={item.tarea}
-                          hecho={!!hechoDraft[item.tarea.id]}
-                          onToggle={() => toggle(item.tarea)}
-                          registro={getRegistro(item.tarea.id)}
-                          onCambiarRegistro={(val) => setRegistroDraft(item.tarea.id, val)}
-                          onAmpliarGif={() => {
-                            const v = videoEfectivoTarea(item.tarea, getRegistro(item.tarea.id));
-                            if (v) setGifAmpliado(v);
-                          }}
-                          mostrarRegistro={nombreBloque === "Fuerza" || nombreBloque === "CMJ"}
-                          esRecordNuevo={recordsEnVivoIds.has(item.tarea.id)}
-                        />
-                      )
-                    )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                    {sec.subs.map(([subTitulo, clave]) => (
+                      <div key={clave} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                        {subTitulo && <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink, paddingLeft: 2 }}>{subTitulo}</span>}
+                        {filasBloque(clave, bloques[clave])}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
             </div>
+
+            {resumenSesion && (
+              <div style={{ marginTop: 22, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.lg, padding: "14px 14px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+                <span style={{ fontFamily: dsF.mono, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em", color: ds.inkSecondary, textTransform: "uppercase" }}>Resumen de la sesión</span>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5 }}>
+                  <span style={{ color: ds.inkSecondary }}>Volumen total</span>
+                  <b style={{ fontFamily: dsF.mono }}>{Math.round(resumenSesion.volumen).toLocaleString("es-ES")} kg</b>
+                </div>
+                {resumenSesion.evaluables > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5 }}>
+                    <span style={{ color: ds.inkSecondary }}>Ejercicios dentro de lo pautado</span>
+                    <b style={{ fontFamily: dsF.mono }}>{resumenSesion.cumplidas} de {resumenSesion.evaluables}</b>
+                  </div>
+                )}
+                {resumenSesion.indice != null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, fontSize: 13.5 }}>
+                    <span style={{ color: ds.inkSecondary }}>Caída de rendimiento</span>
+                    <b style={{ fontFamily: dsF.mono }}>{resumenSesion.indice.toFixed(1).replace(".", ",")} % · {resumenSesion.nivel}</b>
+                  </div>
+                )}
+                {resumenSesion.avisos.length > 0 && (
+                  <div style={{ fontSize: 12, color: ds.inkMuted, lineHeight: 1.5 }}>
+                    {resumenSesion.avisos.map((o) => `${o.item.nombre || ""} ${ESTADOS[o.estado].etiqueta.toLowerCase()}`.trim()).join(" · ")}
+                  </div>
+                )}
+              </div>
+            )}
 
             {errorEnvio && (
               <div style={{ color: ds.danger, fontSize: 12.5, background: `${ds.danger}18`, border: `1px solid ${ds.dangerBorderSubtle}`, borderRadius: dsR.md, padding: "10px 12px", marginTop: 22 }}>{errorEnvio}</div>
