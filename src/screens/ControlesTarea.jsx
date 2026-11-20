@@ -235,13 +235,13 @@ const TONOS = {
 
 // Etiqueta pequeña bajo el nombre que abre un desplegable (children = función
 // que recibe "cerrar" y devuelve el contenido).
-export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, ariaLabel, children }) {
+export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, ariaLabel, grande = false, children }) {
   const [abierto, setAbierto] = useState(false);
   const ref = useRef(null);
   return (
     <>
       <button ref={ref} type="button" aria-label={ariaLabel || rotulo} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
-        style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer", ...TONOS[tono] }}>
+        style={{ height: grande ? 30 : 24, padding: grande ? "0 11px" : "0 9px", borderRadius: grande ? 9 : 8, fontSize: grande ? 12 : 11, fontWeight: 600, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer", ...TONOS[tono] }}>
         {rotulo}
       </button>
       {abierto && <Desplegable ancla={ref} onCerrar={() => setAbierto(false)} ancho={ancho}>{children(() => setAbierto(false))}</Desplegable>}
@@ -269,7 +269,7 @@ export function EtiquetaLado({ tarea, onCambiar }) {
 export function EtiquetaSuperserie({ superserie, onAlternar }) {
   if (!superserie || !onAlternar || !(superserie.puedeEnlazar || superserie.conAnt || superserie.conSig)) return null;
   const unida = superserie.conAnt || superserie.conSig;
-  const rotulo = unida ? `⛓ Superserie ${superserie.conSig ? "con el siguiente" : "con el anterior"} ▾` : "⛓ Superserie ▾";
+  const rotulo = unida ? "Superserie ▾" : "+ Superserie ▾";
   const ahorro = ""; // la duración mostrada es solo la efectiva: no se anuncia ahorro de recuperación
   return (
     <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Superserie" tono={unida ? "activo" : "vacio"} ancho={300}>
