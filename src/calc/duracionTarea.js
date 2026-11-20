@@ -165,3 +165,56 @@ export function formatearDuracionDiseno(seg) {
   if (min < 60) return `${min} min`;
   return `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
 }
+
+// ---------------------------------------------------------------------------
+// Duración EFECTIVA y recuperación RECOMENDADA (diseñador de sesiones).
+//
+// La duración que se muestra al entrenador cuenta solo tiempo de trabajo
+// (reps × ritmo, o el tiempo pautado): sin recuperación ni transiciones, que
+// falsean la duración real de una sesión. La recuperación es una
+// recomendación por serie —según %1RM / RIR / repeticiones— y se muestra
+// aparte, en segundos, nunca dentro de la duración efectiva.
+// `estimarTareaSeg` y compañía NO cambian: las usa la adherencia ponderada.
+// ---------------------------------------------------------------------------
+export function estimarTareaEfectivaSeg(t) {
+  const trabajo = trabajoSerieSeg(t);
+  if (!trabajo) return 0;
+  return Math.max(1, Number(t.series) || 1) * trabajo;
+}
+
+export function estimarCircuitoEfectivoSeg(c) {
+  const rondas = Math.max(1, Number(c.rondas) || 1);
+  return rondas * (c.tareas || []).reduce((sum, t) => sum + trabajoSerieSeg(t), 0);
+}
+
+export function estimarBloqueEfectivoSeg(tareas, circuitos = []) {
+  return tareas.reduce((sum, t) => sum + estimarTareaEfectivaSeg(t), 0) + circuitos.reduce((sum, c) => sum + estimarCircuitoEfectivoSeg(c), 0);
+}
+
+// Recuperación recomendada POR SERIE, en segundos. Ignora el campo `descanso`
+// guardado en la tarea: la recomendación depende solo de la carga pautada.
+export function recuperacionRecomendadaSerieSeg(t, bloque) {
+  return descansoRecomendadoSeg(t, bloque);
+}
+
+// Duración total si se respetan las recuperaciones recomendadas: trabajo +
+// (series − 1) recuperaciones por tarea. Sin transiciones ni solapes de
+// superseries (es una cota simple y explicable).
+export function estimarTareaConRecuperacionSeg(t, bloque) {
+  const trabajo = estimarTareaEfectivaSeg(t);
+  if (!trabajo) return 0;
+  const series = Math.max(1, Number(t.series) || 1);
+  return trabajo + (series - 1) * recuperacionRecomendadaSerieSeg(t, bloque);
+}
+
+export function estimarBloqueConRecuperacionSeg(tareas, circuitos, bloque) {
+  return tareas.reduce((sum, t) => sum + estimarTareaConRecuperacionSeg(t, bloque), 0) + (circuitos || []).reduce((sum, c) => sum + estimarCircuitoEfectivoSeg(c), 0);
+}
+
+// "1 min 30 s", "45 s", "12 min".
+export function formatearSegundosDiseno(seg) {
+  const n = Math.max(0, Math.round(Number(seg) || 0));
+  const m = Math.floor(n / 60);
+  const r = n % 60;
+  return `${m ? `${m} min` : ""}${m && r ? " " : ""}${r || !m ? `${r} s` : ""}`;
+}
