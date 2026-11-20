@@ -1052,6 +1052,8 @@ export function usePlayerHistory(playerId) {
       ultimaCargaReal: r.ignorar ? "" : r.ultima_carga_kg ?? "",
       ultimaRirReal: r.ignorar ? "" : r.ultima_rir ?? "",
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
+      modo: t.modo || "reps",
+      objetivo: t.objetivo || "",
       bloque: t.bloque_sesion || "General",
       nota: t.nota || "",
       materiales: parseMateriales(t.material),
