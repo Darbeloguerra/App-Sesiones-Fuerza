@@ -15,6 +15,7 @@ import {
   sumarMeses,
   labelMes,
 } from "../calc/fechas.js";
+import ResumenFatigaSesion, { ChipValoracion, valoracionDeTarea, referenciasPropias } from "./FatigaSesionEntrenador.jsx";
 import { parseResistenciaData, crearFraccionCumplida, tareasHechasPorJugadorFecha, calcularCumplimientoPauta } from "../calc/adherencia.js";
 import {
   cmjPct,
@@ -120,6 +121,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <PuntoEstadoReal hecho={t.done} />
         <span style={{ fontSize: 12, color: t.done ? ds.ink : ds.inkMuted, flex: 1 }}>{t.name}</span>
+        <ChipValoracion valoracion={valoracionDeTarea(t)} />
         {t.done && t.esResistencia && (
           <span style={{ fontFamily: dsF.mono, fontSize: 10.5, color: t.subtipoCorporal === "parcial" ? ds.accent : ds.success, textAlign: "right" }}>
             {t.subtipoCorporal === "parcial" ? `Hizo menos: ${t.cargaReal || "sin detalle"}` : "Cumplido completo"}
@@ -158,7 +160,7 @@ function FilaTareaHistorialReal({ tarea: t }) {
   );
 }
 
-function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
+function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta, referencia = null }) {
   const [abierto, setAbierto] = useState(false);
   const total = tareasDelDia.length;
   const hechas = tareasDelDia.filter((t) => t.done).length;
@@ -184,6 +186,7 @@ function TarjetaDiaReal({ fecha, tareasDelDia, etiqueta }) {
       </div>
       {abierto && (
         <div style={{ borderTop: `1px solid ${ds.border}`, padding: "10px 14px 14px", display: "flex", flexDirection: "column", gap: 10 }}>
+          <ResumenFatigaSesion tareasDelDia={tareasDelDia} referencia={referencia} />
           {Object.entries(bloques).map(([nombreBloque, tareas]) => (
             <div key={nombreBloque}>
               <div style={{ fontSize: 12, fontWeight: 600, color: ds.inkSecondary, marginBottom: 5 }}>{nombreBloque}</div>
@@ -340,6 +343,7 @@ function HistorialPorJugador({ players, jugadorInicial, tareasById, ejerciciosBy
     gruposPorFecha[g.fecha].push(g);
   });
   const fechas = Object.keys(gruposPorFecha).sort().reverse();
+  const referenciaPorGrupo = referenciasPropias(items, normalizarFecha);
 
   // Para el modo "Progreso por tarea": la comparación debe ser entre
   // registros con EXACTAMENTE las mismas condiciones planificadas ese día
@@ -441,7 +445,7 @@ function HistorialPorJugador({ players, jugadorInicial, tareasById, ejerciciosBy
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {fechas.map((f) =>
             gruposPorFecha[f].map((g, i) => (
-              <TarjetaDiaReal key={`${f}::${i}`} fecha={g.fecha} tareasDelDia={g.tareas} etiqueta={gruposPorFecha[f].length > 1 ? `sesión ${i + 1} de ${gruposPorFecha[f].length}` : null} />
+              <TarjetaDiaReal key={`${f}::${i}`} fecha={g.fecha} tareasDelDia={g.tareas} referencia={referenciaPorGrupo.get(`${g.fecha}::${g.tareas[0]?.sesionId || ""}`) ?? null} etiqueta={gruposPorFecha[f].length > 1 ? `sesión ${i + 1} de ${gruposPorFecha[f].length}` : null} />
             ))
           )}
           {fechas.length === 0 && <div style={{ color: ds.inkMuted, fontSize: 13, padding: "20px 0", textAlign: "center" }}>Sin sesiones registradas en este rango</div>}
