@@ -13,6 +13,13 @@ import {
   estimarBloqueTareasSeg,
   sugerirAlternancias,
   formatearDuracionDiseno,
+  estimarTareaEfectivaSeg,
+  estimarCircuitoEfectivoSeg,
+  estimarBloqueEfectivoSeg,
+  recuperacionRecomendadaSerieSeg,
+  estimarTareaConRecuperacionSeg,
+  estimarBloqueConRecuperacionSeg,
+  formatearSegundosDiseno,
 } from "./duracionTarea.js";
 
 test("aSegundosDiseno: convierte minutos a segundos, deja segundos igual", () => {
@@ -119,3 +126,39 @@ test("formatearDuracionDiseno: minutos y horas+minutos, 0 es un guion", () => {
   assert.equal(formatearDuracionDiseno(600), "10 min");
   assert.equal(formatearDuracionDiseno(3660), "1 h 01 min");
 });
+
+test("duración efectiva: solo trabajo, sin recuperación ni transición", () => {
+  const t = { series: 4, cantidad: 5, modo: "reps", modoCarga: "pct1rm", pct1rm: 80, descanso: 300 };
+  assert.equal(estimarTareaEfectivaSeg(t), 4 * 5 * SEG_POR_REP_TEST);
+  assert.ok(estimarTareaSeg(t, "Fuerza") > estimarTareaEfectivaSeg(t));
+});
+test("duración efectiva: unilateral duplica y tiempo/minutos se respetan", () => {
+  assert.equal(estimarTareaEfectivaSeg({ series: 2, cantidad: 8, modo: "reps", lateralidad: "unilateral" }), 2 * 8 * 4 * 2);
+  assert.equal(estimarTareaEfectivaSeg({ series: 1, cantidad: 8, modo: "minutos" }), 480);
+  assert.equal(estimarTareaEfectivaSeg({ series: 3, cantidad: 30, modo: "tiempo" }), 90);
+  assert.equal(estimarTareaEfectivaSeg({ series: 3, cantidad: "", modo: "reps" }), 0);
+});
+test("duración efectiva de bloque con circuito", () => {
+  const c = { rondas: 3, tareas: [{ cantidad: 10, modo: "reps" }, { cantidad: 20, modo: "tiempo" }] };
+  assert.equal(estimarCircuitoEfectivoSeg(c), 3 * (40 + 20));
+  assert.equal(estimarBloqueEfectivoSeg([{ series: 2, cantidad: 10, modo: "reps" }], [c]), 80 + 180);
+});
+test("recuperación recomendada ignora el descanso guardado en la tarea", () => {
+  const t = { modo: "reps", modoCarga: "pct1rm", pct1rm: 92, descanso: 30 };
+  assert.equal(recuperacionRecomendadaSerieSeg(t, "Fuerza"), 240);
+  assert.equal(recuperacionRecomendadaSerieSeg({ ...t, pct1rm: 65 }, "Fuerza"), 120);
+  assert.equal(recuperacionRecomendadaSerieSeg({}, "Core"), 45);
+});
+test("duración total con recuperación recomendada: trabajo + (series-1) recuperaciones", () => {
+  const t = { series: 4, cantidad: 5, modo: "reps", modoCarga: "pct1rm", pct1rm: 80 };
+  assert.equal(estimarTareaConRecuperacionSeg(t, "Fuerza"), 80 + 3 * 180);
+  assert.equal(estimarTareaConRecuperacionSeg({ series: 1, cantidad: 5, modo: "reps" }, "Fuerza"), 20);
+  assert.equal(estimarBloqueConRecuperacionSeg([t], [], "Fuerza"), 80 + 540);
+});
+test("formatearSegundosDiseno", () => {
+  assert.equal(formatearSegundosDiseno(45), "45 s");
+  assert.equal(formatearSegundosDiseno(90), "1 min 30 s");
+  assert.equal(formatearSegundosDiseno(720), "12 min");
+  assert.equal(formatearSegundosDiseno(0), "0 s");
+});
+const SEG_POR_REP_TEST = 4;
