@@ -1,496 +1,261 @@
-// Controles de la fila de tarea del diseñador (modo tabla, iPad horizontal):
-// desplegables anclados a su celda, etiquetas bajo el nombre y flechas.
-// Los desplegables se dibujan en un portal por encima de todo (nada los recorta),
-// se abren hacia arriba si abajo no hay sitio y tienen scroll propio.
-import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
-import { createPortal } from "react-dom";
+import React, { useRef, useState } from "react";
 import { ds, dsF } from "../core/designSystem.jsx";
-import { OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { recuperacionRecomendadaSerieSeg, estimarTareaEfectivaSeg, estimarTareaConRecuperacionSeg, formatearSegundosDiseno } from "../calc/duracionTarea.js";
 
-export const ANCHO_COL = 66;
-export const ANCHO_FLECHAS = 92;
-// Por debajo de este ancho de ventana la fila pasa a dos niveles y los desplegables
-// suben como hoja inferior.
-export const ANCHO_MIN_TABLA = 760;
-const ALTO_CELDA = 34;
+// Piezas del diseñador de sesión rediseñado: lista de bloques con casillas y
+// arrastre, partes de Activación, pestañas para pantallas estrechas y caja de
+// recuperación recomendada. Son presentacionales: el estado vive en
+// DisenoSesionReal.
 
-function medidas() {
-  const v = typeof window !== "undefined" ? window.visualViewport : null;
-  return { w: window.innerWidth, h: v ? v.height : window.innerHeight, hLayout: window.innerHeight };
-}
+export const NOMBRE_BLOQUE = { activacion: "Activación", preventivo: "Preventivo", core: "Core", resistencia: "Resistencia", cmj: "CMJ", fuerza: "Fuerza" };
 
-export function Desplegable({ ancla, onCerrar, ancho = 320, children }) {
-  const [pos, setPos] = useState(null);
-  useLayoutEffect(() => {
-    const calcular = () => {
-      const el = ancla && ancla.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const { w, h, hLayout } = medidas();
-      if (w < ANCHO_MIN_TABLA) {
-        const v = window.visualViewport;
-        const finVisible = v ? v.offsetTop + v.height : hLayout;
-        setPos({ hoja: true, bottom: Math.max(0, hLayout - finVisible), maxHeight: Math.round(h * 0.85) });
-        return;
-      }
-      const a = Math.min(ancho, w - 16);
-      const left = Math.max(8, Math.min(r.left + r.width / 2 - a / 2, w - a - 8));
-      const abajo = h - r.bottom - 12;
-      const arriba = r.top - 12;
-      const haciaAbajo = abajo >= 300 || abajo >= arriba;
-      setPos(
-        haciaAbajo
-          ? { left, width: a, top: r.bottom + 6, maxHeight: Math.max(160, abajo - 6) }
-          : { left, width: a, bottom: hLayout - r.top + 6, maxHeight: Math.max(160, arriba - 6) }
-      );
-    };
-    calcular();
-    window.addEventListener("resize", calcular);
-    if (window.visualViewport) window.visualViewport.addEventListener("resize", calcular);
-    return () => {
-      window.removeEventListener("resize", calcular);
-      if (window.visualViewport) window.visualViewport.removeEventListener("resize", calcular);
-    };
-  }, [ancla, ancho]);
-  useEffect(() => {
-    const alTecla = (e) => {
-      if (e.key === "Escape") onCerrar();
-    };
-    window.addEventListener("keydown", alTecla);
-    return () => window.removeEventListener("keydown", alTecla);
-  }, [onCerrar]);
-  if (!pos) return null;
-  const hoja = !!pos.hoja;
-  const estiloPos = hoja
-    ? { left: 0, right: 0, bottom: pos.bottom, maxHeight: pos.maxHeight, borderRadius: "16px 16px 0 0", paddingBottom: "max(12px, env(safe-area-inset-bottom, 0px))" }
-    : pos;
-  return createPortal(
-    <div className="ds-reset" style={{ position: "fixed", inset: 0, zIndex: 1300, background: hoja ? "rgba(0,0,0,0.55)" : undefined }} onClick={onCerrar}>
-      <div
-        role="dialog"
-        onClick={(e) => e.stopPropagation()}
-        style={{ position: "fixed", ...estiloPos, overflowY: "auto", overscrollBehavior: "contain", WebkitOverflowScrolling: "touch", boxSizing: "border-box", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 12, padding: 10, display: "flex", flexDirection: "column", gap: 10, boxShadow: "0 12px 32px rgba(0,0,0,0.45)", fontFamily: dsF.sans, color: ds.ink, ...(hoja ? { borderRadius: "16px 16px 0 0", padding: "10px 12px max(12px, env(safe-area-inset-bottom, 0px))" } : null) }}
-      >
-        {hoja && <span style={{ alignSelf: "center", width: 36, height: 4, borderRadius: 2, background: ds.border, flexShrink: 0 }} />}
-        {children}
-      </div>
-    </div>,
-    document.body
+function Casilla({ on, medio = false }) {
+  return (
+    <span
+      aria-hidden="true"
+      style={{
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        flexShrink: 0,
+        boxSizing: "border-box",
+        border: `1.5px solid ${on || medio ? ds.accent : ds.inkMuted}`,
+        background: on ? ds.accent : medio ? ds.accentSubtle : "transparent",
+        color: on ? ds.accentInk : ds.accent,
+        display: "grid",
+        placeItems: "center",
+        fontSize: 14,
+        fontWeight: 800,
+        lineHeight: 1,
+      }}
+    >
+      {on ? "✓" : medio ? "–" : ""}
+    </span>
   );
 }
 
-export function Cabecera({ titulo, subtitulo }) {
+function AvisoPunto({ n }) {
+  if (!n) return null;
+  return <span style={{ flexShrink: 0, fontSize: 11.5, fontWeight: 700, color: ds.warning || ds.danger }}>⚠ {n}</span>;
+}
+
+function PanelConfirmar({ texto, onBorrar, onCancelar, etiquetaBorrar = "Borrar contenido" }) {
   return (
-    <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, padding: "0 4px" }}>
-      <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{titulo}</span>
-      {subtitulo && <span style={{ fontSize: 11.5, color: ds.inkSecondary, textAlign: "right" }}>{subtitulo}</span>}
+    <div role="alert" style={{ margin: "0 8px 8px", padding: "8px 10px", borderRadius: 9, border: `1px solid ${ds.danger}`, background: ds.bgElevated, display: "flex", flexDirection: "column", gap: 8, fontSize: 12.5, color: ds.inkSecondary, lineHeight: 1.4 }}>
+      <span>{texto}</span>
+      <div style={{ display: "flex", gap: 6 }}>
+        <button type="button" onClick={onBorrar} style={{ minHeight: 34, padding: "0 12px", borderRadius: 8, border: `1px solid ${ds.danger}`, background: "transparent", color: ds.danger, fontWeight: 700, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>{etiquetaBorrar}</button>
+        <button type="button" onClick={onCancelar} style={{ minHeight: 34, padding: "0 12px", borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontWeight: 600, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>Cancelar</button>
+      </div>
     </div>
   );
 }
 
-export function ListaOpciones({ opciones, valor, onElegir, etiqueta, altoMax = 260 }) {
-  const selRef = useRef(null);
-  // Al abrir, la opción elegida queda a la vista aunque la lista tenga scroll.
-  useEffect(() => {
-    if (selRef.current && selRef.current.scrollIntoView) selRef.current.scrollIntoView({ block: "nearest" });
-  }, []);
+// Lista de bloques: casilla + nombre (+ avisos). Los marcados se pueden
+// arrastrar desde el asa; la hoja de pantallas estrechas usa flechas.
+// Activación muestra debajo sus tres partes, también seleccionables.
+export function ListaBloquesDiseno({
+  orden,
+  marcado,
+  foco,
+  partes,
+  subAct,
+  avisos,
+  avisosParte,
+  confirmar,
+  textoConfirmar,
+  onAlternar,
+  onAlternarParte,
+  onFoco,
+  onFocoParte,
+  onReordenar,
+  onBorrar,
+  onCancelar,
+  conFlechas = false,
+  bloqueado = false,
+}) {
+  const filas = useRef({});
+  const [arrastrando, setArrastrando] = useState(null);
+
+  const moverA = (id, destino) => {
+    const desde = orden.indexOf(id);
+    if (desde < 0 || destino === desde) return;
+    const nuevo = orden.slice();
+    nuevo.splice(desde, 1);
+    nuevo.splice(destino, 0, id);
+    onReordenar(nuevo);
+  };
+  const alMover = (ev) => {
+    if (!arrastrando) return;
+    const y = ev.clientY;
+    let destino = orden.length - 1;
+    for (let k = 0; k < orden.length; k++) {
+      const el = filas.current[orden[k]];
+      if (!el) continue;
+      const r = el.getBoundingClientRect();
+      if (y < r.top + r.height / 2) {
+        destino = k;
+        break;
+      }
+    }
+    moverA(arrastrando, destino);
+  };
+
   return (
-    <div role="listbox" aria-label={etiqueta} style={{ display: "flex", flexDirection: "column", gap: 2, padding: 4, border: `1px solid ${ds.border}`, borderRadius: 10, background: ds.surface, maxHeight: altoMax, overflowY: "auto", overscrollBehavior: "contain" }}>
-      {opciones.map((o) => {
-        const sel = String(o.v) === String(valor);
-        const base = { flexShrink: 0, height: 38, boxSizing: "border-box", padding: "0 12px", borderRadius: 8, border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, fontWeight: 600, cursor: "pointer", textAlign: "left", fontFamily: dsF.sans, width: "100%" };
-        const nota = o.fuera ? (sel ? "fuera de zona" : "fuera") : (o.nota || "");
-        const estilo = sel ? { ...base, background: ds.accent, color: ds.accentInk, fontWeight: 700 } : o.zona ? { ...base, background: ds.accentSubtle, color: ds.accent } : o.tenue ? { ...base, background: "transparent", color: ds.inkMuted, fontSize: 12.5 } : { ...base, background: "transparent", color: ds.ink };
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, pointerEvents: bloqueado ? "none" : undefined }} onPointerMove={alMover} onPointerUp={() => setArrastrando(null)} onPointerCancel={() => setArrastrando(null)}>
+      {orden.map((id, i) => {
+        const on = marcado(id);
+        const enFoco = on && (foco === id);
+        const arrastrado = arrastrando === id;
         return (
-          <button key={String(o.v) + o.t} ref={sel ? selRef : undefined} type="button" role="option" aria-selected={sel} onClick={() => o.onElegir ? o.onElegir() : onElegir(o.v)} style={estilo}>
-            <span>{o.t}</span>
-            <span style={{ fontSize: 11, color: o.fuera && !sel ? ds.danger : undefined }}>{sel ? "✓ " : ""}{nota}</span>
-          </button>
+          <div
+            key={id}
+            ref={(el) => { filas.current[id] = el; }}
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              borderRadius: 11,
+              border: `1px ${on ? "solid" : "dashed"} ${enFoco ? ds.accent : ds.border}`,
+              background: enFoco ? ds.accentSubtle : on ? ds.surface : "transparent",
+              boxShadow: arrastrado ? "0 10px 28px rgba(0,0,0,0.5)" : undefined,
+              opacity: arrastrado ? 0.9 : 1,
+              position: "relative",
+              zIndex: arrastrado ? 3 : undefined,
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", minHeight: 44 }}>
+              {!conFlechas && (
+                <button
+                  type="button"
+                  aria-label={`Arrastrar ${NOMBRE_BLOQUE[id]}`}
+                  onPointerDown={(ev) => { if (!on) return; ev.currentTarget.setPointerCapture?.(ev.pointerId); setArrastrando(id); }}
+                  style={{ width: 30, height: 40, border: 0, background: "transparent", color: ds.inkMuted, fontSize: 16, letterSpacing: -2, touchAction: "none", cursor: on ? "grab" : "default", flexShrink: 0, visibility: on ? "visible" : "hidden" }}
+                >
+                  ⋮⋮
+                </button>
+              )}
+              <button type="button" aria-label={`Seleccionar ${NOMBRE_BLOQUE[id]}`} aria-pressed={on} onClick={() => onAlternar(id)} style={{ border: 0, background: "transparent", padding: conFlechas ? "0 4px 0 10px" : "0 4px", height: 44, display: "flex", alignItems: "center", cursor: "pointer" }}>
+                <Casilla on={on} />
+              </button>
+              <button type="button" onClick={() => (on ? onFoco(id) : onAlternar(id))} style={{ flex: 1, minWidth: 0, textAlign: "left", border: 0, background: "transparent", height: 44, padding: "0 6px", color: on ? ds.ink : ds.inkSecondary, fontWeight: on ? 700 : 500, fontSize: 14, fontFamily: dsF.sans, cursor: "pointer" }}>
+                {NOMBRE_BLOQUE[id]}
+              </button>
+              <AvisoPunto n={on ? avisos[id] : 0} />
+              {conFlechas && (
+                <div style={{ display: "flex", gap: 4, padding: "0 8px" }}>
+                  <button type="button" aria-label="Subir" disabled={i === 0} onClick={() => moverA(id, i - 1)} style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, opacity: i === 0 ? 0.3 : 1 }}>↑</button>
+                  <button type="button" aria-label="Bajar" disabled={i === orden.length - 1} onClick={() => moverA(id, i + 1)} style={{ width: 34, height: 34, borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, opacity: i === orden.length - 1 ? 0.3 : 1 }}>↓</button>
+                </div>
+              )}
+            </div>
+            {confirmar === id && <PanelConfirmar texto={textoConfirmar} onBorrar={() => onBorrar(id)} onCancelar={onCancelar} />}
+            {id === "activacion" && on && (
+              <div style={{ display: "flex", flexDirection: "column", padding: conFlechas ? "0 8px 8px 38px" : "0 8px 8px 38px", gap: 2 }}>
+                {partes.map((p) => {
+                  const act = !!subAct[p.id];
+                  const f = foco === p.id;
+                  return (
+                    <React.Fragment key={p.id}>
+                      <button type="button" onClick={() => onAlternarParte(p.id)} style={{ display: "flex", alignItems: "center", gap: 8, height: 38, borderRadius: 8, padding: "0 6px", cursor: "pointer", border: 0, background: f ? ds.accentSubtle : "transparent", textAlign: "left", width: "100%" }}>
+                        <Casilla on={act} />
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 500, color: act ? ds.ink : ds.inkMuted, fontFamily: dsF.sans }}>{p.nombre}</span>
+                        <AvisoPunto n={act ? avisosParte?.[p.id] : 0} />
+                      </button>
+                      {confirmar === `sub:${p.id}` && <PanelConfirmar texto={textoConfirmar} onBorrar={() => onBorrar(`sub:${p.id}`)} onCancelar={onCancelar} etiquetaBorrar="Borrar ejercicios" />}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         );
       })}
     </div>
   );
 }
 
-// Aviso dentro de un desplegable: motivo y botón para usar la carga sugerida.
-export function BloqueAviso({ info, cerrar }) {
-  if (!info) return null;
-  const rojo = info.estado === "inconsistente";
+// Pestañas para pantallas estrechas: un chip por bloque marcado y «＋ Bloques»
+// que abre la hoja con casillas y flechas.
+export function PestanasBloquesDiseno({ ids, foco, avisos, onFoco, onMas }) {
   return (
-    <div style={{ border: `1px solid ${rojo ? ds.danger : ds.accentBorderSubtle}`, background: rojo ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
-      <span><b style={{ color: rojo ? ds.danger : ds.accent }}>⚠</b> {info.mensaje}</span>
-      {info.textoBoton && info.onAplicar && (
-        <button type="button" onClick={() => { info.onAplicar(); cerrar(); }} style={{ height: 34, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontSize: 12.5, fontWeight: 700, fontFamily: dsF.sans, cursor: "pointer" }}>{info.textoBoton}</button>
-      )}
-    </div>
-  );
-}
-
-export function Implicaciones({ datos, sugerencia }) {
-  if (!datos && !sugerencia) return null;
-  return (
-    <div style={{ padding: "0 4px", display: "flex", flexDirection: "column", gap: 4, fontSize: 11.5, lineHeight: 1.4, color: ds.inkSecondary }}>
-      {datos && datos.lineas.map((l) => (
-        <span key={l.etq}><b style={{ color: ds.ink }}>{l.etq}</b> {l.txt}</span>
-      ))}
-      {(datos || sugerencia) && (
-        <span style={{ fontSize: 10.5, color: ds.inkMuted }}>{datos ? datos.fuente : ""}{datos && sugerencia ? " · " : ""}{sugerencia || ""}</span>
-      )}
-    </div>
-  );
-}
-
-// Línea de orientación dentro de un desplegable (%1RM, RIR o repeticiones).
-// Con objetivo en la tarea: dice cuál es la zona. Sin objetivo: un toque en
-// Fuerza, Hipertrofia o Potencia lo fija y rellena RIR y repeticiones.
-export function BloqueObjetivo({ objetivo, textoZona, onElegirObjetivo, cerrar }) {
-  if (objetivo) {
-    return (
-      <div style={{ border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, borderRadius: 10, padding: "7px 10px", fontSize: 11.5, lineHeight: 1.4, color: ds.inkSecondary }}>
-        <b style={{ color: ds.ink }}>{objetivo.etiqueta}</b> · {textoZona} Lo resaltado está en su zona; a la derecha ves en qué objetivos encaja cada valor.
-      </div>
-    );
-  }
-  return (
-    <div style={{ border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "7px 10px", display: "flex", flexDirection: "column", gap: 7, fontSize: 11.5, lineHeight: 1.4, color: ds.inkSecondary }}>
-      <span><b style={{ color: ds.ink }}>Esta tarea no tiene objetivo.</b> Elígelo y se rellenan RIR y repeticiones. A la derecha de cada valor ves en qué objetivos encaja.</span>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        {OBJETIVOS_SESION.map((o) => (
-          <button key={o.id} type="button" onClick={() => { onElegirObjetivo(o.id); cerrar(); }}
-            style={{ height: 32, padding: "0 12px", borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 12, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer" }}>{o.etiqueta}</button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
-  return (
-    <label style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 3 }}>
-      <span style={{ fontSize: 10, fontWeight: 600, color: ds.inkSecondary, paddingLeft: 2 }}>{etiqueta}</span>
-      <select aria-label={etiqueta} value={valor} onChange={(e) => onCambiar(e.target.value)} style={{ height: 38, boxSizing: "border-box", padding: "0 10px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, fontSize: 16, fontWeight: 600, fontFamily: dsF.sans }}>
-        {opciones.map((o) => <option key={o.v} value={o.v}>{o.t}</option>)}
-      </select>
-    </label>
-  );
-}
-
-// Celda numérica: muestra el valor y abre un desplegable con valores rápidos,
-// "Otro valor" (teclado) y, opcionalmente, campos extra y la explicación.
-export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false, aviso = null, avisoInfo = null }) {
-  const [abierto, setAbierto] = useState(false);
-  const [teclado, setTeclado] = useState(false);
-  const [borrador, setBorrador] = useState("");
-  const ref = useRef(null);
-  const tiene = valor !== "" && valor != null;
-  const lista = [...opciones];
-  if (tiene && !lista.some((o) => String(o.v) === String(valor))) {
-    lista.push({ v: String(valor), t: String(valor) });
-    lista.sort((a, b) => Number(a.v) - Number(b.v));
-  }
-  const cerrar = () => { setAbierto(false); setTeclado(false); };
-  const elegir = (v) => { onCambiar(String(v)); cerrar(); };
-  const confirmarTeclado = () => { const v = borrador.replace(/[^0-9]/g, ""); if (v !== "") onCambiar(v); cerrar(); };
-  const todas = [
-    ...(autoOpcion ? [{ v: "", t: autoOpcion, tenue: true }] : []),
-    ...lista,
-    { v: "__otro", t: "Otro valor… (teclado)", tenue: true, onElegir: () => { setBorrador(tiene ? String(valor) : ""); setTeclado(true); } },
-  ];
-  return (
-    <div style={movil ? { minWidth: 0, display: "flex", flexDirection: "column", gap: 3, opacity: apagada ? 0.5 : 1 } : { width: ANCHO_COL, flexShrink: 0, opacity: apagada ? 0.5 : 1 }}>
-      {movil && <span aria-hidden="true" style={{ fontSize: 9, fontWeight: 600, color: ds.inkMuted, textAlign: "center", whiteSpace: "nowrap", fontFamily: dsF.sans }}>{etiqueta}</span>}
-      <button ref={ref} type="button" aria-label={aviso ? `${etiqueta} (aviso de carga)` : etiqueta} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
-        style={{ position: "relative", width: "100%", height: ALTO_CELDA, boxSizing: "border-box", borderRadius: 10, background: ds.surface, border: `${abierto || aviso || (resaltar && tiene) ? 2 : 1}px solid ${alerta || aviso === "inconsistente" ? ds.danger : aviso === "fuera" ? ds.accent : abierto || (resaltar && tiene) ? ds.accent : ds.border}`, color: alerta || aviso === "inconsistente" ? ds.danger : aviso === "fuera" ? ds.accent : resaltar && tiene ? ds.accent : tiene ? ds.ink : ds.inkMuted, fontWeight: tiene ? 700 : 600, fontSize: 13, fontFamily: dsF.sans, cursor: "pointer", padding: 0 }}>
-        {tiene ? valor : placeholder}
-        {sufijo && tiene && <span style={{ position: "absolute", right: 5, bottom: 2, fontSize: 9, color: ds.inkMuted }}>{sufijo}</span>}
-        {aviso && <span aria-hidden="true" style={{ position: "absolute", top: -7, right: -4, fontSize: 10, lineHeight: "14px", padding: "0 3px", borderRadius: 6, background: aviso === "inconsistente" ? ds.danger : ds.accent, color: ds.accentInk }}>⚠</span>}
+    <div style={{ display: "flex", gap: 6, overflowX: "auto", padding: "2px 0" }}>
+      {ids.map((id) => {
+        const f = foco === id;
+        return (
+          <button key={id} type="button" onClick={() => onFoco(id)} style={{ flexShrink: 0, height: 34, padding: "0 12px", borderRadius: 9, border: `1px solid ${f ? ds.accent : ds.border}`, background: f ? ds.accent : "transparent", color: f ? ds.accentInk : ds.inkSecondary, fontWeight: 600, fontSize: 12.5, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer" }}>
+            {NOMBRE_BLOQUE[id]}{avisos[id] ? " ⚠" : ""}
+          </button>
+        );
+      })}
+      <button type="button" onClick={onMas} style={{ flexShrink: 0, height: 34, padding: "0 12px", borderRadius: 9, border: `1px dashed ${ds.accentBorderSubtle || ds.accent}`, background: "transparent", color: ds.accent, fontWeight: 600, fontSize: 12.5, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer" }}>
+        ＋ Bloques
       </button>
-      {abierto && (
-        <Desplegable ancla={ref} onCerrar={cerrar} ancho={330}>
-          <Cabecera titulo={titulo || etiqueta} subtitulo={subtitulo} />
-          {avisoInfo && !teclado && <BloqueAviso info={{ ...avisoInfo, estado: aviso }} cerrar={cerrar} />}
-          {typeof extra === "function" ? extra(cerrar) : extra}
-          {teclado ? (
-            <div style={{ display: "flex", gap: 8 }}>
-              <input autoFocus aria-label={`${etiqueta}: otro valor`} inputMode="numeric" value={borrador} onChange={(e) => setBorrador(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={(e) => { if (e.key === "Enter") confirmarTeclado(); }}
-                style={{ flex: 1, height: 44, boxSizing: "border-box", borderRadius: 10, border: `1px solid ${ds.accent}`, background: ds.surface, color: ds.ink, fontSize: 18, fontWeight: 700, textAlign: "center", fontFamily: dsF.sans }} />
-              <button type="button" onClick={confirmarTeclado} style={{ width: 64, height: 44, borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>OK</button>
-            </div>
-          ) : (
-            <ListaOpciones opciones={todas} valor={valor} onElegir={elegir} etiqueta={etiqueta} />
-          )}
-          {typeof pie === "function" ? pie(cerrar) : pie}
-        </Desplegable>
-      )}
     </div>
   );
 }
 
-const TONOS = {
-  normal: { border: `1px solid ${ds.border}`, color: ds.inkSecondary, background: "transparent" },
-  activo: { border: `1px solid ${ds.accent}`, color: ds.accent, background: ds.accentSubtle, fontWeight: 700 },
-  peligro: { border: `1px solid ${ds.danger}`, color: ds.danger, background: "transparent", fontWeight: 700 },
-  vacio: { border: `1px dashed ${ds.border}`, color: ds.inkMuted, background: "transparent" },
-};
-
-// Etiqueta pequeña bajo el nombre que abre un desplegable (children = función
-// que recibe "cerrar" y devuelve el contenido).
-export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, ariaLabel, children }) {
-  const [abierto, setAbierto] = useState(false);
-  const ref = useRef(null);
+export function HojaBloquesDiseno({ abierta, onCerrar, children }) {
+  if (!abierta) return null;
   return (
-    <>
-      <button ref={ref} type="button" aria-label={ariaLabel || rotulo} aria-haspopup="dialog" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}
-        style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer", ...TONOS[tono] }}>
-        {rotulo}
-      </button>
-      {abierto && <Desplegable ancla={ref} onCerrar={() => setAbierto(false)} ancho={ancho}>{children(() => setAbierto(false))}</Desplegable>}
-    </>
-  );
-}
-
-// Lado visible en la línea de etiquetas (antes estaba dentro de Repeticiones).
-export function EtiquetaLado({ tarea, onCambiar }) {
-  const uni = tarea.lateralidad === "unilateral";
-  return (
-    <EtiquetaDesplegable rotulo={`${uni ? "Unilateral" : "Bilateral"} ▾`} ariaLabel="Lado" tono={uni ? "activo" : "normal"} ancho={250}>
-      {(cerrar) => (
-        <>
-          <Cabecera titulo="Lado" subtitulo="cómo se ejecuta" />
-          <ListaOpciones etiqueta="Lado" valor={uni ? "unilateral" : "bilateral"} onElegir={(v) => { onCambiar({ ...tarea, lateralidad: v }); cerrar(); }} opciones={[{ v: "bilateral", t: "Bilateral" }, { v: "unilateral", t: "Unilateral" }]} />
-          <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>En unilateral, las repeticiones son por lado.</span>
-        </>
-      )}
-    </EtiquetaDesplegable>
-  );
-}
-
-// Superserie a la vista: une o separa con el siguiente ejercicio.
-export function EtiquetaSuperserie({ superserie, onAlternar }) {
-  if (!superserie || !onAlternar || !(superserie.puedeEnlazar || superserie.conAnt || superserie.conSig)) return null;
-  const unida = superserie.conAnt || superserie.conSig;
-  const rotulo = unida ? `⛓ Superserie ${superserie.conSig ? "con el siguiente" : "con el anterior"} ▾` : "⛓ Superserie ▾";
-  const ahorro = superserie.ahorroSeg > 0 ? `${Math.round(superserie.ahorroSeg / 6) / 10} min`.replace(".", ",") : "";
-  return (
-    <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Superserie" tono={unida ? "activo" : "vacio"} ancho={300}>
-      {(cerrar) => (
-        <>
-          <Cabecera titulo="Superserie" subtitulo="alternan en la pausa" />
-          {superserie.conAnt && !superserie.conSig ? (
-            <span style={{ fontSize: 12, color: ds.inkSecondary, padding: "0 4px", lineHeight: 1.4 }}>Este ejercicio forma superserie con el anterior. Para separarlos, usa la etiqueta del primero.</span>
-          ) : (
-            <button type="button" onClick={() => { onAlternar(); cerrar(); }} style={{ minHeight: 44, borderRadius: 10, border: `1px solid ${ds.accentBorderSubtle}`, background: ds.accentSubtle, color: ds.accent, fontWeight: 700, fontSize: 13.5, fontFamily: dsF.sans, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", padding: "0 12px" }}>
-              <span>{superserie.conSig ? "Separar los dos ejercicios" : "Unir con el siguiente"}</span>
-              {!superserie.conSig && ahorro && <small style={{ fontWeight: 500, fontSize: 11 }}>ahorra {ahorro}</small>}
-            </button>
-          )}
-          <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Hacéis A, pausa corta, B, y volvéis a A: el descanso de uno lo cubre el trabajo del otro. Funciona mejor con ejercicios de zonas distintas.</span>
-        </>
-      )}
-    </EtiquetaDesplegable>
-  );
-}
-
-// Objetivo de esta tarea: siempre visible, primera etiqueta de la línea. Si los
-// valores se salen de su zona muestra hacia dónde derivan ("Fuerza → Hipertrofia")
-// y ofrece adoptar ese objetivo sin tocar los valores.
-//   objetivo: objetivo elegido o null; deriva: null (encaja) o ids con los que
-//   encajan ahora; hayValores: si la tarea ya tiene %, RIR o repeticiones.
-export function EtiquetaObjetivo({ objetivo, deriva = null, encajan = [], hayValores = false, onElegir, onAdoptar }) {
-  const nom = (id) => (OBJETIVOS_SESION.find((o) => o.id === id) || { etiqueta: id }).etiqueta;
-  const alejada = !!objetivo && !!deriva;
-  const rotulo = !objetivo ? "Objetivo ▾" : alejada ? `${objetivo.etiqueta} → ${deriva.length ? deriva.map(nom).join(" / ") : "sin objetivo claro"} ▾` : `${objetivo.etiqueta} ▾`;
-  return (
-    <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Objetivo de la tarea" tono={!objetivo ? "vacio" : alejada ? "peligro" : "activo"} ancho={300}>
-      {(cerrar) => (
-        <>
-          <Cabecera titulo="Objetivo de esta tarea" subtitulo="rellena RIR y repeticiones" />
-          {hayValores && alejada && (
-            <div style={{ border: `1px solid ${ds.danger}`, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
-              <span><b>Tus valores ya no son de {objetivo.etiqueta.toLowerCase()}.</b> {deriva.length ? `Encajan con ${deriva.map(nom).join(" o ")}.` : "No encajan con ningún objetivo: revisa %, RIR y repeticiones."}</span>
-              {deriva.length > 0 && (
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                  {deriva.map((id) => (
-                    <button key={id} type="button" onClick={() => { onAdoptar(id); cerrar(); }} style={{ height: 34, padding: "0 12px", borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontSize: 12.5, fontWeight: 700, fontFamily: dsF.sans, cursor: "pointer" }}>Pasar a {nom(id)}</button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          {hayValores && !alejada && encajan.length > 0 && (
-            <span style={{ fontSize: 11.5, color: ds.inkSecondary, padding: "0 4px" }}>Tus valores encajan con {encajan.map(nom).join(" y ")}.</span>
-          )}
-          <ListaOpciones etiqueta="Objetivo" valor={objetivo ? objetivo.id : ""} onElegir={(v) => { onElegir(v); cerrar(); }}
-            opciones={[...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta, nota: etiquetaRirCorta(o) })), { v: "", t: "Sin objetivo", tenue: true }]} />
-          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Al elegirlo se rellenan RIR y repeticiones. Si ya hay un %, se respeta.</span>
-        </>
-      )}
-    </EtiquetaDesplegable>
-  );
-}
-
-const etiquetaRirCorta = (o) => (o.rir.max == null ? `RIR ≥${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
-
-// Valores típicos que se rellenan al elegir un objetivo. Son criterio de la
-// app, no datos científicos: los edita el entrenador y se guardan en el dispositivo.
-export function BotonValoresTipicos({ tipicos, onCambiar, onRestablecer }) {
-  const pcts = [30, 40, 50, 60, 70, 75, 80, 85, 90, 95, 100].map((v) => ({ v: String(v), t: `${v} %` }));
-  const rirs = [0, 1, 2, 3, 4, 5].map((v) => ({ v: String(v), t: String(v) }));
-  const reps = [1, 2, 3, 4, 5, 6].map((v) => ({ v: String(v), t: String(v) }));
-  return (
-    <EtiquetaDesplegable rotulo="Valores típicos ▾" ariaLabel="Valores típicos por objetivo" ancho={340}>
-      {() => (
-        <>
-          <Cabecera titulo="Valores típicos por objetivo" subtitulo="se rellenan al elegir el objetivo" />
-          {OBJETIVOS_SESION.map((o) => {
-            const d = tipicos[o.id];
-            return (
-              <div key={o.id} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                <b style={{ fontSize: 12.5, color: ds.ink }}>{o.etiqueta}</b>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <CampoSelect etiqueta="%1RM" valor={String(d.pct)} opciones={pcts} onCambiar={(v) => onCambiar(o.id, "pct", Number(v))} />
-                  <CampoSelect etiqueta="RIR" valor={String(d.rir)} opciones={rirs} onCambiar={(v) => onCambiar(o.id, "rir", Number(v))} />
-                  {o.zonas && <CampoSelect etiqueta="Repeticiones" valor={String(d.reps ?? 4)} opciones={reps} onCambiar={(v) => onCambiar(o.id, "reps", Number(v))} />}
-                </div>
-              </div>
-            );
-          })}
-          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Son un punto de partida de la app, no un dato científico. En fuerza e hipertrofia las repeticiones salen de la tabla (desde 75 %); en potencia las eliges tú. Se guardan en este dispositivo.</span>
-          <button type="button" onClick={onRestablecer} style={{ height: 34, borderRadius: 9, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer" }}>Restablecer valores iniciales</button>
-        </>
-      )}
-    </EtiquetaDesplegable>
-  );
-}
-
-export function EtiquetaAccion({ texto, onClick, ariaLabel }) {
-  return (
-    <button type="button" aria-label={ariaLabel || texto} onClick={onClick}
-      style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, fontFamily: dsF.sans, whiteSpace: "nowrap", cursor: "pointer", ...TONOS.normal }}>
-      {texto}
-    </button>
-  );
-}
-
-export function EtiquetaFija({ texto }) {
-  return <span style={{ height: 24, padding: "0 9px", borderRadius: 8, fontSize: 11, fontWeight: 600, display: "inline-flex", alignItems: "center", background: ds.border, color: ds.ink, whiteSpace: "nowrap" }}>{texto}</span>;
-}
-
-export function EtiquetaMaterial({ tarea, onCambiar, disponibles, onAgregarMaterial, mostrarCarga }) {
-  const sel = tarea.materiales || [];
-  const rotulo = sel.length ? `${sel[0]}${sel.length > 1 ? ` +${sel.length - 1}` : ""} ▾` : "Material ▾";
-  return (
-    <EtiquetaDesplegable rotulo={rotulo} ariaLabel="Material" tono={sel.length ? "activo" : "vacio"} ancho={290}>
-      {(cerrar) => <PanelMaterial tarea={tarea} onCambiar={onCambiar} disponibles={disponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} cerrar={cerrar} />}
-    </EtiquetaDesplegable>
-  );
-}
-
-function PanelMaterial({ tarea, onCambiar, disponibles, onAgregarMaterial, mostrarCarga, cerrar }) {
-  const [nuevo, setNuevo] = useState("");
-  const sel = tarea.materiales || [];
-  const alternar = (m) => onCambiar({ ...tarea, materiales: sel.includes(m) ? sel.filter((x) => x !== m) : [...sel, m] });
-  const anadir = () => { if (nuevo.trim()) { onAgregarMaterial(nuevo.trim()); setNuevo(""); } };
-  return (
-    <>
-      <Cabecera titulo="Material" subtitulo="Puedes marcar varios" />
-      {mostrarCarga && (
-        <div style={{ display: "flex" }}>
-          <CampoSelect etiqueta="Resistencia" valor={tarea.tipoResistencia || "Peso libre"} onCambiar={(v) => onCambiar({ ...tarea, tipoResistencia: v })} opciones={[{ v: "Peso libre", t: "Peso libre" }, { v: "Elástica", t: "Elástica" }, { v: "Peso corporal", t: "Peso corporal" }]} />
+    <div onClick={onCerrar} style={{ position: "fixed", inset: 0, zIndex: 62, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+      <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: 560, maxHeight: "88dvh", overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: "20px 20px 0 0", padding: 12, paddingBottom: "calc(12px + env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+          <b style={{ fontFamily: dsF.display, fontSize: 15 }}>Bloques de la sesión</b>
+          <button type="button" onClick={onCerrar} style={{ minHeight: 40, padding: "0 16px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontFamily: dsF.sans, cursor: "pointer" }}>Listo</button>
         </div>
-      )}
-      <div role="listbox" aria-multiselectable="true" aria-label="Material" style={{ display: "flex", flexDirection: "column", gap: 2, padding: 4, border: `1px solid ${ds.border}`, borderRadius: 10, background: ds.surface, maxHeight: 220, overflowY: "auto", overscrollBehavior: "contain" }}>
-        {disponibles.length === 0 && <span style={{ fontSize: 12, color: ds.inkMuted, padding: "8px 10px" }}>Aún no hay materiales dados de alta.</span>}
-        {disponibles.map((m) => {
-          const activo = sel.includes(m);
-          return (
-            <button key={m} type="button" role="option" aria-selected={activo} onClick={() => alternar(m)} style={{ flexShrink: 0, height: 38, padding: "0 12px", borderRadius: 8, border: "none", display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: 14, fontWeight: activo ? 700 : 600, background: activo ? ds.accent : "transparent", color: activo ? ds.accentInk : ds.ink, cursor: "pointer", fontFamily: dsF.sans }}>
-              <span>{m}</span><span>{activo ? "☑" : "☐"}</span>
-            </button>
-          );
-        })}
+        {children}
       </div>
-      <div style={{ display: "flex", gap: 6 }}>
-        <input value={nuevo} onChange={(e) => setNuevo(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") anadir(); }} placeholder="Añadir material nuevo…" aria-label="Material nuevo" style={{ flex: 1, minWidth: 0, height: 40, boxSizing: "border-box", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "0 10px", fontSize: 16, fontFamily: dsF.sans }} />
-        <button type="button" onClick={anadir} style={{ width: 44, height: 40, borderRadius: 10, border: `1px solid ${ds.border}`, background: "transparent", color: ds.accent, fontSize: 18, cursor: "pointer" }}>+</button>
-      </div>
-      <button type="button" onClick={cerrar} style={{ height: 40, borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 14, cursor: "pointer" }}>Listo</button>
-    </>
+    </div>
   );
 }
 
-export function EtiquetaTipo({ tarea, onCambiar }) {
-  const plio = tarea.tipoMov === "pliometrico";
+// Recuperación RECOMENDADA por serie (nunca se suma a la duración de la
+// sesión). Siempre en segundos y siempre «por serie»; con la duración total si
+// se respeta. En superserie se aclara que es la pausa tras completar A y B.
+export function CajaRecuperacion({ tarea, bloque, etiquetaPar = "" }) {
+  const series = Number(tarea.series);
+  const trabajo = estimarTareaEfectivaSeg(tarea);
+  if (!(series > 1) || !trabajo) return null;
+  const rc = recuperacionRecomendadaSerieSeg(tarea, bloque);
+  const total = estimarTareaConRecuperacionSeg(tarea, bloque);
   return (
-    <EtiquetaDesplegable rotulo={`${plio ? "Pliométrico" : "No pliométrico"} ▾`} ariaLabel="Tipo de movimiento" tono="activo" ancho={270}>
-      {(cerrar) => (
-        <>
-          <Cabecera titulo="Tipo de movimiento" subtitulo="Potencia" />
-          <ListaOpciones etiqueta="Tipo de movimiento" valor={plio ? "pliometrico" : "nopliometrico"} onElegir={(v) => { onCambiar({ ...tarea, tipoMov: v }); cerrar(); }}
-            opciones={[{ v: "nopliometrico", t: "No pliométrico", nota: "30–70 %" }, { v: "pliometrico", t: "Pliométrico", nota: "≤30 %" }]} />
-          <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Pliométrico: saltos con carga, lanzamientos. No pliométrico: sentadilla, press… Soriano et al., 2015 y 2017.</span>
-        </>
-      )}
-    </EtiquetaDesplegable>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", alignItems: "baseline", padding: "8px 10px", borderRadius: 9, border: `1px dashed ${ds.border}`, color: ds.inkSecondary, fontSize: 12, lineHeight: 1.4, flex: "1 1 100%" }}>
+      <span style={{ color: ds.accent, fontWeight: 600 }}>Recuperación recomendada por serie{etiquetaPar ? ` · tras completar ${etiquetaPar}a y ${etiquetaPar}b` : ""}</span>
+      <span style={{ color: ds.ink, fontWeight: 700 }}>{rc} s</span>
+      <span style={{ flex: "1 1 100%", fontSize: 11, color: ds.inkMuted }}>
+        Duración efectiva de la tarea: <b style={{ color: ds.ink }}>{formatearSegundosDiseno(trabajo)}</b>. Duración total con la recuperación recomendada: <b style={{ color: ds.ink }}>{formatearSegundosDiseno(total)}</b>. La recuperación no se incluye en la duración de la sesión.
+      </span>
+    </div>
   );
 }
 
-function PanelNota({ tarea, onCambiar, cerrar }) {
-  const [texto, setTexto] = useState(tarea.nota || "");
+// Superserie: las tareas enlazadas van juntas en un recuadro, numeradas 1a/1b.
+export function GrupoSuperserie({ etiquetas, children }) {
   return (
-    <>
-      <Cabecera titulo="Nota para el jugador" subtitulo="Opcional" />
-      <textarea autoFocus aria-label="Nota" value={texto} onChange={(e) => setTexto(e.target.value)} rows={4} style={{ boxSizing: "border-box", width: "100%", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, padding: "10px 12px", fontSize: 16, lineHeight: 1.4, fontFamily: dsF.sans, resize: "none" }} />
-      <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button type="button" onClick={() => { onCambiar({ ...tarea, nota: "" }); cerrar(); }} style={{ height: 40, padding: "0 14px", borderRadius: 10, border: "none", background: "transparent", color: ds.inkSecondary, fontWeight: 600, fontSize: 13, cursor: "pointer" }}>Borrar</button>
-        <button type="button" onClick={() => { onCambiar({ ...tarea, nota: texto.trim() }); cerrar(); }} style={{ height: 40, padding: "0 16px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Guardar</button>
-      </div>
-    </>
+    <div style={{ border: `1.5px solid ${ds.accent}`, borderRadius: 13, padding: 8, display: "flex", flexDirection: "column", gap: 6, background: ds.accentSubtle }}>
+      <div style={{ fontFamily: dsF.mono, fontWeight: 700, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.accent, padding: "0 4px" }}>Superserie · se alternan {etiquetas.join(" y ")}</div>
+      {children}
+    </div>
   );
 }
 
-export function EtiquetaNota({ tarea, onCambiar }) {
-  return (
-    <EtiquetaDesplegable rotulo={tarea.nota ? "✎ Nota ▾" : "+ Nota ▾"} ariaLabel="Nota" tono={tarea.nota ? "activo" : "vacio"} ancho={300}>
-      {(cerrar) => <PanelNota tarea={tarea} onCambiar={onCambiar} cerrar={cerrar} />}
-    </EtiquetaDesplegable>
-  );
+// Agrupa índices consecutivos enlazados por alternaCon (misma regla que
+// datosSuperserie): [[0], [1, 2], [3]].
+export function gruposSuperserie(tareas, datos) {
+  const grupos = [];
+  tareas.forEach((_, i) => {
+    if (i > 0 && datos[i].conAnt && grupos.length) grupos[grupos.length - 1].push(i);
+    else grupos.push([i]);
+  });
+  return grupos;
 }
 
-export function EtiquetaAviso({ aviso, objetivo, onAplicar, onIgnorar }) {
-  const rojo = aviso.estado === "inconsistente";
-  const info = aviso.estado === "info";
-  const sug = aviso.sugerido ? `RIR ${aviso.sugerido.rir}${aviso.sugerido.pct1rm != null ? ` · ${aviso.sugerido.pct1rm} %` : ""}` : "";
-  const botonBase = { height: 34, borderRadius: 9, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" };
+export function TituloParte({ titulo, minutos, extra }) {
   return (
-    <EtiquetaDesplegable rotulo={`${info ? "ℹ" : "⚠"} ${aviso.corto} ▾`} tono={rojo ? "peligro" : info ? "normal" : "activo"} ancho={330} ariaLabel="Aviso de carga">
-      {(cerrar) => (
-        <>
-          <Cabecera titulo="Guía del objetivo" subtitulo={objetivo ? `${objetivo.etiqueta} · ${objetivo.rir.max == null ? `RIR ${objetivo.rir.min}+` : `RIR ${objetivo.rir.min}–${objetivo.rir.max}`}` : ""} />
-          <div style={{ border: `1px solid ${rojo ? ds.danger : info ? ds.border : ds.accentBorderSubtle}`, background: rojo || info ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
-            <span>{aviso.mensaje}</span>
-            {sug && onAplicar && <button type="button" onClick={() => { onAplicar(); cerrar(); }} style={{ ...botonBase, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700 }}>Aplicar sugerido: {sug}</button>}
-            {onIgnorar && <button type="button" onClick={() => { onIgnorar(); cerrar(); }} style={{ ...botonBase, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontWeight: 600 }}>Dejarlo así, es intencionado</button>}
-          </div>
-          {aviso.fuente && <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px" }}>{aviso.fuente}</span>}
-        </>
-      )}
-    </EtiquetaDesplegable>
-  );
-}
-
-export function FlechasTarea({ onSubir, onBajar, onEliminar }) {
-  const boton = (etq, simbolo, onClick, color) => (
-    <button type="button" aria-label={etq} title={etq} disabled={!onClick} onClick={onClick || undefined}
-      style={{ width: 28, height: ALTO_CELDA, padding: 0, borderRadius: 8, border: `1px solid ${ds.border}`, background: "transparent", color: color || ds.inkSecondary, fontSize: 14, cursor: onClick ? "pointer" : "default", opacity: onClick ? 1 : 0.35 }}>
-      {simbolo}
-    </button>
-  );
-  return (
-    <div style={{ display: "flex", gap: 4, width: ANCHO_FLECHAS, flexShrink: 0 }}>
-      {boton("Subir tarea", "↑", onSubir)}
-      {boton("Bajar tarea", "↓", onBajar)}
-      {boton("Quitar tarea", "×", onEliminar, ds.danger)}
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <b style={{ fontSize: 13, color: ds.ink }}>{titulo}</b>
+      {minutos > 0 && <span style={{ fontFamily: dsF.mono, fontSize: 11.5, color: ds.inkSecondary }}>~{minutos} min</span>}
+      {extra}
     </div>
   );
 }
