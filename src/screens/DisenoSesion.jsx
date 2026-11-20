@@ -41,6 +41,7 @@ import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
 import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, rtfDePct, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 import { aplicarObjetivo, ligarCampo, derivaDeObjetivo, objetivosQueEncajan, objetivosEnZona, textoZonaObjetivo, leerTipicos, guardarTipicos, normalizarTipicos, VALORES_TIPICOS_INICIALES } from "../calc/objetivoTarea.js";
 import { ajustarRecuperaciones, aplicarDescansos, formatearMinutosDiseno } from "../calc/tiempoDisponible.js";
+import { ListaBloquesDiseno, PestanasBloquesDiseno, HojaBloquesDiseno, CajaRecuperacion, GrupoSuperserie, gruposSuperserie, TituloParte, NOMBRE_BLOQUE } from "./DisenoBloques.jsx";
 import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueObjetivo, BotonValoresTipicos, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
@@ -55,6 +56,13 @@ import {
   estimarBloqueTareasSeg,
   sugerirAlternancias,
   formatearDuracionDiseno,
+  estimarTareaEfectivaSeg,
+  estimarCircuitoEfectivoSeg,
+  estimarBloqueEfectivoSeg,
+  estimarTareaConRecuperacionSeg,
+  estimarBloqueConRecuperacionSeg,
+  recuperacionRecomendadaSerieSeg,
+  formatearSegundosDiseno,
 } from "../calc/duracionTarea.js";
 
 // Microciclos del CMJ con caché compartida (para etiquetar sesiones por fecha
@@ -231,6 +239,9 @@ export function tareaADraft(t, ejerciciosById, opts = {}) {
     descanso: t.descanso_seg ?? "",
     alternaCon: t.alterna_con || "",
     alternaConNombre: t.alterna_con ? ejerciciosById.get(t.alterna_con)?.nombre || "" : "",
+    // Objetivo de la tarea (fuerza / hipertrofia / potencia): ahora se guarda para
+    // que la valoración de la sesión sepa qué se pretendía en cada ejercicio.
+    objetivo: t.objetivo || "",
   };
 }
 
@@ -306,8 +317,29 @@ function useReferenciasPorEjercicio(sesionActualId) {
 // (mockup_diseno_sesion.html, campo "desc" de cada builder-head). No es lo
 // mismo que el resumen corto de la navegación lateral, que sale de
 // resumenBloque() y sí es dinámico (nº de tareas, automático/manual, etc).
+// Orden por defecto de los bloques seleccionables. Movilidad ya no es un bloque
+// propio: es una parte de Activación (junto a Cardiovascular y Estiramiento
+// dinámico). El entrenador reordena arrastrando; se guarda en
+// sesiones.orden_bloques y es el orden que ve el jugador.
+export const ORDEN_BLOQUES_BASE = ["activacion", "preventivo", "core", "resistencia", "cmj", "fuerza"];
+export const PARTES_ACTIVACION = [
+  { id: "cardio", nombre: "Cardiovascular" },
+  { id: "mov", nombre: "Movilidad" },
+  { id: "estir", nombre: "Estiramiento dinámico" },
+];
+export function ordenDesdeSesion(valor) {
+  let arr = [];
+  try {
+    arr = Array.isArray(valor) ? valor : valor ? JSON.parse(valor) : [];
+  } catch {
+    arr = [];
+  }
+  const validos = arr.filter((id, i) => ORDEN_BLOQUES_BASE.includes(id) && arr.indexOf(id) === i);
+  return [...validos, ...ORDEN_BLOQUES_BASE.filter((id) => !validos.includes(id))];
+}
+
 const BLOQUES_DISENO = [
-  { id: "activacion", numero: 1, nombre: "Activación", modo: "manual", descripcion: "Bici estática, opcional — se omite si no hay acceso." },
+  { id: "activacion", numero: 1, nombre: "Activación", modo: "manual", descripcion: "Cardiovascular, movilidad y estiramiento dinámico." },
   { id: "movilidad", numero: 2, nombre: "Movilidad", modo: "rotativo", descripcion: "Elige cómo se resuelve este bloque cada sesión." },
   { id: "preventivo", numero: 3, nombre: "Preventivo", modo: "rotativo-categoria", descripcion: "Elige cómo se resuelve este bloque cada sesión." },
   { id: "core", numero: 4, nombre: "Core", modo: "manual", descripcion: "Tareas y circuitos de core, sin carga externa." },
@@ -664,7 +696,7 @@ export function datosSuperserie(tareas, bloque = "Fuerza") {
 const MINUTOS_DISPONIBLES = [10, 15, 20, 25, 30, 40, 45, 60, 75, 90];
 function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, alternancias, onAlternar, onAplicarDescansos, tipicos, onTipico, onRestablecerTipicos }) {
   const objetivoSeg = (Number(minutos) || 0) * 60;
-  const est = estimarBloqueTareasSeg(tareas, circuitos, "Fuerza");
+  const est = estimarBloqueEfectivoSeg(tareas, circuitos);
   if (!est && !objetivoSeg) return null;
   const pasa = objetivoSeg > 0 && est > objetivoSeg;
   const pct = objetivoSeg > 0 ? Math.min(100, Math.round((est / objetivoSeg) * 100)) : 0;
@@ -682,34 +714,8 @@ function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, 
             </>
           )}
         </EtiquetaDesplegable>
-        {est > 0 && <span>Estimado <b>{formatearMinutosDiseno(est)}</b></span>}
+        {est > 0 && <span>Duración efectiva <b>{formatearMinutosDiseno(est)}</b></span>}
         {tipicos && <span style={{ marginLeft: "auto" }}><BotonValoresTipicos tipicos={tipicos} onCambiar={onTipico} onRestablecer={onRestablecerTipicos} /></span>}
-        {pasa && (
-          <EtiquetaDesplegable rotulo="Ajustar ▾" ariaLabel="Ajustar al tiempo disponible" tono="activo" ancho={340}>
-            {(cerrar) => (
-              <>
-                <Cabecera titulo={`Cómo ganar ${formatearMinutosDiseno(est - objetivoSeg)}`} />
-                {ajuste && cambiadas.length > 0 && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 4, border: `1px solid ${ds.border}`, background: ds.surface, borderRadius: 10, padding: "8px 10px" }}>
-                    <b style={{ fontSize: 12.5 }}>Acortar recuperaciones (mínimo 60 s)</b>
-                    <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>
-                      {cambiadas.map(([k, seg]) => { const t = tareas.find((x) => String(x.key) === String(k)); return `${nombrePorKey.get(t?.key) || "Tarea"}: ${descansoEfectivoSeg(t, "Fuerza")} → ${seg} s`; }).join(" · ")}. Quedaría en {formatearMinutosDiseno(ajuste.totalSeg)}{ajuste.alcanza ? "." : " y aun así no llega: habría que quitar series o ejercicios."}
-                    </span>
-                    <button type="button" onClick={() => { onAplicarDescansos(ajuste.descansos); cerrar(); }} style={{ height: 36, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>Aplicar</button>
-                  </div>
-                )}
-                {alternancias.map(({ a, b, ahorro }) => (
-                  <div key={`${a.key}-${b.key}`} style={{ display: "flex", flexDirection: "column", gap: 4, border: `1px solid ${ds.border}`, background: ds.surface, borderRadius: 10, padding: "8px 10px" }}>
-                    <b style={{ fontSize: 12.5 }}>Superserie {a.nombre} + {b.nombre}</b>
-                    <span style={{ fontSize: 11.5, color: ds.inkSecondary, lineHeight: 1.35 }}>Zonas distintas. Ahorra {formatearMinutosDiseno(ahorro)} sin recortar descansos.</span>
-                    <button type="button" onClick={() => { onAlternar(a, b, "Fuerza"); cerrar(); }} style={{ height: 36, borderRadius: 9, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" }}>Unir en superserie</button>
-                  </div>
-                ))}
-                <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Menos recuperación suele bajar las repeticiones de las series siguientes. El tiempo disponible es solo una ayuda de diseño: no se guarda en la sesión.</span>
-              </>
-            )}
-          </EtiquetaDesplegable>
-        )}
       </div>
       {objetivoSeg > 0 && (
         <>
@@ -717,7 +723,7 @@ function PanelTiempoDisponible({ tareas, circuitos, minutos, onMinutos, ajuste, 
             <div style={{ width: `${pct}%`, height: "100%", borderRadius: 6, background: pasa ? ds.danger : ds.accent }} />
           </div>
           <span role="status" style={{ fontSize: 12, color: pasa ? ds.danger : ds.inkSecondary, fontWeight: pasa ? 600 : 400 }}>
-            {pasa ? `Te pasas ${formatearMinutosDiseno(est - objetivoSeg)} de los ${minutos} min. Las recuperaciones recomendadas no caben.` : `Cabe: sobran ${formatearMinutosDiseno(objetivoSeg - est)}.`}
+            {pasa ? `El trabajo efectivo se pasa ${formatearMinutosDiseno(est - objetivoSeg)} de los ${minutos} min.` : `El trabajo efectivo cabe: sobran ${formatearMinutosDiseno(objetivoSeg - est)} para las recuperaciones.`}
           </span>
         </>
       )}
@@ -736,7 +742,6 @@ export function EncabezadoTablaTareas({ mostrarCarga }) {
       {mostrarCarga && col("%1RM")}
       {mostrarCarga && col("RIR")}
       {col("Repeticiones")}
-      {col("Recuperación")}
       <span style={{ width: ANCHO_FLECHAS, flexShrink: 0 }} />
     </div>
   );
@@ -780,8 +785,6 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const textoZonaPct = zp ? (zp.min === 0 ? `≤${zp.max}` : `${zp.min}–${zp.max}`) : "";
   const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
   const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
-  const autoRecNum = Number(tarea.series) > 1 ? Number(descansoRecomendadoSeg(tarea, mostrarCarga ? "Fuerza" : "Core")) || 0 : 0;
-  const autoRec = autoRecNum ? String(autoRecNum) : "—";
   const avRir = aviso && (aviso.campo === "rir" || aviso.campo === "ambos") ? aviso.estado : null;
   const avPct = aviso && (aviso.campo === "pct" || aviso.campo === "ambos") ? aviso.estado : null;
   const avReps = aviso && aviso.campo === "reps" && aviso.estado === "fuera" ? "fuera" : null;
@@ -798,18 +801,6 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const encajan = objetivosQueEncajan(tarea);
   const deriva = derivaDeObjetivo(tarea);
   const hayValores = Number(tarea.pct1rm) > 0 || (tarea.rir !== "" && tarea.rir != null) || (tarea.cantidad !== "" && tarea.cantidad != null);
-  const opcRec = nums([30, 45, 60, 90, 120, 150, 180, 240, 300]);
-  if (descansoAjustado && descansoAjustado !== autoRecNum) {
-    const i = opcRec.findIndex((o) => o.v === String(descansoAjustado));
-    if (i >= 0) opcRec[i] = { ...opcRec[i], zona: true, nota: "ajustada" };
-    else opcRec.unshift({ v: String(descansoAjustado), t: `Ajustada a tu tiempo (${descansoAjustado} s)`, zona: true });
-  }
-  const pieRec = (
-    <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>
-      {descansoAjustado && descansoAjustado !== autoRecNum ? `Con tu tiempo disponible la recomendada (${autoRecNum} s) no cabe: ajustada serían ${descansoAjustado} s. ` : ""}
-      {enSuper ? "En superserie, esta pausa es la que haces tras completar A y B." : "Menos recuperación suele bajar las repeticiones de las series siguientes. Una superserie recorta tiempo sin acortar el descanso de cada músculo."}
-    </span>
-  );
   const claseLetra = enSuper ? { background: ds.accent, color: ds.accentInk } : { background: ds.border, color: ds.accent };
   const letra = orden != null && (
     <span style={{ minWidth: 26, height: 26, padding: "0 5px", boxSizing: "border-box", borderRadius: 8, ...claseLetra, fontFamily: dsF.mono, fontSize: 11.5, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{orden}</span>
@@ -843,11 +834,10 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
   const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={cambiarCampo("pct1rm")} opciones={pctOpc} extra={conSugerencias ? bloqueObj("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
   const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={cambiarCampo("rir")} opciones={rirOpc} extra={conSugerencias ? bloqueObj("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
-  const celdaRec = <CeldaDesplegable key="rec" movil={movil} etiqueta="Recuperación" titulo="Recuperación" subtitulo="segundos entre series" valor={tarea.descanso} placeholder={autoRec} apagada={Number(tarea.series) <= 1} resaltar onCambiar={(v) => onCambiar({ ...tarea, descanso: v })} autoOpcion={`Recomendada (${autoRec} s)`} opciones={opcRec} pie={pieRec} />;
   const celdas = mostrarCarga ? (
-    <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}{celdaRec}</>
+    <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}</>
   ) : (
-    <>{celdaSeries}{celdaReps}{celdaRec}</>
+    <>{celdaSeries}{celdaReps}</>
   );
   if (movil) {
     return (
@@ -859,7 +849,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
         </div>
         {etiquetas}
         {lineaAjuste}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${mostrarCarga ? 5 : 3}, minmax(0, 1fr))`, gap: 4 }}>{celdas}</div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${mostrarCarga ? 4 : 2}, minmax(0, 1fr))`, gap: 4 }}>{celdas}</div>
       </div>
     );
   }
@@ -879,7 +869,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
 }
 
-export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null }) {
+export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null, sinBordeSuperserie = false }) {
   // Una sola fila para todos los tamaños: en pantalla ancha todo en una línea;
   // en móvil, en dos niveles. Siempre con los mismos desplegables.
   const movil = useAnchoVentana() < ANCHO_MIN_TABLA;
@@ -914,9 +904,13 @@ export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, mate
   }, [tarea.abrirEditor]);
 
   const enSuperserie = !!superserie && (superserie.conAnt || superserie.conSig);
+  const parSuperserie = enSuperserie && superserie.etiqueta ? String(superserie.etiqueta).replace(/[a-z]$/, "") : "";
   return (
-    <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto || aviso ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", alignItems: "center", gap: 4 }}>
-      <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onAlternarEnlace={onAlternarEnlace} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} descansoAjustado={descansoAjustado} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
+    <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto || aviso ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie && !sinBordeSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
+      <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
+        <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onAlternarEnlace={onAlternarEnlace} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} descansoAjustado={descansoAjustado} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
+      </div>
+      <CajaRecuperacion tarea={tarea} bloque={mostrarCarga ? "Fuerza" : "Core"} etiquetaPar={parSuperserie} />
     </div>
   );
 }
@@ -1303,7 +1297,7 @@ const EnSesionContext = React.createContext(() => 0);
 // Hueco (columna derecha) donde la biblioteca se acopla en iPad horizontal / ordenador.
 const BibliotecaSlotContext = React.createContext(null);
 
-export function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
+export function SelectorEjercicioReal({ ejercicios, bloque, titulo = "", onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
   const [abierto, setAbierto] = useState(false);
   const [filtro, setFiltro] = useState("");
   const [zonaFiltro, setZonaFiltro] = useState("");
@@ -1389,7 +1383,7 @@ export function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona
       setAviso(`${conZona.length} añadidos. Faltan zonas corporales.`);
       return;
     }
-    setAviso(`${conZona.length} ${conZona.length === 1 ? "ejercicio añadido" : "ejercicios añadidos"} a ${bloque || "la sesión"}`);
+    setAviso(`${conZona.length} ${conZona.length === 1 ? "ejercicio añadido" : "ejercicios añadidos"} a ${titulo || bloque || "la sesión"}`);
     if (!acoplado) cerrarTodo();
   };
 
@@ -1544,7 +1538,7 @@ export function SelectorEjercicioReal({ ejercicios, bloque, onAdd, onAsignarZona
         <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: lateralPanel ? "stretch" : "flex-end", justifyContent: lateralPanel ? "flex-end" : "center", padding: 0 }}>
           <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: lateralPanel ? 470 : 560, height: lateralPanel ? "100%" : "92dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: lateralPanel ? 0 : "20px 20px 0 0", boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12, paddingBottom: "calc(12px + env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>Añadir a {bloque || "la sesión"}</span>
+              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>Añadir a {titulo || bloque || "la sesión"}</span>
               <button type="button" aria-label="Cerrar" onClick={cerrarTodo} style={{ width: 44, height: 44, background: "none", border: "none", color: ds.inkMuted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
             </div>
             {cuerpo}
@@ -1930,7 +1924,7 @@ function BarraResumenDisenoReal({ resumen, bloqueActivo, onIrBloque, compacta = 
     <>
       {compacta ? (
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-          <div style={{ textAlign: "right", lineHeight: 1.2 }} title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos.">
+          <div style={{ textAlign: "right", lineHeight: 1.2 }} title="Duración efectiva: solo tiempo de trabajo (4 s por repetición o el tiempo pautado), sin recuperación ni transiciones. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos.">
             <div style={{ fontFamily: dsF.mono, fontWeight: 800, fontSize: 16, color: ds.accent }}>~{formatearDuracionDiseno(totalSeg)}</div>
             {fuerza.series ? <div style={{ fontSize: 11.5, color: ds.inkSecondary }}>{fuerza.series} series de fuerza</div> : null}
           </div>
@@ -1945,7 +1939,7 @@ function BarraResumenDisenoReal({ resumen, bloqueActivo, onIrBloque, compacta = 
         </div>
       ) : (
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 10, padding: "6px 10px" }}>
-        <span title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 15, fontWeight: 700, color: ds.accent, flexShrink: 0 }}>
+        <span title="Duración efectiva: solo tiempo de trabajo (4 s por repetición o el tiempo pautado), sin recuperación ni transiciones. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 15, fontWeight: 700, color: ds.accent, flexShrink: 0 }}>
           ~{formatearDuracionDiseno(totalSeg)}
         </span>
         <div style={{ display: "flex", alignItems: "center", gap: 6, flex: 1, minWidth: 0, overflowX: "auto" }}>
@@ -2020,7 +2014,7 @@ function ResumenSesionDisenoReal({ resumen, anchoDesktop, bloqueActivo, onIrBloq
     >
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
         <span style={{ fontFamily: dsF.display, fontSize: 13, fontWeight: 700 }}>Resumen</span>
-        <span title="Tiempo orientativo: 4 s por repetición, descansos entre series y 30 s por cambio de ejercicio. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 16, fontWeight: 700, color: ds.accent }}>
+        <span title="Duración efectiva: solo tiempo de trabajo (4 s por repetición o el tiempo pautado), sin recuperación ni transiciones. Movilidad 5 min, preventivo 3 min por ejercicio y CMJ 5 min son valores fijos." style={{ fontFamily: dsF.mono, fontSize: 16, fontWeight: 700, color: ds.accent }}>
           ~{formatearDuracionDiseno(totalSeg)}
         </span>
       </div>
@@ -2131,7 +2125,7 @@ export const COLOR_BLOQUE_DISENO = { activacion: "#7C6FB0", movilidad: "#5FA87A"
 export function TarjetaBloqueDiseno({ id, abierto, onToggle, resumen, vacio, color, children }) {
   const info = BLOQUES_DISENO.find((x) => x.id === id) || { nombre: id };
   return (
-    <div style={{ background: abierto ? ds.surfaceRaised : ds.surface, border: `1px solid ${abierto ? color : ds.border}`, borderLeft: `4px solid ${color}`, borderRadius: 12, overflow: "hidden" }}>
+    <div style={{ background: abierto ? ds.surfaceRaised : ds.surface, borderStyle: "solid", borderWidth: "1px 1px 1px 4px", borderColor: `${abierto ? color : ds.border} ${abierto ? color : ds.border} ${abierto ? color : ds.border} ${color}`, borderRadius: 12, overflow: "hidden" }}>
       <div onClick={onToggle} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", cursor: "pointer" }}>
         <span style={{ width: 28, height: 28, borderRadius: 8, background: color, color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <IconoBloqueDiseno id={id} />
@@ -2236,9 +2230,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // PantallaEntrenadorAncha para el resto de pantallas "anchas" de la app.
   const ancho = useAnchoVentana();
   const anchoDesktop = ancho >= 900;
-  const lateralBloques = ancho >= 1320;
-  const [slotBiblio, setSlotBiblio] = useState(null);
-  const [destinoBiblio, setDestinoBiblio] = useState("fuerza");
+  const lateralBloques = ancho >= 1000;
+  const [mostrarResumen, setMostrarResumen] = useState(false);
+  const [detalleAbierto, setDetalleAbierto] = useState(false);
   const [ajustesAbiertos, setAjustesAbiertos] = useState(false);
   // Le dice a SelectorEjercicioReal cómo guardar la zona corporal de un
   // ejercicio antiguo que todavía no la tenía, y refresca la lista local
@@ -2284,12 +2278,25 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   // referirse, así que se deja en null y el componente usa la estimación
   // poblacional en su lugar (nunca el test de uno aplicado a todos).
   const jugadorReferenciaResistencia = targetPlayerIds && targetPlayerIds.length === 1 ? players.find((p) => p.id === targetPlayerIds[0]) || null : null;
-  const [activacionActiva, setActivacionActiva] = useState(base ? !!base.activacion_activa : true);
-  const [activacionEjercicioId, setActivacionEjercicioId] = useState("");
-  const [activacionEjercicioNombre, setActivacionEjercicioNombre] = useState("");
-  const [activacionMateriales, setActivacionMateriales] = useState([]);
-  const [duracionActivacion, setDuracionActivacion] = useState("8");
-  const [unidadActivacion, setUnidadActivacion] = useState("minutos");
+  // Activación = tres partes seleccionables (Cardiovascular, Movilidad,
+  // Estiramiento dinámico). Cardiovascular y Estiramiento llevan ejercicios de
+  // la biblioteca (tareas con bloque "Activación" y parte "cardio" / "estir");
+  // Movilidad conserva su rotación automática por jugador (modoMovilidad).
+  // Una sesión nueva arranca solo con Activación marcada.
+  const [subAct, setSubAct] = useState({ cardio: true, mov: true, estir: true });
+  const [tareasCardio, setTareasCardio] = useState([]);
+  const [tareasEstir, setTareasEstir] = useState([]);
+  const preventivoInicial = (() => {
+    if (!base) return 0;
+    const v = base.preventivo_activo;
+    if (typeof v === "boolean") return v ? 1 : 0;
+    return Number(v) || 0;
+  })();
+  const [marcados, setMarcados] = useState({ activacion: true, preventivo: false, core: false, resistencia: false, fuerza: false });
+  const [ordenBloques, setOrdenBloques] = useState(() => ordenDesdeSesion(base?.orden_bloques));
+  const [confirmarBorrado, setConfirmarBorrado] = useState(null); // id de bloque o "sub:<parte>"
+  const [hojaBloques, setHojaBloques] = useState(false);
+  const [objetivoTareas, setObjetivoTareas] = useState(""); // objetivo para tareas nuevas de Fuerza
   // A diferencia de Activación, CMJ no es rutina de cada sesión — es un día
   // de medición puntual, así que por defecto va desactivado en una sesión
   // nueva (nunca se enciende solo). Tampoco hace falta elegir ejercicio: es
@@ -2340,11 +2347,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
 
   // Paso activo en el nav de la izquierda — el constructor (columna central)
   // solo renderiza el contenido de este bloque, en vez de los 7 apilados.
-  const [bloqueActivo, setBloqueActivo] = useState(BLOQUES_DISENO[0].id);
-  // La biblioteca fija añade al bloque con el que se está trabajando.
-  useEffect(() => {
-    if (["fuerza", "core", "preventivo"].includes(bloqueActivo)) setDestinoBiblio(bloqueActivo);
-  }, [bloqueActivo]);
+  const [bloqueActivoRaw, setBloqueActivo] = useState(BLOQUES_DISENO[0].id);
+  // Movilidad ya no es un bloque: llevar a «movilidad» abre Activación.
+  const bloqueActivo = bloqueActivoRaw === "movilidad" ? "activacion" : bloqueActivoRaw;
 
   const [tareasCore, setTareasCore] = useState([]);
   const [circuitosCore, setCircuitosCore] = useState([]);
@@ -2371,7 +2376,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   const [circuitosFuerza, setCircuitosFuerza] = useState([]);
 
   const [previousTareaIds, setPreviousTareaIds] = useState([]);
-  const [activacionTareaId, setActivacionTareaId] = useState(null);
   const [cmjTareaId, setCmjTareaId] = useState(null);
   const [movilidadTareaIdsPorFecha, setMovilidadTareaIdsPorFecha] = useState({});
   const [preventivoTareaIdsPorFecha, setPreventivoTareaIdsPorFecha] = useState({}); // fecha -> [id, id, ...]
@@ -2412,17 +2416,21 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     setCircuitosResistencia(agruparCircuitosDeTareas(tareas, ejerciciosById, "Resistencia", { nuevo: true }));
     setTareasFuerza(porBloque("Fuerza", progresion));
     setCircuitosFuerza(agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true, ...progresion }));
-    const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
-    if (activacionTarea) {
-      setDuracionActivacion(String(activacionTarea.cantidad || "8"));
-      setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
-      setActivacionMateriales(parseMateriales(activacionTarea.material));
-      const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
-      if (eAct) {
-        setActivacionEjercicioId(eAct.id);
-        setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
-      }
-    }
+    const tareasAct = tareas.filter((t) => t.bloque_sesion === "Activación");
+    const cardio = tareasAct.filter((t) => t.parte !== "estir").map((t) => tareaADraft(t, ejerciciosById, { nuevo: true }));
+    const estir = tareasAct.filter((t) => t.parte === "estir").map((t) => tareaADraft(t, ejerciciosById, { nuevo: true }));
+    const hayMov = tareas.some((t) => t.bloque_sesion === "Movilidad");
+    setTareasCardio(cardio);
+    setTareasEstir(estir);
+    setSubAct({ cardio: cardio.length > 0, mov: hayMov, estir: estir.length > 0 });
+    if (!hayMov) setModoMovilidad("no_incluir");
+    setMarcados({
+      activacion: cardio.length > 0 || estir.length > 0 || hayMov,
+      preventivo: preventivoInicial > 0,
+      core: porBloque("Core").length > 0 || agruparCircuitosDeTareas(tareas, ejerciciosById, "Core", { nuevo: true }).length > 0,
+      resistencia: porBloque("Resistencia").length > 0 || agruparCircuitosDeTareas(tareas, ejerciciosById, "Resistencia", { nuevo: true }).length > 0,
+      fuerza: porBloque("Fuerza").length > 0 || agruparCircuitosDeTareas(tareas, ejerciciosById, "Fuerza", { nuevo: true }).length > 0,
+    });
     const cmjTarea = tareas.find((t) => t.bloque_sesion === "CMJ");
     if (cmjTarea) setCmjActiva(true);
     setCargandoExistente(false);
@@ -2453,64 +2461,10 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       if (cancelled) return;
       setReadOnly(hayRegistro);
       const ejerciciosById = new Map(ejercicios.map((e) => [e.id, e]));
-      const toDraft = (t) => {
-        let materiales = [];
-        try {
-          materiales = t.material ? JSON.parse(t.material) : [];
-        } catch {
-          materiales = [];
-        }
-        // Sesiones diseñadas antes de este cambio guardaban Resistencia como
-        // "intervalos/trabajo/descanso" en las columnas genéricas de series/
-        // cantidad/rir — se leen igual si no hay resistencia_data, para no
-        // perder lo ya diseñado.
-        let resistencia = { tipo: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg" };
-        if (t.resistencia_data) {
-          try {
-            resistencia = { ...resistencia, ...JSON.parse(t.resistencia_data) };
-          } catch {
-            /* se queda el valor por defecto */
-          }
-        } else if (t.bloque_sesion === "Resistencia" && (t.series || t.cantidad || t.rir)) {
-          resistencia = { ...resistencia, tipo: "hiit", intervalos: t.series ?? "", tiempo: t.cantidad ?? "", recuperacion: t.rir ?? "" };
-        }
-        const e = ejerciciosById.get(t.ejercicio_id) || {};
-        return {
-          key: t.id,
-          tareaId: t.id,
-          nombre: e.nombre || "(ejercicio eliminado)",
-          ejercicioId: t.ejercicio_id,
-          gif: e.gif_url || "",
-          modo: t.modo || "reps",
-          series: t.series ?? "",
-          cantidad: t.cantidad ?? "",
-          rir: t.rir ?? "",
-          modoCarga: t.modo_carga === "pct1rm" ? "pct1rm" : "rir",
-          pct1rm: t.pct1rm ?? "",
-          tipoResistencia: t.tipo_resistencia || "Peso libre",
-          materiales,
-          lateralidad: t.lateralidad || "bilateral",
-          nota: t.nota || "",
-          tipoResistenciaCardio: resistencia.tipo,
-          capacidad: resistencia.capacidad,
-          modalidad: resistencia.modalidad,
-          estructuraManual: resistencia.estructuraManual,
-          bloques: resistencia.bloques,
-          intervalos: resistencia.intervalos,
-          tiempo: resistencia.tiempo,
-          tiempoUnidad: resistencia.tiempoUnidad,
-          intensidad: resistencia.intensidad,
-          distancia: resistencia.distancia,
-          duracion: resistencia.duracion,
-          rpe: resistencia.rpe,
-          recuperacion: resistencia.recuperacion,
-          recuperacionUnidad: resistencia.recuperacionUnidad,
-          circuito_id: t.circuito_id || "",
-          orden_en_circuito: t.orden_en_circuito || "",
-        };
-      };
-
-      const porBloque = (nombreBloque) => tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id).map(toDraft);
+      // Mismo mapeo que usa Reutilizar (tareaADraft): conserva descanso, superseries y objetivo.
+      const toDraft = (t) => tareaADraft(t, ejerciciosById);
+      const ordenar = (arr) => arr.slice().sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0));
+      const porBloque = (nombreBloque) => ordenar(tareas.filter((t) => t.bloque_sesion === nombreBloque && !t.circuito_id)).map(toDraft);
       const circuitosDelBloque = (nombreBloque) =>
         circuitos
           .filter((c) => c.bloque_sesion === nombreBloque)
@@ -2532,18 +2486,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       setCircuitosResistencia(circuitosDelBloque("Resistencia"));
       setTareasFuerza(porBloque("Fuerza"));
       setCircuitosFuerza(circuitosDelBloque("Fuerza"));
-      const activacionTarea = tareas.find((t) => t.bloque_sesion === "Activación");
-      if (activacionTarea) {
-        setDuracionActivacion(String(activacionTarea.cantidad || "8"));
-        setUnidadActivacion(activacionTarea.modo === "tiempo" ? "segundos" : "minutos");
-        setActivacionMateriales(parseMateriales(activacionTarea.material));
-        setActivacionTareaId(activacionTarea.id);
-        const eAct = ejerciciosById.get(activacionTarea.ejercicio_id);
-        if (eAct) {
-          setActivacionEjercicioId(eAct.id);
-          setActivacionEjercicioNombre(eAct.nombre || "(ejercicio eliminado)");
-        }
-      }
+      // Activación: las tareas con parte "estir" son Estiramiento dinámico; el
+      // resto (incluida la tarea única de sesiones antiguas) es Cardiovascular.
+      const tareasAct = ordenar(tareas.filter((t) => t.bloque_sesion === "Activación"));
+      const cardio = tareasAct.filter((t) => t.parte !== "estir").map(toDraft);
+      const estir = tareasAct.filter((t) => t.parte === "estir").map(toDraft);
+      setTareasCardio(cardio);
+      setTareasEstir(estir);
       const cmjTarea = tareas.find((t) => t.bloque_sesion === "CMJ");
       if (cmjTarea) {
         setCmjActiva(true);
@@ -2619,6 +2568,17 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           setModoPreventivo("automatico");
         }
       }
+      // Bloques marcados: los que tienen contenido (o están activos) en lo ya
+      // guardado. Movilidad y Preventivo según el modo inferido arriba.
+      const hayMovilidadGuardada = tareasMovilidad.length > 0;
+      setSubAct({ cardio: cardio.length > 0, mov: hayMovilidadGuardada, estir: estir.length > 0 });
+      setMarcados({
+        activacion: cardio.length > 0 || estir.length > 0 || hayMovilidadGuardada,
+        preventivo: fechasPrev.length > 0,
+        core: porBloque("Core").length > 0 || circuitosDelBloque("Core").length > 0,
+        resistencia: porBloque("Resistencia").length > 0 || circuitosDelBloque("Resistencia").length > 0,
+        fuerza: porBloque("Fuerza").length > 0 || circuitosDelBloque("Fuerza").length > 0,
+      });
       setPreviousTareaIds(tareas.map((t) => t.id));
       setPreviousCircuitoIds(circuitos.map((c) => c.id));
       setCargandoExistente(false);
@@ -2636,7 +2596,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   };
   const removeFecha = (f) => setFechas((prev) => prev.filter((d) => d !== f));
 
-  const agregarTarea = (bloqueSetter) => async (ejercicioOClic) => {
+  const agregarTarea = (bloqueSetter, base = null) => async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
     let gifUrl = ejercicioOClic.gif_url || "";
@@ -2652,24 +2612,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       }
     }
     const conCarga = bloqueSetter === setTareasFuerza;
-    bloqueSetter((prev) => [...prev, heredarDeAnterior(nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl }), prev[prev.length - 1], conCarga)]);
-  };
-
-  // Igual que en Resistencia: la modalidad ES la elección de "qué
-  // ejercicio" para Activación — ya no se abre el buscador de la
-  // Biblioteca, se resuelve (o se crea la primera vez) el ejercicio con el
-  // nombre de la modalidad elegida.
-  const cambiarModalidadActivacion = async (modalidadKey) => {
-    const nombreModalidad = MODALIDADES_ACTIVACION[modalidadKey];
-    try {
-      const creado = await resolveEjercicio(ejercicios, { nombre: nombreModalidad, bloque: "", tags_descriptivos: [] });
-      addEjercicioLocal(creado);
-      setActivacionEjercicioId(creado.id);
-      setActivacionEjercicioNombre(creado.nombre);
-      setActivacionMateriales([]); // ejercicio nuevo -> el material anterior no tiene por qué aplicar
-    } catch (e) {
-      setError("No se pudo guardar la modalidad de activación. Comprueba tu conexión e inténtalo de nuevo.");
-    }
+    bloqueSetter((prev) => {
+      let nueva = heredarDeAnterior(nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl }), prev[prev.length - 1], conCarga);
+      if (base) nueva = { ...nueva, ...base };
+      // Objetivo elegido para la sesión: las tareas nuevas de Fuerza lo heredan.
+      if (conCarga && objetivoTareas && !nueva.objetivo) nueva = aplicarObjetivo(nueva, objetivoTareas, leerTipicos()).tarea;
+      return [...prev, nueva];
+    });
   };
 
   // Movilidad en modo manual: una única tarea (a diferencia de Core/
@@ -2692,6 +2641,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     }
     setTareaMovilidadManual(nuevaTareaBase({ id: ejercicioId, nombre, gif_url: gifUrl }));
   };
+
+  // Modos efectivos: un bloque desmarcado no se guarda aunque conserve su modo.
+  const modoMovilidadEf = marcados.activacion && subAct.mov ? modoMovilidad : "no_incluir";
+  const modoPreventivoEf = marcados.preventivo ? modoPreventivo : "no_incluir";
+  const tareasCardioEf = marcados.activacion && subAct.cardio ? tareasCardio : [];
+  const tareasEstirEf = marcados.activacion && subAct.estir ? tareasEstir : [];
+  const activacionEfectiva = tareasCardioEf.length > 0 || tareasEstirEf.length > 0 || modoMovilidadEf !== "no_incluir";
 
   const guardar = async (comoBorrador = false) => {
     setError("");
@@ -2718,9 +2674,11 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         objetivo,
         nombre: nombre.trim(),
         jugadores_destino: targetPlayerIds,
-        preventivo_activo: preventivoCantidad,
-        activacion_activa: activacionActiva,
+        preventivo_activo: marcados.preventivo ? preventivoCantidad : 0,
+        activacion_activa: activacionEfectiva,
         cmj_activo: cmjActiva,
+        // Orden de bloques elegido por el entrenador: es el que ve el jugador.
+        orden_bloques: JSON.stringify(ordenBloques),
         lote_origen_id: "",
         // "enviada" aquí significa "publicada, visible para el jugador" —
         // no que el jugador ya haya mandado datos. Un borrador se guarda con
@@ -2770,7 +2728,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           recuperacionUnidad: t.recuperacionUnidad || "",
         });
 
-      const guardarTareaSuelta = async (t, bloqueNombre, mostrarCarga) => {
+      const guardarTareaSuelta = async (t, bloqueNombre, mostrarCarga, parte = "", posicion = 0) => {
         const ejercicioId = t.ejercicioId;
         const esResistencia = bloqueNombre === "Resistencia";
         const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
@@ -2797,6 +2755,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           alterna_con: t.alternaCon || "",
           circuito_id: "",
           orden_en_circuito: "",
+          parte,
+          orden: posicion + 1,
+          objetivo: bloqueNombre === "Fuerza" ? t.objetivo || "" : "",
         });
         keepTareaIds.add(saved.id);
       };
@@ -2827,50 +2788,22 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
               alterna_con: "",
               circuito_id: savedCircuito.id,
               orden_en_circuito: i + 1,
+              parte: "",
+              orden: i + 1,
+              objetivo: bloqueNombre === "Fuerza" ? t.objetivo || "" : "",
             });
             keepTareaIds.add(saved.id);
           })
         );
       };
 
-      // Activación: una única tarea con el ejercicio que el entrenador elija
-      // de la biblioteca (ya no fijo a "Bici estática"). Si se deja el
-      // interruptor activado pero no se elige ejercicio, ANTES no se
-      // guardaba ninguna tarea y la Activación desaparecía sin más del plan
-      // del jugador (nada avisaba de que faltaba elegirlo) — ahora, en ese
-      // caso, se resuelve "Bici estática" como ejercicio por defecto (el
-      // comportamiento fijo que tenía Activación antes de poder elegir
-      // ejercicio), así que activarla ya basta para que aparezca.
-      let activacionEjercicioIdFinal = activacionEjercicioId;
-      if (activacionActiva && !activacionEjercicioIdFinal) {
-        try {
-          const porDefecto = await resolveEjercicio(ejercicios, { nombre: "Bici estática", bloque: "", tags_descriptivos: [] });
-          activacionEjercicioIdFinal = porDefecto.id;
-          addEjercicioLocal(porDefecto);
-        } catch (e) {
-          // Si ni siquiera se puede resolver el ejercicio por defecto (sin
-          // conexión, etc.), se sigue sin tarea de Activación esta vez, pero
-          // el resto de la sesión se guarda igual.
-        }
-      }
-      if (activacionActiva && activacionEjercicioIdFinal) {
-        const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
-          id: activacionTareaId || undefined,
-          sesion_id: savedSesion.id,
-          bloque_sesion: "Activación",
-          ejercicio_id: activacionEjercicioIdFinal,
-          modo: unidadActivacion === "segundos" ? "tiempo" : "minutos",
-          series: "",
-          cantidad: duracionActivacion,
-          rir: "",
-          tipo_resistencia: "",
-          material: JSON.stringify(activacionMateriales || []),
-          nota: "",
-          circuito_id: "",
-          orden_en_circuito: "",
-        });
-        keepTareaIds.add(saved.id);
-      }
+      // Activación: ejercicios de Cardiovascular y de Estiramiento dinámico
+      // (tareas de la biblioteca, cada una con su duración y material). Cada
+      // una lleva su parte ("cardio" / "estir"); la Movilidad se guarda más
+      // abajo con su rotación. Las sesiones antiguas, con una sola tarea de
+      // Activación sin parte, se abren como Cardiovascular.
+      await Promise.all(tareasCardioEf.map((t, i) => guardarTareaSuelta(t, "Activación", false, "cardio", i)));
+      await Promise.all(tareasEstirEf.map((t, i) => guardarTareaSuelta(t, "Activación", false, "estir", i)));
 
       // CMJ: día de medición puntual — no es una tarea configurable, es
       // siempre el mismo test. No hace falta que el entrenador elija nada:
@@ -2904,7 +2837,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       // automática — una fecha, un turno. Cada fecha de la sesión avanza el
       // puntero por separado, así que fechas distintas de la misma sesión
       // pueden tocar ejercicios distintos.
-      if (modoMovilidad === "manual" && tareaMovilidadManual) {
+      if (modoMovilidadEf === "manual" && tareaMovilidadManual) {
         for (const fecha of fechas) {
           const saved = await guardarFilaConParcial(parcialRef.current, "tareas", {
             id: movilidadTareaIdsPorFecha[fecha] || undefined,
@@ -2925,7 +2858,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           });
           keepTareaIds.add(saved.id);
         }
-      } else if (modoMovilidad === "automatico") {
+      } else if (modoMovilidadEf === "automatico") {
         const poolMovilidad = ejercicios
           .filter((e) => e.bloque === "Movilidad")
           .slice()
@@ -2975,7 +2908,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       // avanza el puntero de rotación por separado. Si no hay una única
       // categoría común, se omite sin avisar con error — es una omisión
       // esperada.
-      if (modoPreventivo === "manual" && tareasPreventivoManual.length) {
+      if (modoPreventivoEf === "manual" && tareasPreventivoManual.length) {
         for (const fecha of fechas) {
           const idsExistentes = preventivoTareaIdsPorFecha[fecha] || [];
           for (let i = 0; i < tareasPreventivoManual.length; i++) {
@@ -3000,7 +2933,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
             keepTareaIds.add(saved.id);
           }
         }
-      } else if (modoPreventivo === "automatico" && preventivoCantidad > 0) {
+      } else if (modoPreventivoEf === "automatico" && preventivoCantidad > 0) {
         // Conservar lo ya asignado en las fechas que ya tienen Preventivo.
         const fechasPreventivoASortear = [];
         for (const fecha of fechas) {
@@ -3053,11 +2986,11 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         }
       }
 
-      await Promise.all(tareasCore.map((t) => guardarTareaSuelta(t, "Core", false)));
+      await Promise.all(tareasCore.map((t, i) => guardarTareaSuelta(t, "Core", false, "", i)));
       await Promise.all(circuitosCore.map((c) => guardarCircuito(c, "Core", false)));
-      await Promise.all(tareasResistencia.map((t) => guardarTareaSuelta(t, "Resistencia", false)));
+      await Promise.all(tareasResistencia.map((t, i) => guardarTareaSuelta(t, "Resistencia", false, "", i)));
       await Promise.all(circuitosResistencia.map((c) => guardarCircuito(c, "Resistencia", false)));
-      await Promise.all(tareasFuerza.map((t) => guardarTareaSuelta(t, "Fuerza", true)));
+      await Promise.all(tareasFuerza.map((t, i) => guardarTareaSuelta(t, "Fuerza", true, "", i)));
       await Promise.all(circuitosFuerza.map((c) => guardarCircuito(c, "Fuerza", true)));
 
       const tareasABorrar = [...new Set([...previousTareaIds, ...parcialRef.current.tareas])].filter((id) => !keepTareaIds.has(id));
@@ -3078,7 +3011,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       onGuardado?.();
     } catch (e) {
       setError(
-        e?.message === "FALTA_SQL_PARA_JUGADORES"
+        e?.message === "FALTA_SQL_ORDEN_PARTES"
+          ? "Para guardar el orden de bloques y las partes de Activación hay que ejecutar antes sql/add_orden_partes_objetivo.sql en Supabase. No se ha publicado la sesión."
+          : e?.message === "FALTA_SQL_PARA_JUGADORES"
           ? "Para dar Preventivo distinto a cada categoría hay que ejecutar antes sql/add_para_jugadores.sql en Supabase. No se ha publicado la sesión."
           : `No se pudo guardar. Comprueba tu conexión e inténtalo de nuevo.${e?.message ? ` (Detalle: ${e.message})` : ""}`
       );
@@ -3086,46 +3021,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       setGuardando(false);
     }
   };
-
-  // Resumen de una línea por paso del nav (columna izquierda) — siempre
-  // derivado de las variables de estado reales de cada bloque, nunca
-  // inventado. Ver mockup_diseno_sesion.html L296-333 para el patrón
-  // ("Bici · 8 min", "Automática", "2 tareas"...).
-  const resumenBloque = (id) => {
-    if (id === "activacion") {
-      if (!activacionActiva) return "Sin activación";
-      const unidad = unidadActivacion === "minutos" ? "min" : "seg";
-      return `${activacionEjercicioNombre || "Bici estática"} · ${duracionActivacion || "—"} ${unidad}`;
-    }
-    if (id === "movilidad") {
-      if (modoMovilidad === "no_incluir") return "No incluido";
-      if (modoMovilidad === "manual") return tareaMovilidadManual ? tareaMovilidadManual.nombre : "Manual · sin elegir";
-      return "Automática";
-    }
-    if (id === "preventivo") {
-      if (modoPreventivo === "no_incluir") return "No incluido";
-      if (modoPreventivo === "manual") return `${tareasPreventivoManual.length} tarea(s)`;
-      return preventivoCantidad > 0 ? `Automático · ${preventivoCantidad}` : "Automático · 0";
-    }
-    if (id === "core") {
-      const nTareas = tareasCore.length + circuitosCore.reduce((a, c) => a + (c.tareas?.length || 0), 0);
-      if (!nTareas) return "Sin tareas";
-      return `${nTareas} tarea(s)${circuitosCore.length ? ` · ${circuitosCore.length} circuito(s)` : ""}`;
-    }
-    if (id === "resistencia") {
-      const nTareas = tareasResistencia.length + circuitosResistencia.reduce((a, c) => a + (c.tareas?.length || 0), 0);
-      if (!nTareas) return "Sin tareas";
-      return `${nTareas} tarea(s)${circuitosResistencia.length ? ` · ${circuitosResistencia.length} circuito(s)` : ""}`;
-    }
-    if (id === "cmj") return cmjActiva ? "Con medición" : "Sin medición hoy";
-    if (id === "fuerza") {
-      const nTareas = tareasFuerza.length + circuitosFuerza.reduce((a, c) => a + (c.tareas?.length || 0), 0);
-      if (!nTareas) return "Sin tareas";
-      return `${nTareas} tarea(s)${circuitosFuerza.length ? ` · ${circuitosFuerza.length} circuito(s)` : ""}`;
-    }
-    return "";
-  };
-
 
   const autoLanzadoRef = useRef(false);
   useEffect(() => {
@@ -3160,39 +3055,48 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     if (bloque === "Fuerza") setTareasFuerza(marcar);
     else setTareasCore(marcar);
   };
-  const minutosFuerza = Number(tiempoFuerzaMin) || 0;
-  const ajusteFuerza = minutosFuerza ? ajustarRecuperaciones(tareasFuerza, circuitosFuerza, minutosFuerza * 60, "Fuerza") : null;
+  const nTareasDe = (tareas, circuitos) => tareas.length + circuitos.reduce((a, c) => a + (c.tareas?.length || 0), 0);
   const resumenDiseno = (() => {
-    const segActivacion = activacionActiva ? aSegundosDiseno(duracionActivacion, unidadActivacion === "minutos" ? "min" : "seg") : 0;
-    const segMovilidad = modoMovilidad === "no_incluir" ? 0 : modoMovilidad === "automatico" ? 300 : tareaMovilidadManual ? 300 : 0;
-    const nPrev = modoPreventivo === "no_incluir" ? 0 : modoPreventivo === "automatico" ? Number(preventivoCantidad) || 0 : tareasPreventivoManual.length;
+    const marc = (id) => (id === "cmj" ? cmjActiva : !!marcados[id]);
+    // Duración EFECTIVA: solo tiempo de trabajo. La recuperación es una
+    // recomendación aparte (segRec = duración total si se respeta).
+    const hayMov = modoMovilidadEf !== "no_incluir";
+    const segMovilidad = hayMov && (modoMovilidadEf === "automatico" || tareaMovilidadManual) ? 300 : 0;
+    const segActivacion = estimarBloqueEfectivoSeg(tareasCardioEf, []) + estimarBloqueEfectivoSeg(tareasEstirEf, []) + segMovilidad;
+    const segActivacionRec = estimarBloqueConRecuperacionSeg(tareasCardioEf, [], "Core") + estimarBloqueConRecuperacionSeg(tareasEstirEf, [], "Core") + segMovilidad;
+    const nPrev = !marc("preventivo") ? 0 : modoPreventivo === "automatico" ? Number(preventivoCantidad) || 0 : modoPreventivo === "manual" ? tareasPreventivoManual.length : 0;
     const segPreventivo = nPrev * 180;
-    const segCore = estimarBloqueTareasSeg(tareasCore, circuitosCore.map((c) => ({ ...c })), "Core");
-    const segResistencia = [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].reduce((sum, t) => sum + estimarResistenciaSeg(t), 0);
-    const segFuerza = estimarBloqueTareasSeg(tareasFuerza, circuitosFuerza, "Fuerza");
+    const segCore = marc("core") ? estimarBloqueEfectivoSeg(tareasCore, circuitosCore) : 0;
+    const segCoreRec = marc("core") ? estimarBloqueConRecuperacionSeg(tareasCore, circuitosCore, "Core") : 0;
+    const segResistencia = marc("resistencia") ? [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].reduce((sum, t) => sum + estimarResistenciaSeg(t), 0) : 0;
+    const segFuerza = marc("fuerza") ? estimarBloqueEfectivoSeg(tareasFuerza, circuitosFuerza) : 0;
+    const segFuerzaRec = marc("fuerza") ? estimarBloqueConRecuperacionSeg(tareasFuerza, circuitosFuerza, "Fuerza") : 0;
     const segCmj = cmjActiva ? 300 : 0;
-    const nTareasDe = (tareas, circuitos) => tareas.length + circuitos.reduce((a, c) => a + (c.tareas?.length || 0), 0);
     const lineaTarea = (t, bloque) => {
       const unidad = t.modo === "tiempo" ? "s" : t.modo === "minutos" ? "min" : t.modo === "metros" ? "m" : "";
       const volumen = t.series || t.cantidad ? `${t.series || "?"}×${t.cantidad || "?"}${unidad}${t.lateralidad === "unilateral" ? " (unilat.)" : ""}` : "sin series/reps";
       const carga = bloque !== "Fuerza" ? "" : t.modoCarga === "pct1rm" ? (Number(t.pct1rm) > 0 ? `${t.pct1rm} %1RM` : "sin %1RM") : t.rir !== "" && t.rir != null ? `RIR ${t.rir}` : "sin RIR";
-      const desc = (Number(t.series) || 0) > 1 ? `desc. ${descansoEfectivoSeg(t, bloque)} s` : "";
-      return { titulo: t.nombre, sub: [volumen, carga, desc, t.alternaCon ? `↔ ${t.alternaConNombre || "otro"}` : ""].filter(Boolean).join(" · "), seg: estimarTareaSeg(t, bloque) };
+      return { titulo: t.nombre, sub: [volumen, carga, t.alternaCon ? `↔ ${t.alternaConNombre || "otro"}` : ""].filter(Boolean).join(" · "), seg: estimarTareaEfectivaSeg(t) };
     };
     const itemsDe = (tareas, circuitos, bloque) => [
       ...tareas.map((t) => lineaTarea(t, bloque)),
-      ...circuitos.map((c, i) => ({ titulo: `Circuito ${i + 1} · ${Number(c.rondas) || 1} ronda(s)`, sub: (c.tareas || []).map((t) => t.nombre).join(", ") || "vacío", seg: estimarCircuitoSeg(c, bloque) })),
+      ...circuitos.map((c, i) => ({ titulo: `Circuito ${i + 1} · ${Number(c.rondas) || 1} ronda(s)`, sub: (c.tareas || []).map((t) => t.nombre).join(", ") || "vacío", seg: estimarCircuitoEfectivoSeg(c) })),
+    ];
+    const itemsAct = [
+      ...tareasCardioEf.map((t) => ({ ...lineaTarea(t, "Core"), titulo: `Cardiovascular · ${t.nombre}` })),
+      ...tareasEstirEf.map((t) => ({ ...lineaTarea(t, "Core"), titulo: `Estiramiento dinámico · ${t.nombre}` })),
+      ...(segMovilidad ? [{ titulo: "Movilidad", sub: modoMovilidadEf === "automatico" ? "rotación automática, se elige al guardar" : tareaMovilidadManual?.nombre || "—", seg: segMovilidad }] : []),
     ];
     const bloques = [
-      { id: "activacion", nombre: "Activación", seg: segActivacion, detalle: activacionActiva ? "" : "no incluida", vacio: !activacionActiva, items: activacionActiva ? [{ titulo: activacionEjercicioNombre || "Bici estática", sub: `${duracionActivacion || "—"} ${unidadActivacion === "minutos" ? "min" : "seg"}`, seg: segActivacion }] : [] },
-      { id: "movilidad", nombre: "Movilidad", seg: segMovilidad, detalle: segMovilidad ? "estimado" : "no incluida", vacio: !segMovilidad, items: segMovilidad ? [{ titulo: modoMovilidad === "automatico" ? "Ejercicio del pool rotativo" : tareaMovilidadManual?.nombre || "—", sub: modoMovilidad === "automatico" ? "se elige al guardar" : "elegido a mano", seg: segMovilidad }] : [] },
-      { id: "preventivo", nombre: "Preventivo", seg: segPreventivo, detalle: nPrev ? `${nPrev} ejercicio(s) · estimado` : "no incluido", vacio: !nPrev, items: nPrev ? (modoPreventivo === "automatico" ? [{ titulo: `${nPrev} ejercicio(s) de la categoría preventiva`, sub: "se eligen al guardar", seg: segPreventivo }] : tareasPreventivoManual.map((t) => ({ titulo: t.nombre, sub: "elegido a mano", seg: 180 }))) : [] },
-      { id: "core", nombre: "Core", seg: segCore, detalle: nTareasDe(tareasCore, circuitosCore) ? `${nTareasDe(tareasCore, circuitosCore)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasCore, circuitosCore), items: itemsDe(tareasCore, circuitosCore, "Core"), sinDato: nTareasDe(tareasCore, circuitosCore) > 0 && !segCore },
-      { id: "resistencia", nombre: "Resistencia", seg: segResistencia, detalle: nTareasDe(tareasResistencia, circuitosResistencia) ? `${nTareasDe(tareasResistencia, circuitosResistencia)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasResistencia, circuitosResistencia), items: [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].map((t) => ({ titulo: t.nombre, sub: [t.tipoResistenciaCardio ? t.tipoResistenciaCardio.toUpperCase() : "sin tipo", t.capacidad].filter(Boolean).join(" · "), seg: estimarResistenciaSeg(t) })), sinDato: nTareasDe(tareasResistencia, circuitosResistencia) > 0 && !segResistencia },
-      { id: "cmj", nombre: "CMJ", seg: segCmj, detalle: cmjActiva ? "estimado" : "no incluido", vacio: !cmjActiva, items: cmjActiva ? [{ titulo: "Medición CMJ", sub: "el jugador verá un aviso en su sesión", seg: segCmj }] : [] },
-      { id: "fuerza", nombre: "Fuerza", seg: segFuerza, detalle: nTareasDe(tareasFuerza, circuitosFuerza) ? `${nTareasDe(tareasFuerza, circuitosFuerza)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasFuerza, circuitosFuerza), items: itemsDe(tareasFuerza, circuitosFuerza, "Fuerza"), sinDato: nTareasDe(tareasFuerza, circuitosFuerza) > 0 && !segFuerza },
+      { id: "activacion", nombre: "Activación", marcado: marc("activacion"), seg: segActivacion, segRec: segActivacionRec, detalle: itemsAct.length ? `${itemsAct.length} parte(s)/ejercicio(s)` : "sin contenido", vacio: !itemsAct.length, items: itemsAct },
+      { id: "preventivo", nombre: "Preventivo", marcado: marc("preventivo"), seg: segPreventivo, segRec: segPreventivo, detalle: nPrev ? `${nPrev} ejercicio(s) · estimado` : "no incluido", vacio: !nPrev, items: nPrev ? (modoPreventivo === "automatico" ? [{ titulo: `${nPrev} ejercicio(s) de la categoría preventiva`, sub: "se eligen al guardar", seg: segPreventivo }] : tareasPreventivoManual.map((t) => ({ titulo: t.nombre, sub: "elegido a mano", seg: 180 }))) : [] },
+      { id: "core", nombre: "Core", marcado: marc("core"), seg: segCore, segRec: segCoreRec, detalle: nTareasDe(tareasCore, circuitosCore) ? `${nTareasDe(tareasCore, circuitosCore)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasCore, circuitosCore), items: marc("core") ? itemsDe(tareasCore, circuitosCore, "Core") : [], sinDato: marc("core") && nTareasDe(tareasCore, circuitosCore) > 0 && !segCore },
+      { id: "resistencia", nombre: "Resistencia", marcado: marc("resistencia"), seg: segResistencia, segRec: segResistencia, detalle: nTareasDe(tareasResistencia, circuitosResistencia) ? `${nTareasDe(tareasResistencia, circuitosResistencia)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasResistencia, circuitosResistencia), items: marc("resistencia") ? [...tareasResistencia, ...circuitosResistencia.flatMap((c) => c.tareas || [])].map((t) => ({ titulo: t.nombre, sub: [t.tipoResistenciaCardio ? t.tipoResistenciaCardio.toUpperCase() : "sin tipo", t.capacidad].filter(Boolean).join(" · "), seg: estimarResistenciaSeg(t) })) : [], sinDato: marc("resistencia") && nTareasDe(tareasResistencia, circuitosResistencia) > 0 && !segResistencia },
+      { id: "cmj", nombre: "CMJ", marcado: cmjActiva, seg: segCmj, segRec: segCmj, detalle: cmjActiva ? "estimado" : "no incluido", vacio: !cmjActiva, items: cmjActiva ? [{ titulo: "Medición CMJ", sub: "el jugador verá un aviso en su sesión", seg: segCmj }] : [] },
+      { id: "fuerza", nombre: "Fuerza", marcado: marc("fuerza"), seg: segFuerza, segRec: segFuerzaRec, detalle: nTareasDe(tareasFuerza, circuitosFuerza) ? `${nTareasDe(tareasFuerza, circuitosFuerza)} tarea(s)` : "sin tareas", vacio: !nTareasDe(tareasFuerza, circuitosFuerza), items: marc("fuerza") ? itemsDe(tareasFuerza, circuitosFuerza, "Fuerza") : [], sinDato: marc("fuerza") && nTareasDe(tareasFuerza, circuitosFuerza) > 0 && !segFuerza },
     ];
-    const totalSeg = bloques.reduce((sum, b) => sum + b.seg, 0);
+    const totalSeg = bloques.filter((b) => b.marcado).reduce((sum, b) => sum + b.seg, 0);
+    const totalRecSeg = bloques.filter((b) => b.marcado).reduce((sum, b) => sum + b.segRec, 0);
 
     const fuerzaTareas = [...tareasFuerza, ...circuitosFuerza.flatMap((c) => c.tareas || [])];
     const seriesFuerza = tareasFuerza.reduce((sum, t) => sum + (Number(t.series) || 0), 0) + circuitosFuerza.reduce((sum, c) => sum + (Number(c.rondas) || 1) * (c.tareas?.length || 0), 0);
@@ -3211,11 +3115,9 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       const z = zonaDe(t) || "Sin zona";
       porZona[z] = (porZona[z] || 0) + (Number(c.rondas) || 1);
     }));
-    const descansos = tareasFuerza.filter((t) => (Number(t.series) || 0) > 1).map((t) => descansoEfectivoSeg(t, "Fuerza"));
+    const descansos = tareasFuerza.filter((t) => (Number(t.series) || 0) > 1).map((t) => recuperacionRecomendadaSerieSeg(t, "Fuerza"));
     const repsTotales = tareasFuerza.reduce((sum, t) => sum + (t.modo === "reps" ? (Number(t.series) || 0) * (Number(t.cantidad) || 0) : 0), 0);
-    const filasDescanso = tareasFuerza
-      .filter((t) => (Number(t.series) || 0) > 1)
-      .map((t) => ({ t, seg: descansoEfectivoSeg(t, "Fuerza"), propio: Number(t.descanso) > 0 }));
+    const filasDescanso = [];
     const sugerencias = [
       ...sugerirAlternancias(tareasFuerza, "Fuerza", zonaDe).map((o) => ({ ...o, bloque: "Fuerza" })),
       ...sugerirAlternancias(tareasCore, "Core", zonaDe).map((o) => ({ ...o, bloque: "Core" })),
@@ -3225,7 +3127,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     if (targetPlayerIds !== null && !(targetPlayerIds || []).length) avisos.push("Sin jugadores destinatarios: no se podrá enviar.");
     if (sinCarga.length) avisos.push(`${sinCarga.length} ejercicio(s) de Fuerza sin %1RM ni RIR (${sinCarga.slice(0, 2).map((t) => t.nombre).join(", ")}${sinCarga.length > 2 ? "…" : ""}).`);
     if (sinSeries.length) avisos.push(`${sinSeries.length} ejercicio(s) de Fuerza sin series o repeticiones: no cuentan en el tiempo estimado.`);
-    return { bloques, totalSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs), porZona, descansoMedio: media(descansos), repsTotales, segTrabajo: segFuerza }, filasDescanso, sugerencias, avisos };
+    return { bloques, totalSeg, totalRecSeg, fuerza: { n: fuerzaTareas.length, series: seriesFuerza, pct: media(pcts), rir: media(rirs), porZona, descansoMedio: media(descansos), repsTotales, segTrabajo: segFuerza }, filasDescanso, sugerencias, avisos };
   })();
 
   // Cuántas veces está cada ejercicio ya en la sesión — lo consume el selector
@@ -3237,6 +3139,517 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     [circuitosCore, circuitosResistencia, circuitosFuerza].forEach((l) => (l || []).forEach((c) => (c.tareas || []).forEach(cuenta)));
     return (id) => m[id] || 0;
   })();
+
+  // ---------- Diseñador rediseñado: bloques seleccionables, orden, partes de Activación ----------
+  const sinJugadores = targetPlayerIds !== null && !targetPlayerIds.length;
+  const marcado = (id) => (id === "cmj" ? cmjActiva : !!marcados[id]);
+  const idsMarcados = ordenBloques.filter(marcado);
+  const nContenidoBloque = (id) => (id === "activacion" ? tareasCardio.length + tareasEstir.length : id === "preventivo" ? tareasPreventivoManual.length : id === "core" ? nTareasDe(tareasCore, circuitosCore) : id === "resistencia" ? nTareasDe(tareasResistencia, circuitosResistencia) : id === "fuerza" ? nTareasDe(tareasFuerza, circuitosFuerza) : 0);
+  const nContenidoParte = (k) => (k === "cardio" ? tareasCardio.length : k === "estir" ? tareasEstir.length : 0);
+  const irABloque = (id) => {
+    setBloqueActivo(id);
+    setConfirmarBorrado(null);
+    setTimeout(() => {
+      const el = typeof document !== "undefined" ? document.getElementById(`bloque-${id === "movilidad" ? "activacion" : id}`) : null;
+      if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 40);
+  };
+  const marcarBloque = (id) => {
+    setConfirmarBorrado(null);
+    if (id === "cmj") setCmjActiva(true);
+    else setMarcados((p) => ({ ...p, [id]: true }));
+    if (id === "preventivo" && modoPreventivo === "no_incluir") setModoPreventivo("automatico");
+    if (id === "activacion" && !subAct.cardio && !subAct.mov && !subAct.estir) setSubAct({ cardio: true, mov: true, estir: true });
+    if (id === "activacion" && modoMovilidad === "no_incluir") setModoMovilidad("automatico");
+    irABloque(id);
+  };
+  const desmarcarBloque = (id) => {
+    if (id === "cmj") setCmjActiva(false);
+    else setMarcados((p) => ({ ...p, [id]: false }));
+    setConfirmarBorrado(null);
+    if (bloqueActivo === id) setBloqueActivo(ordenBloques.find((x) => x !== id && marcado(x)) || null);
+  };
+  const alternarBloque = (id) => {
+    if (!marcado(id)) { marcarBloque(id); return; }
+    if (nContenidoBloque(id) > 0) { setConfirmarBorrado(id); return; }
+    desmarcarBloque(id);
+  };
+  const borrarContenido = (clave) => {
+    if (clave.startsWith("sub:")) {
+      const k = clave.slice(4);
+      if (k === "cardio") setTareasCardio([]);
+      if (k === "estir") setTareasEstir([]);
+      setSubAct((p) => ({ ...p, [k]: false }));
+      setConfirmarBorrado(null);
+      return;
+    }
+    if (clave === "activacion") { setTareasCardio([]); setTareasEstir([]); }
+    if (clave === "preventivo") setTareasPreventivoManual([]);
+    if (clave === "core") { setTareasCore([]); setCircuitosCore([]); }
+    if (clave === "resistencia") { setTareasResistencia([]); setCircuitosResistencia([]); }
+    if (clave === "fuerza") { setTareasFuerza([]); setCircuitosFuerza([]); }
+    desmarcarBloque(clave);
+  };
+  const alternarParte = (k) => {
+    if (subAct[k]) {
+      if (nContenidoParte(k) > 0) { setConfirmarBorrado(`sub:${k}`); return; }
+      setSubAct((p) => ({ ...p, [k]: false }));
+      return;
+    }
+    setSubAct((p) => ({ ...p, [k]: true }));
+    if (k === "mov" && modoMovilidad === "no_incluir") setModoMovilidad("automatico");
+    setConfirmarBorrado(null);
+    irABloque("activacion");
+  };
+  const textoConfirmar = confirmarBorrado
+    ? confirmarBorrado.startsWith("sub:")
+      ? `Se borrarán los ${nContenidoParte(confirmarBorrado.slice(4))} ejercicios de ${PARTES_ACTIVACION.find((x) => x.id === confirmarBorrado.slice(4))?.nombre}. ¿Continuar?`
+      : `Se borrará el contenido de ${NOMBRE_BLOQUE[confirmarBorrado]} (${nContenidoBloque(confirmarBorrado)} ejercicio${nContenidoBloque(confirmarBorrado) === 1 ? "" : "s"}). ¿Continuar?`
+    : "";
+  const avisosFuerza = [...tareasFuerza, ...circuitosFuerza.flatMap((c) => c.tareas || [])].filter((t) => { const o = objetivoDeTarea(t); const a = o ? avisoDeTarea(o, t) : null; return a && a.estado !== "info"; }).length;
+  const avisosPorBloque = { fuerza: avisosFuerza };
+  const totalAvisos = idsMarcados.reduce((sum, id) => sum + (avisosPorBloque[id] || 0), 0);
+  const listaBloques = (conFlechas) => (
+    <ListaBloquesDiseno
+      orden={ordenBloques}
+      marcado={marcado}
+      foco={bloqueActivo}
+      partes={PARTES_ACTIVACION}
+      subAct={subAct}
+      avisos={avisosPorBloque}
+      confirmar={confirmarBorrado}
+      textoConfirmar={textoConfirmar}
+      onAlternar={alternarBloque}
+      onAlternarParte={alternarParte}
+      onFoco={irABloque}
+      onReordenar={setOrdenBloques}
+      onBorrar={borrarContenido}
+      onCancelar={() => setConfirmarBorrado(null)}
+      conFlechas={conFlechas}
+      bloqueado={readOnly}
+    />
+  );
+
+  // Objetivo para las tareas de Fuerza (lo heredan las nuevas y las que no tienen uno).
+  const objetivosFuerza = [...tareasFuerza, ...circuitosFuerza.flatMap((c) => c.tareas || [])].map((t) => t.objetivo || "");
+  const objetivoComun = objetivosFuerza.length && objetivosFuerza.every((o) => o && o === objetivosFuerza[0]) ? objetivosFuerza[0] : "";
+  const objetivoSesionId = objetivoTareas || objetivoComun;
+  const elegirObjetivoSesion = (id) => {
+    setObjetivoTareas(id);
+    if (!id) return;
+    const aplicar = (t) => (t.objetivo ? t : aplicarObjetivo(t, id, leerTipicos()).tarea);
+    setTareasFuerza((prev) => prev.map(aplicar));
+    setCircuitosFuerza((prev) => prev.map((c) => ({ ...c, tareas: (c.tareas || []).map(aplicar) })));
+  };
+  const pastilla = (activo, aviso) => ({ flexShrink: 0, minHeight: 36, padding: "0 12px", borderRadius: 999, border: `1px solid ${aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontWeight: 600, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 });
+  const datosSesion = (
+    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", pointerEvents: readOnly ? "none" : undefined }}>
+      <button type="button" onClick={() => setAjustesAbiertos(true)} disabled={readOnly} style={pastilla(true, sinJugadores)}>
+        {targetPlayerIds === null ? "Todos los jugadores" : targetPlayerIds.length ? `${targetPlayerIds.length} jugador${targetPlayerIds.length === 1 ? "" : "es"}` : "Elige jugadores"}
+      </button>
+      <EtiquetaDesplegable rotulo={objetivoSesionId ? `Objetivo: ${OBJETIVOS_SESION.find((o) => o.id === objetivoSesionId)?.etiqueta} ▾` : "＋ Objetivo"} ariaLabel="Objetivo de la sesión" tono={objetivoSesionId ? "activo" : "vacio"} ancho={300}>
+        {(cerrar) => (
+          <>
+            <Cabecera titulo="Objetivo de la sesión" subtitulo="las tareas de Fuerza lo heredan" />
+            <ListaOpciones etiqueta="Objetivo de la sesión" valor={objetivoSesionId} onElegir={(v) => { elegirObjetivoSesion(v); cerrar(); }} opciones={[{ v: "", t: "Sin objetivo", tenue: true }, ...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta, nota: `RIR ${etiquetaRir(o).replace("RIR ", "")}` }))]} />
+            <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Se aplica a las tareas nuevas de Fuerza y a las que aún no tienen objetivo. Cada tarea conserva el suyo y puedes cambiarlo en ella.</span>
+          </>
+        )}
+      </EtiquetaDesplegable>
+      <button type="button" onClick={() => setDetallesAbiertos(true)} title="Fechas de la sesión y clasificación MD" style={pastilla(false, false)}>
+        {fechas.length ? `${fechas.length} fecha${fechas.length === 1 ? "" : "s"}` : "Fechas"}{md ? ` · ${md}` : ""}
+      </button>
+      <span title="Duración efectiva: solo tiempo de trabajo, sin recuperación ni transiciones" style={{ ...pastilla(false, false), cursor: "default", fontFamily: dsF.mono }}>~{Math.round(resumenDiseno.totalSeg / 60)} min efectivos</span>
+      {totalAvisos > 0 && (
+        <button type="button" onClick={() => setMostrarResumen(true)} style={pastilla(false, true)}>⚠ {totalAvisos}</button>
+      )}
+      <button type="button" aria-pressed={mostrarResumen} onClick={() => setMostrarResumen((v) => !v)} style={pastilla(mostrarResumen, false)}>Resumen</button>
+    </div>
+  );
+  const panelResumenOrden = (
+    <div style={{ border: `1px solid ${ds.accentBorderSubtle || ds.accent}`, borderRadius: 12, background: ds.surface, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 6 }}>
+      <span style={{ fontFamily: dsF.mono, fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted }}>Orden que verá el jugador</span>
+      {idsMarcados.length === 0 && <span style={{ fontSize: 12.5, color: ds.inkMuted }}>Ningún bloque marcado.</span>}
+      {idsMarcados.map((id, i) => {
+        const b = resumenDiseno.bloques.find((x) => x.id === id);
+        return (
+          <div key={id} style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: ds.inkSecondary }}>
+            <span>{i + 1}. {NOMBRE_BLOQUE[id]}{avisosPorBloque[id] ? <span style={{ color: ds.warning || ds.danger }}> ⚠</span> : null}</span>
+            <span style={{ fontFamily: dsF.mono }}>{id === "cmj" ? "medición" : `~${Math.round((b?.seg || 0) / 60)} min`}</span>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 13, color: ds.ink, fontWeight: 700, borderTop: `1px solid ${ds.border}`, paddingTop: 6 }}>
+        <span>Duración efectiva total</span>
+        <span style={{ fontFamily: dsF.mono }}>~{Math.round(resumenDiseno.totalSeg / 60)} min</span>
+      </div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 12.5, color: ds.inkSecondary }}>
+        <span>Duración total con la recuperación recomendada</span>
+        <span style={{ fontFamily: dsF.mono }}>~{Math.round(resumenDiseno.totalRecSeg / 60)} min</span>
+      </div>
+      <button type="button" onClick={() => setDetalleAbierto(true)} style={{ alignSelf: "flex-start", marginTop: 2, background: "none", border: "none", padding: 0, color: ds.accent, fontSize: 12, fontWeight: 600, cursor: "pointer", textDecoration: "underline" }}>Ver detalle por ejercicio y avisos</button>
+    </div>
+  );
+  const resumenCard = (id) => {
+    if (id === "cmj") return "medición";
+    const b = resumenDiseno.bloques.find((x) => x.id === id);
+    const n = id === "activacion" ? tareasCardioEf.length + tareasEstirEf.length : id === "preventivo" ? (b?.items || []).length : nContenidoBloque(id);
+    return `${n} ej. · ~${Math.round((b?.seg || 0) / 60)} min${avisosPorBloque[id] ? ` · ⚠ ${avisosPorBloque[id]}` : ""}`;
+  };
+
+  // Filas de tarea con superseries agrupadas (1a/1b en un mismo recuadro).
+  const filasDeTareas = (lista, setLista, bloque, conCarga, conReferencias) => {
+    const datos = datosSuperserie(lista, bloque);
+    return gruposSuperserie(lista, datos).map((g) => {
+      const filas = g.map((i) => {
+        const t = lista[i];
+        return (
+          <FilaTareaReal
+            key={t.key}
+            tarea={t}
+            orden={datos[i].etiqueta}
+            superserie={datos[i]}
+            sinBordeSuperserie={g.length > 1}
+            onAlternarEnlace={readOnly ? null : alternarEnlace(setLista, i, lista)}
+            mostrarCarga={conCarga}
+            materialesDisponibles={materialesDisponibles}
+            onAgregarMaterial={agregarMaterial}
+            referenciasPorEjercicio={conReferencias ? referenciasPorEjercicio : undefined}
+            onCambiar={(nuevo) => setLista((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
+            onEliminar={() => setLista((prev) => prev.filter((x) => x.key !== t.key))}
+            onSubir={i > 0 ? () => setLista((prev) => { const n = [...prev]; [n[i - 1], n[i]] = [n[i], n[i - 1]]; return n; }) : null}
+            onBajar={i < lista.length - 1 ? () => setLista((prev) => { const n = [...prev]; [n[i], n[i + 1]] = [n[i + 1], n[i]]; return n; }) : null}
+            onAmpliarVideo={setVideoAmpliado}
+          />
+        );
+      });
+      return g.length > 1 ? <GrupoSuperserie key={lista[g[0]].key} etiquetas={g.map((i) => datos[i].etiqueta)}>{filas}</GrupoSuperserie> : filas;
+    });
+  };
+  const estiloVacio = { fontSize: 12.5, color: ds.inkMuted, textAlign: "center", padding: "10px 0" };
+  const cuerpoMovilidad = () => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <select value={modoMovilidad} onChange={(e) => { setModoMovilidad(e.target.value); setConservarMovilidad(false); }} style={campoSelectReal({ maxWidth: 220 })}>
+                      <option value="automatico">Automático (pool rotativo)</option>
+                      <option value="manual">Manual (elegir ejercicio)</option>
+                    </select>
+                    {modoMovilidad === "automatico" &&
+                      (() => {
+                        const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
+                        const nAsignadas = Object.keys(movilidadTareaIdsPorFecha).length;
+                        return (
+                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                            {conservarMovilidad && nAsignadas
+                              ? "Se conservan los ejercicios de Movilidad ya asignados a esta sesión. Cambia el modo si quieres volver a sortearlos."
+                              : poolMov.length
+                              ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
+                              : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
+                          </div>
+                        );
+                      })()}
+                    {modoMovilidad === "manual" &&
+                      (tareaMovilidadManual ? (
+                        <FilaTareaReal
+                          tarea={tareaMovilidadManual}
+                          mostrarCarga={false}
+                          materialesDisponibles={materialesDisponibles}
+                          onAgregarMaterial={agregarMaterial}
+                          onCambiar={(nuevo) => setTareaMovilidadManual(nuevo)}
+                          onEliminar={() => setTareaMovilidadManual(null)}
+                          onAmpliarVideo={setVideoAmpliado}
+                        />
+                      ) : (
+                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
+                      ))}
+                  </div>
+  );
+  const cuerpoActivacion = () => {
+    const partes = PARTES_ACTIVACION.filter((x) => subAct[x.id]);
+    if (!partes.length) return <div style={estiloVacio}>Marca una parte de Activación en la lista de bloques.</div>;
+    const minutosDe = (arr) => Math.round(estimarBloqueEfectivoSeg(arr, []) / 60);
+    const parteConLista = (k, titulo, arr, setArr) => (
+      <div key={k} id={`parte-${k}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <TituloParte titulo={titulo} minutos={minutosDe(arr)} />
+        {ancho >= ANCHO_MIN_TABLA && arr.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
+        {arr.length ? filasDeTareas(arr, setArr, "Activación", false, false) : <div style={estiloVacio}>Sin ejercicios todavía</div>}
+        <SelectorEjercicioReal acoplable ejercicios={ejercicios} titulo={titulo} onAdd={agregarTarea(setArr, { modo: "minutos", series: "1", cantidad: "8" })} onAsignarZona={asignarZonaYActualizar} />
+      </div>
+    );
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        {partes.map((x) =>
+          x.id === "mov" ? (
+            <div key="mov" id="parte-mov" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <TituloParte titulo="Movilidad" extra={modoMovilidad === "automatico" ? <span style={{ height: 26, padding: "0 10px", borderRadius: 9, border: `1px solid ${ds.accent}`, background: ds.accentSubtle, color: ds.accent, fontWeight: 600, fontSize: 12, display: "inline-flex", alignItems: "center" }}>Rotación automática</span> : null} />
+              {cuerpoMovilidad()}
+            </div>
+          ) : x.id === "cardio" ? parteConLista("cardio", "Cardiovascular", tareasCardio, setTareasCardio) : parteConLista("estir", "Estiramiento dinámico", tareasEstir, setTareasEstir)
+        )}
+      </div>
+    );
+  };
+  const cuerpoPreventivo = () => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <select value={modoPreventivo} onChange={(e) => { setModoPreventivo(e.target.value); setConservarPreventivo(false); }} style={campoSelectReal({ maxWidth: 220 })}>
+                      <option value="automatico">Automático (pool por categoría)</option>
+                      <option value="manual">Manual (elegir ejercicios)</option>
+                    </select>
+                    {modoPreventivo === "automatico" && (
+                      <>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicios ese día</span>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <button
+                              type="button"
+                              onClick={() => { setPreventivoCantidad((v) => Math.max(0, v - 1)); setConservarPreventivo(false); }}
+                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                            >
+                              −
+                            </button>
+                            <span style={{ width: 24, textAlign: "center", fontFamily: dsF.mono, fontSize: 14, color: preventivoCantidad > 0 ? ds.accent : ds.inkMuted }}>
+                              {preventivoCantidad}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => { setPreventivoCantidad((v) => v + 1); setConservarPreventivo(false); }}
+                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
+                            >
+                              +
+                            </button>
+                          </div>
+                          <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría de cada jugador"}</span>
+                        </div>
+                        {conservarPreventivo && Object.keys(preventivoTareaIdsPorFecha).length > 0 && (
+                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                            Se conservan los ejercicios de Preventivo ya asignados a esta sesión. Cambia la cantidad o el modo si quieres volver a sortearlos.
+                          </div>
+                        )}
+                        {preventivoCantidad > 0 &&
+                          (() => {
+                            const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
+                            const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
+                            if (!cat) {
+                              const { porCategoria, sinCategoriaUnica } = repartoPreventivoPorCategoria(targetPlayerIds, players);
+                              if (!porCategoria.size) {
+                                return (
+                                  <div style={{ fontSize: 11.5, color: ds.warning }}>
+                                    Ningún destinatario tiene una única categoría preventiva — este bloque se omitirá al guardar. Asigna una categoría a los jugadores para que se aplique.
+                                  </div>
+                                );
+                              }
+                              return (
+                                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: ds.inkSecondary }}>
+                                  <div>Los destinatarios no comparten categoría: cada uno recibirá los ejercicios de la suya.</div>
+                                  {[...porCategoria.entries()].map(([catId, ids]) => {
+                                    const c = categoriasPreventivas.find((x) => x.id === catId);
+                                    const pool = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId).length;
+                                    return (
+                                      <div key={catId} style={{ color: pool ? ds.inkMuted : ds.warning }}>
+                                        · {c?.nombre || "Categoría"}: {ids.length} jugador(es){pool ? ` · ${pool} ejercicio(s) en el pool` : " · sin ejercicios en el pool, se omitirá"}
+                                      </div>
+                                    );
+                                  })}
+                                  {sinCategoriaUnica.length > 0 && (
+                                    <div style={{ color: ds.warning }}>
+                                      Sin Preventivo (0 o varias categorías): {sinCategoriaUnica.map((p) => p.name).join(", ")}.
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            }
+                            const poolPrev = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId);
+                            return (
+                              <>
+                                <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
+                                  Categoría detectada para este roster: <span style={{ color: ds.accent, fontWeight: 500 }}>{cat.nombre}</span>
+                                </div>
+                                <div style={{ fontSize: 11.5, color: poolPrev.length ? ds.inkMuted : ds.warning }}>
+                                  {poolPrev.length
+                                    ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
+                                    : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
+                                </div>
+                              </>
+                            );
+                          })()}
+                      </>
+                    )}
+                    {modoPreventivo === "manual" && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {tareasPreventivoManual.map((t) => (
+                          <FilaTareaReal
+                            key={t.key}
+                            tarea={t}
+                            mostrarCarga={false}
+                            materialesDisponibles={materialesDisponibles}
+                            onAgregarMaterial={agregarMaterial}
+                            onCambiar={(nuevo) => setTareasPreventivoManual((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
+                            onEliminar={() => setTareasPreventivoManual((prev) => prev.filter((x) => x.key !== t.key))}
+                            onAmpliarVideo={setVideoAmpliado}
+                          />
+                        ))}
+                        <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
+                      </div>
+                    )}
+                  </div>
+  );
+  const cuerpoCore = () => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {ancho >= ANCHO_MIN_TABLA && tareasCore.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
+                    {filasDeTareas(tareasCore, setTareasCore, "Core", false, false)}
+                    {circuitosCore.map((c) => (
+                      <CajaCircuitoReal
+                        key={c.key}
+                        circuito={c}
+                        bloque="Core"
+                        mostrarCarga={false}
+                        ejercicios={ejercicios}
+                        onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
+                        onError={setError}
+                        materialesDisponibles={materialesDisponibles}
+                        onAgregarMaterial={agregarMaterial}
+                        onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
+                        onEliminarCircuito={() => setCircuitosCore((prev) => prev.filter((x) => x.key !== c.key))}
+                        onAmpliarVideo={setVideoAmpliado}
+                      />
+                    ))}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
+                      <button
+                        onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        + Añadir circuito
+                      </button>
+                    </div>
+                  </div>
+  );
+  const cuerpoResistencia = () => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {tareasResistencia.map((t) => (
+                      <CampoResistenciaTareaReal
+                        key={t.key}
+                        tarea={t}
+                        onCambiar={(nuevo) => setTareasResistencia((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
+                        onEliminar={() => setTareasResistencia((prev) => prev.filter((x) => x.key !== t.key))}
+                        jugadorReferencia={jugadorReferenciaResistencia}
+                        ejercicios={ejercicios}
+                        onEjercicioCreado={addEjercicioLocal}
+                        onAmpliarVideo={setVideoAmpliado}
+                      />
+                    ))}
+                    {circuitosResistencia.map((c) => (
+                      <CajaCircuitoReal
+                        key={c.key}
+                        circuito={c}
+                        bloque="Resistencia"
+                        ejercicios={ejercicios}
+                        onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
+                        onError={setError}
+                        materialesDisponibles={materialesDisponibles}
+                        onAgregarMaterial={agregarMaterial}
+                        onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
+                        onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
+                        jugadorReferencia={jugadorReferenciaResistencia}
+                        onAmpliarVideo={setVideoAmpliado}
+                      />
+                    ))}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          try {
+                            const creado = await resolveEjercicio(ejercicios, { nombre: MODALIDADES_RESISTENCIA.carrera, bloque: "", tags_descriptivos: [] });
+                            addEjercicioLocal(creado);
+                            setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, gif: creado.gif_url || "", tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
+                          } catch (e) {
+                            setError("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
+                          }
+                        }}
+                        style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}
+                      >
+                        + Ejercicio
+                      </button>
+                      <button
+                        onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        + Añadir circuito
+                      </button>
+                    </div>
+                    {/* Nota de referencia (mockup: bloque "Sobre estos rangos"
+                        al pie del builder de Resistencia) — se muestra una
+                        sola vez para todo el bloque, no repetida por tarea. */}
+                    <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5, background: ds.surface, border: `1px solid ${ds.borderSoft}`, borderRadius: 8, padding: "10px 12px" }}>
+                      <b style={{ color: ds.ink }}>Sobre estos rangos:</b> son de referencia poblacional (Pallarés &amp; Morán-Navarro, 2012, actualizado con literatura posterior). Ancla siempre que puedas la intensidad al umbral o VAM real del jugador — la variabilidad individual frente al %FCmáx teórico es alta (Mann, Lamberts &amp; Lambert, 2013). <b style={{ color: ds.ink }}>Sin test de campo,</b> el jugador recibe un objetivo calculado con la VAM/FCmáx media de futbolistas profesionales (14.8 km/h / 194 ppm; Bruzzese et al., 2021, n=9) en vez de su dato real — es una aproximación de población, no una referencia perceptiva ni un sustituto de su propio test.
+                    </div>
+                  </div>
+  );
+  const cuerpoCmj = () => (
+                  <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
+                    <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
+                      <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
+                    </span>
+                    <span style={{ fontSize: 13, color: cmjActiva ? ds.ink : ds.inkMuted }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
+                  </div>
+  );
+  const cuerpoFuerza = () => (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
+                    {!readOnly && (
+                      <PanelTiempoDisponible
+                        tareas={tareasFuerza}
+                        circuitos={circuitosFuerza}
+                        minutos={tiempoFuerzaMin}
+                        onMinutos={setTiempoFuerzaMin}
+                        tipicos={tipicos}
+                        onTipico={cambiarTipico}
+                        onRestablecerTipicos={restablecerTipicos}
+                        alternancias={resumenDiseno.sugerencias.filter((x) => x.bloque === "Fuerza")}
+                        onAlternar={aplicarAlternancia}
+                        onAplicarDescansos={(mapa) => setTareasFuerza((prev) => aplicarDescansos(prev, mapa))}
+                      />
+                    )}
+                    <ResumenAvisosCarga tareas={tareasFuerza} />
+                    {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
+                    {filasDeTareas(tareasFuerza, setTareasFuerza, "Fuerza", true, true)}
+                    {circuitosFuerza.map((c) => (
+                      <CajaCircuitoReal
+                        key={c.key}
+                        circuito={c}
+                        bloque="Fuerza"
+                        mostrarCarga={true}
+                        ejercicios={ejercicios}
+                        onEjercicioCreado={addEjercicioLocal}
+                        onAsignarZona={asignarZonaYActualizar}
+                        onError={setError}
+                        materialesDisponibles={materialesDisponibles}
+                        onAgregarMaterial={agregarMaterial}
+                        referenciasPorEjercicio={referenciasPorEjercicio}
+                        onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
+                        onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
+                        onCambiarCircuito={(patch) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
+                        onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
+                        onAmpliarVideo={setVideoAmpliado}
+                      />
+                    ))}
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
+                      <button
+                        onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
+                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
+                      >
+                        + Añadir circuito
+                      </button>
+                    </div>
+                  </div>
+  );
+  const cuerposBloque = { activacion: cuerpoActivacion, preventivo: cuerpoPreventivo, core: cuerpoCore, resistencia: cuerpoResistencia, cmj: cuerpoCmj, fuerza: cuerpoFuerza };
 
   const etiquetaGuardar = isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar en biblioteca";
   const botonGuardar = (corto) => (
@@ -3260,20 +3673,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       {corto ? "Siguiente →" : "Siguiente: asignar →"}
     </button>
   );
-  const sinJugadores = targetPlayerIds !== null && !targetPlayerIds.length;
-  const chipsSesion = (
-    <>
-      <button type="button" onClick={() => setAjustesAbiertos(true)} disabled={readOnly} style={{ flexShrink: 0, minHeight: 40, padding: "0 12px", borderRadius: 999, border: `1px solid ${sinJugadores ? ds.danger : ds.accent}`, background: ds.accentSubtle, color: sinJugadores ? ds.danger : ds.accent, fontFamily: dsF.sans, fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
-        {targetPlayerIds === null ? "✓ Todos los jugadores" : targetPlayerIds.length ? `${targetPlayerIds.length} jugador${targetPlayerIds.length === 1 ? "" : "es"}` : "Elige jugadores"} ▾
-      </button>
-      <button type="button" onClick={() => setAjustesAbiertos(true)} disabled={readOnly} style={{ flexShrink: 0, minHeight: 40, maxWidth: 200, padding: "0 12px", borderRadius: 999, border: `1px ${objetivo ? "solid" : "dashed"} ${ds.border}`, background: "transparent", color: objetivo ? ds.ink : ds.inkMuted, fontFamily: dsF.sans, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-        {objetivo ? objetivo : "+ Objetivo"}
-      </button>
-      <button type="button" onClick={() => setDetallesAbiertos(true)} title="Fechas de la sesión y clasificación MD" style={{ flexShrink: 0, minHeight: 40, padding: "0 12px", borderRadius: 999, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontFamily: dsF.sans, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap" }}>
-        {fechas.length ? `${fechas.length} fecha${fechas.length === 1 ? "" : "s"}` : "Fechas"}{md ? ` · ${md}` : ""}
-      </button>
-    </>
-  );
   const filaNombre = (
     <>
       <button type="button" aria-label={readOnly ? "Volver" : "Salir sin guardar"} title={readOnly ? "Volver" : "Salir sin guardar"} onClick={onBack} style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 10, border: "none", background: "transparent", color: ds.inkSecondary, fontSize: 22, cursor: "pointer" }}>←</button>
@@ -3283,37 +3682,21 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         disabled={readOnly}
         placeholder="Nombre de la sesión"
         aria-label="Nombre de la sesión"
-        style={{ flex: lateralBloques ? "1 1 200px" : "1 1 140px", minWidth: lateralBloques ? 150 : 0, maxWidth: lateralBloques ? 320 : undefined, minHeight: 44, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, fontWeight: 700, padding: "0 12px", boxSizing: "border-box" }}
+        style={{ flex: "1 1 140px", minWidth: 0, maxWidth: 420, minHeight: 44, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, fontWeight: 700, padding: "0 12px", boxSizing: "border-box" }}
       />
     </>
   );
-  const botonesCabecera = !readOnly && ancho >= 700 ? <>{botonGuardar(!lateralBloques)}{botonSiguiente(!lateralBloques || ancho < 1250)}</> : null;
-  const resumenCabecera = <BarraResumenDisenoReal compacta resumen={resumenDiseno} bloqueActivo={bloqueActivo} onIrBloque={setBloqueActivo} />;
   const filaFlex = { display: "flex", alignItems: "center", gap: 8 };
-
-  const destinosBiblio = [
-    { id: "fuerza", nombre: "Fuerza", onAdd: (...a) => { setBloqueActivo("fuerza"); return agregarTarea(setTareasFuerza)(...a); } },
-    { id: "core", nombre: "Core", onAdd: (...a) => { setBloqueActivo("core"); return agregarTarea(setTareasCore)(...a); } },
-    ...(modoPreventivo === "manual" ? [{ id: "preventivo", nombre: "Preventivo", onAdd: (...a) => { setBloqueActivo("preventivo"); return agregarTarea(setTareasPreventivoManual)(...a); } }] : []),
-  ];
-  const destinoActual = destinosBiblio.find((d) => d.id === destinoBiblio) || destinosBiblio[0];
 
   return (
     <EnSesionContext.Provider value={conteoEnSesion}>
-    <BibliotecaSlotContext.Provider value={lateralBloques ? slotBiblio : null}>
+    <BibliotecaSlotContext.Provider value={null}>
     <>
     <PantallaBase rol="entrenador" maxWidth={lateralBloques ? 1320 : ancho >= 700 ? 900 : 640} layoutFijo>
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
-            {lateralBloques ? (
-              <div style={filaFlex}>{filaNombre}{chipsSesion}<span style={{ flex: 1 }} />{resumenCabecera}{botonesCabecera}</div>
-            ) : (
-              <>
-                <div style={filaFlex}>{filaNombre}{ancho >= 700 && botonesCabecera}</div>
-                <div style={{ ...filaFlex, overflowX: "auto" }}>{chipsSesion}<span style={{ flex: 1 }} />{resumenCabecera}</div>
-              </>
-            )}
+            <div style={filaFlex}>{filaNombre}{!readOnly && <>{botonGuardar(true)}{botonSiguiente(true)}</>}</div>
           </div>
         {readOnly && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
@@ -3459,460 +3842,61 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minHeight: 0 }}>
-
-          <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
-          {lateralBloques && <div ref={setSlotBiblio} style={{ width: 300, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0 }} />}
-          {lateralBloques && !readOnly && <SelectorEjercicioReal panelFijo ejercicios={ejercicios} bloque={destinoActual.nombre} onAdd={destinoActual.onAdd} onAsignarZona={asignarZonaYActualizar} destinos={destinosBiblio} destinoId={destinoActual.id} onCambiarDestino={setDestinoBiblio} />}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14, alignItems: "stretch", flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
-          {/* Constructor: una tarjeta desplegable por bloque. */}
-          <div style={{ flex: "0 0 auto", width: "100%", pointerEvents: readOnly ? "none" : undefined, boxSizing: "border-box" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <TarjetaBloqueDiseno id="activacion" abierto={bloqueActivo === "activacion"} onToggle={() => setBloqueActivo((p) => (p === "activacion" ? null : "activacion"))} resumen={resumenBloque("activacion")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "activacion")?.vacio} color={COLOR_BLOQUE_DISENO["activacion"]}>
-                {bloqueActivo === "activacion" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <div onClick={() => setActivacionActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                      <span style={{ width: 34, height: 20, borderRadius: 10, background: activacionActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
-                        <span style={{ position: "absolute", top: 2, left: activacionActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
-                      </span>
-                      <span style={{ fontSize: 13, color: activacionActiva ? ds.ink : ds.inkMuted }}>{activacionActiva ? "Activada para esta sesión" : "Sin acceso a activación — sesión empieza en Movilidad"}</span>
+        <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
+          {lateralBloques && (
+            <aside style={{ width: 300, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingBottom: 6, pointerEvents: readOnly ? "none" : undefined }}>
+              {datosSesion}
+              <span style={{ fontFamily: dsF.mono, fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted }}>Bloques</span>
+              {listaBloques(false)}
+            </aside>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
+            {!lateralBloques && (
+              <>
+                <PestanasBloquesDiseno ids={idsMarcados} foco={bloqueActivo} avisos={avisosPorBloque} onFoco={irABloque} onMas={() => setHojaBloques(true)} />
+                {datosSesion}
+              </>
+            )}
+            {mostrarResumen && panelResumenOrden}
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, pointerEvents: readOnly ? "none" : undefined }}>
+              {idsMarcados.length ? (
+                idsMarcados.map((id) => {
+                  const b = resumenDiseno.bloques.find((x) => x.id === id);
+                  return (
+                    <div key={id} id={`bloque-${id}`}>
+                      <TarjetaBloqueDiseno id={id} abierto={bloqueActivo === id} onToggle={() => setBloqueActivo((prev) => (prev === id ? null : id))} resumen={resumenCard(id)} vacio={!!b?.vacio} color={COLOR_BLOQUE_DISENO[id]}>
+                        {bloqueActivo === id && cuerposBloque[id]()}
+                      </TarjetaBloqueDiseno>
                     </div>
-                    {activacionActiva && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>MODALIDAD</span>
-                          <select
-                            value={Object.entries(MODALIDADES_ACTIVACION).find(([, v]) => v === activacionEjercicioNombre)?.[0] || "bici"}
-                            onChange={(e) => cambiarModalidadActivacion(e.target.value)}
-                            style={{ width: 200, fontFamily: dsF.sans, fontSize: 11.5, fontWeight: 600, padding: "6px 9px", borderRadius: 6, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink }}
-                          >
-                            {Object.entries(MODALIDADES_ACTIVACION).map(([k, v]) => (
-                              <option key={k} value={k}>
-                                {v}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-                        {activacionEjercicioId && (
-                          <div style={{ maxWidth: 220 }}>
-                            <SelectorMaterialReal
-                              seleccionados={activacionMateriales}
-                              disponibles={materialesDisponibles}
-                              onCambiar={setActivacionMateriales}
-                              onAgregarMaterial={agregarMaterial}
-                            />
-                          </div>
-                        )}
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          <span style={{ fontFamily: dsF.mono, fontSize: 9, letterSpacing: "0.04em", color: ds.inkMuted }}>TIEMPO</span>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <input value={duracionActivacion} onChange={(e) => setDuracionActivacion(e.target.value)} style={campoStyleDiseno(50)} />
-                          <button
-                            onClick={() => setUnidadActivacion((u) => (u === "minutos" ? "segundos" : "minutos"))}
-                            style={{
-                              fontSize: 11,
-                              padding: "6px 10px",
-                              borderRadius: 6,
-                              border: `1px solid ${ds.border}`,
-                              background: ds.border,
-                              color: ds.accent,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {unidadActivacion === "minutos" ? "min" : "seg"}
-                          </button>
-                        </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="movilidad" abierto={bloqueActivo === "movilidad"} onToggle={() => setBloqueActivo((p) => (p === "movilidad" ? null : "movilidad"))} resumen={resumenBloque("movilidad")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "movilidad")?.vacio} color={COLOR_BLOQUE_DISENO["movilidad"]}>
-                {bloqueActivo === "movilidad" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={modoMovilidad} onChange={(e) => { setModoMovilidad(e.target.value); setConservarMovilidad(false); }} style={campoSelectReal({ maxWidth: 220 })}>
-                      <option value="automatico">Automático (pool rotativo)</option>
-                      <option value="manual">Manual (elegir ejercicio)</option>
-                      <option value="no_incluir">No incluir</option>
-                    </select>
-                    {modoMovilidad === "automatico" &&
-                      (() => {
-                        const poolMov = ejercicios.filter((e) => e.bloque === "Movilidad");
-                        const nAsignadas = Object.keys(movilidadTareaIdsPorFecha).length;
-                        return (
-                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                            {conservarMovilidad && nAsignadas
-                              ? "Se conservan los ejercicios de Movilidad ya asignados a esta sesión. Cambia el modo si quieres volver a sortearlos."
-                              : poolMov.length
-                              ? `La app elegirá automáticamente el siguiente ejercicio del pool de Movilidad (${poolMov.length} en el pool) al guardar. No requiere acción aquí.`
-                              : "No hay ejercicios en el pool de Movilidad todavía — añade alguno en Biblioteca para que este bloque se aplique."}
-                          </div>
-                        );
-                      })()}
-                    {modoMovilidad === "manual" &&
-                      (tareaMovilidadManual ? (
-                        <FilaTareaReal
-                          tarea={tareaMovilidadManual}
-                          mostrarCarga={false}
-                          materialesDisponibles={materialesDisponibles}
-                          onAgregarMaterial={agregarMaterial}
-                          onCambiar={(nuevo) => setTareaMovilidadManual(nuevo)}
-                          onEliminar={() => setTareaMovilidadManual(null)}
-                          onAmpliarVideo={setVideoAmpliado}
-                        />
-                      ) : (
-                        <SelectorEjercicioReal ejercicios={ejercicios} bloque="Movilidad" onAdd={elegirEjercicioMovilidadManual} onAsignarZona={asignarZonaYActualizar} />
-                      ))}
-                    {modoMovilidad === "no_incluir" && (
-                      <div style={{ fontSize: 12.5, color: ds.inkMuted, textAlign: "center" }}>Bloque desactivado — no se incluirá en esta sesión.</div>
-                    )}
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="preventivo" abierto={bloqueActivo === "preventivo"} onToggle={() => setBloqueActivo((p) => (p === "preventivo" ? null : "preventivo"))} resumen={resumenBloque("preventivo")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "preventivo")?.vacio} color={COLOR_BLOQUE_DISENO["preventivo"]}>
-                {bloqueActivo === "preventivo" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <select value={modoPreventivo} onChange={(e) => { setModoPreventivo(e.target.value); setConservarPreventivo(false); }} style={campoSelectReal({ maxWidth: 220 })}>
-                      <option value="automatico">Automático (pool por categoría)</option>
-                      <option value="manual">Manual (elegir ejercicios)</option>
-                      <option value="no_incluir">No incluir</option>
-                    </select>
-                    {modoPreventivo === "automatico" && (
-                      <>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                          <span style={{ fontSize: 13, color: ds.inkSecondary }}>Ejercicios ese día</span>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            <button
-                              type="button"
-                              onClick={() => { setPreventivoCantidad((v) => Math.max(0, v - 1)); setConservarPreventivo(false); }}
-                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-                            >
-                              −
-                            </button>
-                            <span style={{ width: 24, textAlign: "center", fontFamily: dsF.mono, fontSize: 14, color: preventivoCantidad > 0 ? ds.accent : ds.inkMuted }}>
-                              {preventivoCantidad}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => { setPreventivoCantidad((v) => v + 1); setConservarPreventivo(false); }}
-                              style={{ width: 26, height: 26, borderRadius: 6, background: ds.bgElevated, border: `1px solid ${ds.border}`, color: ds.ink, fontSize: 15, cursor: "pointer", lineHeight: 1 }}
-                            >
-                              +
-                            </button>
-                          </div>
-                          <span style={{ fontSize: 12, color: ds.inkMuted }}>{preventivoCantidad === 0 ? "no se aplicará hoy" : "de la categoría de cada jugador"}</span>
-                        </div>
-                        {conservarPreventivo && Object.keys(preventivoTareaIdsPorFecha).length > 0 && (
-                          <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                            Se conservan los ejercicios de Preventivo ya asignados a esta sesión. Cambia la cantidad o el modo si quieres volver a sortearlos.
-                          </div>
-                        )}
-                        {preventivoCantidad > 0 &&
-                          (() => {
-                            const catId = categoriaComunEntreJugadores(targetPlayerIds, players);
-                            const cat = catId ? categoriasPreventivas.find((c) => c.id === catId) : null;
-                            if (!cat) {
-                              const { porCategoria, sinCategoriaUnica } = repartoPreventivoPorCategoria(targetPlayerIds, players);
-                              if (!porCategoria.size) {
-                                return (
-                                  <div style={{ fontSize: 11.5, color: ds.warning }}>
-                                    Ningún destinatario tiene una única categoría preventiva — este bloque se omitirá al guardar. Asigna una categoría a los jugadores para que se aplique.
-                                  </div>
-                                );
-                              }
-                              return (
-                                <div style={{ display: "flex", flexDirection: "column", gap: 4, fontSize: 12, color: ds.inkSecondary }}>
-                                  <div>Los destinatarios no comparten categoría: cada uno recibirá los ejercicios de la suya.</div>
-                                  {[...porCategoria.entries()].map(([catId, ids]) => {
-                                    const c = categoriasPreventivas.find((x) => x.id === catId);
-                                    const pool = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId).length;
-                                    return (
-                                      <div key={catId} style={{ color: pool ? ds.inkMuted : ds.warning }}>
-                                        · {c?.nombre || "Categoría"}: {ids.length} jugador(es){pool ? ` · ${pool} ejercicio(s) en el pool` : " · sin ejercicios en el pool, se omitirá"}
-                                      </div>
-                                    );
-                                  })}
-                                  {sinCategoriaUnica.length > 0 && (
-                                    <div style={{ color: ds.warning }}>
-                                      Sin Preventivo (0 o varias categorías): {sinCategoriaUnica.map((p) => p.name).join(", ")}.
-                                    </div>
-                                  )}
-                                </div>
-                              );
-                            }
-                            const poolPrev = ejercicios.filter((e) => e.bloque === "Preventivo" && e.categoria_preventiva_id === catId);
-                            return (
-                              <>
-                                <div style={{ fontSize: 12.5, color: ds.inkSecondary }}>
-                                  Categoría detectada para este roster: <span style={{ color: ds.accent, fontWeight: 500 }}>{cat.nombre}</span>
-                                </div>
-                                <div style={{ fontSize: 11.5, color: poolPrev.length ? ds.inkMuted : ds.warning }}>
-                                  {poolPrev.length
-                                    ? `${poolPrev.length} ejercicio(s) en el pool de esta categoría${preventivoCantidad > poolPrev.length ? " — al pedir más de los que hay, el ciclo se repetirá ese día." : "."}`
-                                    : "Esta categoría no tiene ejercicios en su pool todavía — el bloque se omitirá."}
-                                </div>
-                              </>
-                            );
-                          })()}
-                      </>
-                    )}
-                    {modoPreventivo === "manual" && (
-                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {tareasPreventivoManual.map((t) => (
-                          <FilaTareaReal
-                            key={t.key}
-                            tarea={t}
-                            mostrarCarga={false}
-                            materialesDisponibles={materialesDisponibles}
-                            onAgregarMaterial={agregarMaterial}
-                            onCambiar={(nuevo) => setTareasPreventivoManual((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
-                            onEliminar={() => setTareasPreventivoManual((prev) => prev.filter((x) => x.key !== t.key))}
-                            onAmpliarVideo={setVideoAmpliado}
-                          />
-                        ))}
-                        <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Preventivo" onAdd={agregarTarea(setTareasPreventivoManual)} onAsignarZona={asignarZonaYActualizar} />
-                      </div>
-                    )}
-                    {modoPreventivo === "no_incluir" && (
-                      <div style={{ fontSize: 12.5, color: ds.inkMuted, textAlign: "center" }}>Bloque desactivado — no se incluirá en esta sesión.</div>
-                    )}
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="core" abierto={bloqueActivo === "core"} onToggle={() => setBloqueActivo((p) => (p === "core" ? null : "core"))} resumen={resumenBloque("core")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "core")?.vacio} color={COLOR_BLOQUE_DISENO["core"]}>
-                {bloqueActivo === "core" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {ancho >= ANCHO_MIN_TABLA && tareasCore.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
-                    {tareasCore.map((t, i) => (
-                      <FilaTareaReal
-                        key={t.key}
-                        tarea={t}
-                        orden={datosSuperserie(tareasCore, "Core")[i].etiqueta}
-                        superserie={datosSuperserie(tareasCore, "Core")[i]}
-                        onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasCore, i, tareasCore)}
-                        mostrarCarga={false}
-                        materialesDisponibles={materialesDisponibles}
-                        onAgregarMaterial={agregarMaterial}
-                        onCambiar={(nuevo) => setTareasCore((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
-                        onEliminar={() => setTareasCore((prev) => prev.filter((x) => x.key !== t.key))}
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    {circuitosCore.map((c) => (
-                      <CajaCircuitoReal
-                        key={c.key}
-                        circuito={c}
-                        bloque="Core"
-                        mostrarCarga={false}
-                        ejercicios={ejercicios}
-                        onEjercicioCreado={addEjercicioLocal}
-                        onAsignarZona={asignarZonaYActualizar}
-                        onError={setError}
-                        materialesDisponibles={materialesDisponibles}
-                        onAgregarMaterial={agregarMaterial}
-                        onCambiarTareas={(nuevas) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
-                        onCambiarRondas={(r) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
-                        onCambiarCircuito={(patch) => setCircuitosCore((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
-                        onEliminarCircuito={() => setCircuitosCore((prev) => prev.filter((x) => x.key !== c.key))}
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Core" onAplicar={aplicarAlternancia} />}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Core" onAdd={agregarTarea(setTareasCore)} onAsignarZona={asignarZonaYActualizar} />
-                      <button
-                        onClick={() => setCircuitosCore((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
-                      >
-                        + Añadir circuito
-                      </button>
-                    </div>
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="resistencia" abierto={bloqueActivo === "resistencia"} onToggle={() => setBloqueActivo((p) => (p === "resistencia" ? null : "resistencia"))} resumen={resumenBloque("resistencia")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "resistencia")?.vacio} color={COLOR_BLOQUE_DISENO["resistencia"]}>
-                {bloqueActivo === "resistencia" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {tareasResistencia.map((t) => (
-                      <CampoResistenciaTareaReal
-                        key={t.key}
-                        tarea={t}
-                        onCambiar={(nuevo) => setTareasResistencia((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
-                        onEliminar={() => setTareasResistencia((prev) => prev.filter((x) => x.key !== t.key))}
-                        jugadorReferencia={jugadorReferenciaResistencia}
-                        ejercicios={ejercicios}
-                        onEjercicioCreado={addEjercicioLocal}
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    {circuitosResistencia.map((c) => (
-                      <CajaCircuitoReal
-                        key={c.key}
-                        circuito={c}
-                        bloque="Resistencia"
-                        ejercicios={ejercicios}
-                        onEjercicioCreado={addEjercicioLocal}
-                        onAsignarZona={asignarZonaYActualizar}
-                        onError={setError}
-                        materialesDisponibles={materialesDisponibles}
-                        onAgregarMaterial={agregarMaterial}
-                        onCambiarTareas={(nuevas) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
-                        onCambiarRondas={(r) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
-                        onCambiarCircuito={(patch) => setCircuitosResistencia((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
-                        onEliminarCircuito={() => setCircuitosResistencia((prev) => prev.filter((x) => x.key !== c.key))}
-                        jugadorReferencia={jugadorReferenciaResistencia}
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          try {
-                            const creado = await resolveEjercicio(ejercicios, { nombre: MODALIDADES_RESISTENCIA.carrera, bloque: "", tags_descriptivos: [] });
-                            addEjercicioLocal(creado);
-                            setTareasResistencia((prev) => [...prev, { key: Date.now() + Math.random(), nombre: creado.nombre, ejercicioId: creado.id, gif: creado.gif_url || "", tipoResistenciaCardio: "", capacidad: "", modalidad: "carrera", estructuraManual: false, bloques: "", series: "", intervalos: "", tiempo: "", tiempoUnidad: "seg", intensidad: "", distancia: "", duracion: "", rpe: "", recuperacion: "", recuperacionUnidad: "seg", nota: "" }]);
-                          } catch (e) {
-                            setError("No se pudo crear la tarea de resistencia. Comprueba tu conexión e inténtalo de nuevo.");
-                          }
-                        }}
-                        style={{ fontSize: 12.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer", fontWeight: 500 }}
-                      >
-                        + Ejercicio
-                      </button>
-                      <button
-                        onClick={() => setCircuitosResistencia((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
-                      >
-                        + Añadir circuito
-                      </button>
-                    </div>
-                    {/* Nota de referencia (mockup: bloque "Sobre estos rangos"
-                        al pie del builder de Resistencia) — se muestra una
-                        sola vez para todo el bloque, no repetida por tarea. */}
-                    <div style={{ fontSize: 11, color: ds.inkSecondary, lineHeight: 1.5, background: ds.surface, border: `1px solid ${ds.borderSoft}`, borderRadius: 8, padding: "10px 12px" }}>
-                      <b style={{ color: ds.ink }}>Sobre estos rangos:</b> son de referencia poblacional (Pallarés &amp; Morán-Navarro, 2012, actualizado con literatura posterior). Ancla siempre que puedas la intensidad al umbral o VAM real del jugador — la variabilidad individual frente al %FCmáx teórico es alta (Mann, Lamberts &amp; Lambert, 2013). <b style={{ color: ds.ink }}>Sin test de campo,</b> el jugador recibe un objetivo calculado con la VAM/FCmáx media de futbolistas profesionales (14.8 km/h / 194 ppm; Bruzzese et al., 2021, n=9) en vez de su dato real — es una aproximación de población, no una referencia perceptiva ni un sustituto de su propio test.
-                    </div>
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="cmj" abierto={bloqueActivo === "cmj"} onToggle={() => setBloqueActivo((p) => (p === "cmj" ? null : "cmj"))} resumen={resumenBloque("cmj")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "cmj")?.vacio} color={COLOR_BLOQUE_DISENO["cmj"]}>
-                {bloqueActivo === "cmj" && (
-                  <div onClick={() => setCmjActiva((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer" }}>
-                    <span style={{ width: 34, height: 20, borderRadius: 10, background: cmjActiva ? ds.accent : ds.border, position: "relative", flexShrink: 0 }}>
-                      <span style={{ position: "absolute", top: 2, left: cmjActiva ? 16 : 2, width: 16, height: 16, borderRadius: "50%", background: ds.canvas }} />
-                    </span>
-                    <span style={{ fontSize: 13, color: cmjActiva ? ds.ink : ds.inkMuted }}>{cmjActiva ? "Hoy toca medición CMJ" : "Sin medición CMJ esta sesión"}</span>
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-                <TarjetaBloqueDiseno id="fuerza" abierto={bloqueActivo === "fuerza"} onToggle={() => setBloqueActivo((p) => (p === "fuerza" ? null : "fuerza"))} resumen={resumenBloque("fuerza")} vacio={!!resumenDiseno.bloques.find((x) => x.id === "fuerza")?.vacio} color={COLOR_BLOQUE_DISENO["fuerza"]}>
-                {bloqueActivo === "fuerza" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {!readOnly && <AvisoCmjDestinatariosReal estado={estadoCmjDiseno} players={players} targetPlayerIds={targetPlayerIds} fechas={fechas} desplegable />}
-                    {!readOnly && (
-                      <PanelTiempoDisponible
-                        tareas={tareasFuerza}
-                        circuitos={circuitosFuerza}
-                        minutos={tiempoFuerzaMin}
-                        onMinutos={setTiempoFuerzaMin}
-                        tipicos={tipicos}
-                        onTipico={cambiarTipico}
-                        onRestablecerTipicos={restablecerTipicos}
-                        ajuste={ajusteFuerza}
-                        alternancias={resumenDiseno.sugerencias.filter((x) => x.bloque === "Fuerza")}
-                        onAlternar={aplicarAlternancia}
-                        onAplicarDescansos={(mapa) => setTareasFuerza((prev) => aplicarDescansos(prev, mapa))}
-                      />
-                    )}
-                    <ResumenAvisosCarga tareas={tareasFuerza} />
-                    {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
-                    {tareasFuerza.map((t, i) => (
-                      <FilaTareaReal
-                        key={t.key}
-                        tarea={t}
-                        orden={datosSuperserie(tareasFuerza, "Fuerza")[i].etiqueta}
-                        superserie={datosSuperserie(tareasFuerza, "Fuerza")[i]}
-                        descansoAjustado={ajusteFuerza ? ajusteFuerza.descansos[t.key] ?? null : null}
-                        onAlternarEnlace={readOnly ? null : alternarEnlace(setTareasFuerza, i, tareasFuerza)}
-                        mostrarCarga={true}
-                        materialesDisponibles={materialesDisponibles}
-                        onAgregarMaterial={agregarMaterial}
-                        referenciasPorEjercicio={referenciasPorEjercicio}
-                        onCambiar={(nuevo) => setTareasFuerza((prev) => prev.map((x) => (x.key === t.key ? nuevo : x)))}
-                        onEliminar={() => setTareasFuerza((prev) => prev.filter((x) => x.key !== t.key))}
-                        onSubir={
-                          i > 0
-                            ? () =>
-                                setTareasFuerza((prev) => {
-                                  const nueva = [...prev];
-                                  [nueva[i - 1], nueva[i]] = [nueva[i], nueva[i - 1]];
-                                  return nueva;
-                                })
-                            : null
-                        }
-                        onBajar={
-                          i < tareasFuerza.length - 1
-                            ? () =>
-                                setTareasFuerza((prev) => {
-                                  const nueva = [...prev];
-                                  [nueva[i], nueva[i + 1]] = [nueva[i + 1], nueva[i]];
-                                  return nueva;
-                                })
-                            : null
-                        }
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    {circuitosFuerza.map((c) => (
-                      <CajaCircuitoReal
-                        key={c.key}
-                        circuito={c}
-                        bloque="Fuerza"
-                        mostrarCarga={true}
-                        ejercicios={ejercicios}
-                        onEjercicioCreado={addEjercicioLocal}
-                        onAsignarZona={asignarZonaYActualizar}
-                        onError={setError}
-                        materialesDisponibles={materialesDisponibles}
-                        onAgregarMaterial={agregarMaterial}
-                        referenciasPorEjercicio={referenciasPorEjercicio}
-                        onCambiarTareas={(nuevas) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, tareas: nuevas } : x)))}
-                        onCambiarRondas={(r) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, rondas: r } : x)))}
-                        onCambiarCircuito={(patch) => setCircuitosFuerza((prev) => prev.map((x) => (x.key === c.key ? { ...x, ...patch } : x)))}
-                        onEliminarCircuito={() => setCircuitosFuerza((prev) => prev.filter((x) => x.key !== c.key))}
-                        onAmpliarVideo={setVideoAmpliado}
-                      />
-                    ))}
-                    {!readOnly && <SugerenciasAlternanciaReal sugerencias={resumenDiseno.sugerencias} bloque="Fuerza" onAplicar={aplicarAlternancia} />}
-                    <div style={{ display: "flex", gap: 8 }}>
-                      <SelectorEjercicioReal acoplable ejercicios={ejercicios} bloque="Fuerza" onAdd={agregarTarea(setTareasFuerza)} onAsignarZona={asignarZonaYActualizar} />
-                      <button
-                        onClick={() => setCircuitosFuerza((prev) => [...prev, { key: Date.now() + Math.random(), tareas: [], rondas: 1 }])}
-                        style={{ fontSize: 12.5, color: ds.inkSecondary, background: "transparent", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "6px 10px", cursor: "pointer" }}
-                      >
-                        + Añadir circuito
-                      </button>
-                    </div>
-                  </div>
-                )}
-                </TarjetaBloqueDiseno>
-              </div>
-          </div>
-
-          </div>
+                  );
+                })
+              ) : (
+                <div style={{ textAlign: "center", color: ds.inkMuted, fontSize: 13.5, lineHeight: 1.6, padding: "40px 12px", border: `1px dashed ${ds.border}`, borderRadius: 12 }}>
+                  Ningún bloque marcado.<br />Marca uno en la lista para empezar.
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {!readOnly && ancho < 700 && (
-          <div style={{ flexShrink: 0, borderTop: `1px solid ${ds.border}`, paddingTop: 10, marginTop: 8, display: "flex", gap: 8 }}>
-            {botonGuardar(true)}
-            <span style={{ flex: 1, display: "flex" }}>{botonSiguiente(false)}</span>
-          </div>
-        )}
       </div>
     </PantallaBase>
+    {!lateralBloques && (
+      <HojaBloquesDiseno abierta={hojaBloques} onCerrar={() => { setHojaBloques(false); setConfirmarBorrado(null); }}>
+        {listaBloques(true)}
+      </HojaBloquesDiseno>
+    )}
+    {detalleAbierto && (
+      <div onClick={() => setDetalleAbierto(false)} style={{ position: "fixed", inset: 0, zIndex: 55, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "56px 16px 16px" }}>
+        <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: 520, maxHeight: "calc(100dvh - 80px)", overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 14, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <strong style={{ flex: 1, fontFamily: dsF.display, fontSize: 15 }}>Detalle de la sesión</strong>
+            <button type="button" onClick={() => setDetalleAbierto(false)} style={{ minHeight: 40, padding: "0 16px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700, cursor: "pointer" }}>Cerrar</button>
+          </div>
+          <ResumenSesionDisenoReal resumen={resumenDiseno} anchoDesktop={false} bloqueActivo={bloqueActivo} onIrBloque={(id) => { irABloque(id); setDetalleAbierto(false); }} />
+        </div>
+      </div>
+    )}
     {revisandoEnvio && (
       <PasoRevisarEnviarReal
         resumen={resumenDiseno}
