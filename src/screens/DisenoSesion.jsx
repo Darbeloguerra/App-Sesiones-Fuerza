@@ -41,7 +41,7 @@ import { cmjMicroDeFecha, cmjVentanasMicrociclo } from "../calc/cmj.js";
 import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia, sugerirCarga, zonaPct, zonaRir, implicaciones, rtfDePct, OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
 import { aplicarObjetivo, ligarCampo, derivaDeObjetivo, objetivosQueEncajan, objetivosEnZona, textoZonaObjetivo, leerTipicos, guardarTipicos, normalizarTipicos, VALORES_TIPICOS_INICIALES } from "../calc/objetivoTarea.js";
 import { ajustarRecuperaciones, aplicarDescansos, formatearMinutosDiseno } from "../calc/tiempoDisponible.js";
-import { ListaBloquesDiseno, PestanasBloquesDiseno, HojaBloquesDiseno, CajaRecuperacion, GrupoSuperserie, gruposSuperserie, TituloParte, NOMBRE_BLOQUE } from "./DisenoBloques.jsx";
+import { ListaBloquesDiseno, PestanasBloquesDiseno, HojaBloquesDiseno, CajaRecuperacion, GrupoSuperserie, gruposSuperserie, ParteCaja, TarjetaBloque, VacioParte, NOMBRE_BLOQUE } from "./DisenoBloques.jsx";
 import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueObjetivo, BotonValoresTipicos, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
@@ -764,7 +764,7 @@ function celdaTabla(etiqueta, valor, onCambiar, placeholder, ancho, unidad = "",
 // (lado, superserie, tipo, material, nota, objetivo, aviso), cinco cajones iguales
 // con desplegable y flechas. Orden de trabajo: series, carga (%1RM, RIR) y, con la
 // carga elegida, repeticiones.
-function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onAlternarEnlace = null, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null, descansoAjustado = null }) {
+function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, aviso = null, onAplicarSugerido = null, onIgnorarAviso = null, orden, superserie, onAlternarEnlace = null, onSubir, onBajar, onEliminar, materialesDisponibles, onAgregarMaterial, movil = false, onVerVideo = null, onSustituir = null, descansoAjustado = null }) {
   const [ajuste, setAjuste] = useState(null);
   const modo = tarea.modo || "reps";
   const enSuper = !!superserie && (superserie.conAnt || superserie.conSig);
@@ -814,9 +814,18 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
       {mostrarCarga && objetivoGuia?.zonas && <EtiquetaTipo tarea={tarea} onCambiar={onCambiar} />}
       <EtiquetaMaterial tarea={tarea} onCambiar={onCambiar} disponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} mostrarCarga={mostrarCarga} />
       <EtiquetaNota tarea={tarea} onCambiar={onCambiar} />
+      {onSustituir && <EtiquetaAccion texto="⇄ Sustituir" ariaLabel="Sustituir ejercicio" onClick={onSustituir} />}
       {onVerVideo && <EtiquetaAccion texto="▶ Vídeo" ariaLabel="Ver vídeo" onClick={onVerVideo} />}
     </div>
   );
+  const ytId = onVerVideo ? extractYouTubeId(tarea.gif) : null;
+  const matiz = Array.from(String(tarea.nombre || "")).reduce((a, c) => (a * 31 + c.charCodeAt(0)) % 360, 7);
+  const degradado = `linear-gradient(135deg, hsl(${matiz} 45% 32%), hsl(${(matiz + 40) % 360} 40% 18%))`;
+  const miniatura = onVerVideo ? (
+    <button type="button" aria-label="Ver vídeo" onClick={onVerVideo} style={{ width: 36, height: 36, borderRadius: 9, border: 0, padding: 0, flexShrink: 0, cursor: "pointer", background: ytId ? `center / cover url(https://img.youtube.com/vi/${ytId}/mqdefault.jpg), ${degradado}` : degradado, display: "grid", placeItems: "center" }}>
+      <span style={{ width: 20, height: 20, borderRadius: "50%", background: "rgba(0,0,0,0.67)", color: "#fff", fontSize: 9, display: "grid", placeItems: "center", paddingLeft: 1 }}>▶</span>
+    </button>
+  ) : null;
   const lineaAjuste = ajuste ? <span role="status" style={{ fontSize: 11.5, lineHeight: 1.35, color: ds.accent }}>↳ {ajuste}</span> : null;
   const flechas = <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />;
   const celdaSeries = <CeldaDesplegable key="series" movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />;
@@ -844,6 +853,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 9 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {letra}
+          {miniatura}
           <div style={{ flex: 1, minWidth: 0 }}>{nombre}</div>
           {flechas}
         </div>
@@ -869,10 +879,12 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
 }
 
-export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null, sinBordeSuperserie = false }) {
+export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, materialesDisponibles, onAgregarMaterial, orden, onSubir, onBajar, referenciasPorEjercicio, onAmpliarVideo, superserie = null, onAlternarEnlace = null, descansoAjustado = null, sinBordeSuperserie = false, apilada = false, onSustituir = null, ejercicios = null, onAsignarZona = null, bloqueNombre = "" }) {
   // Una sola fila para todos los tamaños: en pantalla ancha todo en una línea;
   // en móvil, en dos niveles. Siempre con los mismos desplegables.
-  const movil = useAnchoVentana() < ANCHO_MIN_TABLA;
+  const anchoVentana = useAnchoVentana();
+  const movil = apilada || anchoVentana < ANCHO_MIN_TABLA;
+  const [sustituyendo, setSustituyendo] = useState(false);
   // El objetivo es de la tarea (se elige en las sugerencias de RIR, Repeticiones o
   // %1RM), no de la sesión: solo esa tarea avisa si se sale de su zona. No se guarda
   // en la base de datos: al reabrir la sesión se conserva la carga, no la etiqueta.
@@ -908,9 +920,12 @@ export function FilaTareaReal({ tarea, onCambiar, onEliminar, mostrarCarga, mate
   return (
     <div style={{ padding: movil ? (enSuperserie ? "10px 8px 10px 7px" : "10px") : (enSuperserie ? "7px 8px 7px 9px" : "7px 8px 7px 12px"), minHeight: movil ? undefined : 56, boxSizing: "border-box", background: ds.bgElevated, borderRadius: 10, border: `1px solid ${resumen.incompleto || aviso ? ds.accentBorderSubtle : ds.border}`, borderLeft: enSuperserie && !sinBordeSuperserie ? `4px solid ${ds.accent}` : undefined, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6 }}>
       <div style={{ flex: "1 1 100%", minWidth: 0, display: "flex", alignItems: "center", gap: 4 }}>
-        <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onAlternarEnlace={onAlternarEnlace} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} descansoAjustado={descansoAjustado} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
+        <ControlesFilaTabla tarea={tarea} onCambiar={onCambiar} mostrarCarga={mostrarCarga} objetivoGuia={objetivoGuia} aviso={aviso} onAplicarSugerido={aplicarSugerido} onIgnorarAviso={ignorarAviso} orden={orden} superserie={superserie} onAlternarEnlace={onAlternarEnlace} onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} materialesDisponibles={materialesDisponibles} onAgregarMaterial={onAgregarMaterial} movil={movil} descansoAjustado={descansoAjustado} onSustituir={onSustituir && ejercicios ? () => setSustituyendo(true) : null} onVerVideo={tieneVideoJugable && onAmpliarVideo ? () => onAmpliarVideo(tarea.gif) : null} />
       </div>
       <CajaRecuperacion tarea={tarea} bloque={mostrarCarga ? "Fuerza" : "Core"} etiquetaPar={parSuperserie} />
+      {sustituyendo && ejercicios && (
+        <SelectorEjercicioReal soloModal ejercicios={ejercicios} bloque={bloqueNombre || (mostrarCarga ? "Fuerza" : "")} titulo={`Sustituir ${tarea.nombre}`} onAdd={(e) => { setSustituyendo(false); onSustituir(e); }} onCerrado={() => setSustituyendo(false)} onAsignarZona={onAsignarZona} />
+      )}
     </div>
   );
 }
@@ -1297,8 +1312,14 @@ const EnSesionContext = React.createContext(() => 0);
 // Hueco (columna derecha) donde la biblioteca se acopla en iPad horizontal / ordenador.
 const BibliotecaSlotContext = React.createContext(null);
 
-export function SelectorEjercicioReal({ ejercicios, bloque, titulo = "", onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
-  const [abierto, setAbierto] = useState(false);
+export function SelectorEjercicioReal({ ejercicios, bloque, titulo = "", soloModal = false, onCerrado = null, onAdd, onAsignarZona, acoplable = false, panelFijo = false, destinos = null, destinoId = "", onCambiarDestino = null }) {
+  const [abierto, setAbierto] = useState(soloModal);
+  const abiertoPrevio = useRef(soloModal);
+  useEffect(() => {
+    if (abiertoPrevio.current && !abierto && onCerrado) onCerrado();
+    abiertoPrevio.current = abierto;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [abierto]);
   const [filtro, setFiltro] = useState("");
   const [zonaFiltro, setZonaFiltro] = useState("");
   const [regionFiltro, setRegionFiltro] = useState("");
@@ -1530,15 +1551,17 @@ export function SelectorEjercicioReal({ ejercicios, bloque, titulo = "", onAdd, 
   }
 
   return (
-    <div style={{ position: "relative" }}>
-      <button onClick={() => setAbierto((v) => !v)} style={{ minHeight: 44, fontSize: 13.5, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "0 14px", cursor: "pointer", fontWeight: 600 }}>
-        + Añadir ejercicios desde biblioteca
-      </button>
+    <div style={{ position: "relative", flex: "1 1 auto" }}>
+      {!soloModal && (
+        <button onClick={() => setAbierto((v) => !v)} style={{ width: "100%", minHeight: 38, fontSize: 13, color: ds.accent, background: "transparent", border: `1px dashed ${ds.accentBorderSubtle}`, borderRadius: 10, padding: "0 14px", cursor: "pointer", fontWeight: 600, textAlign: "center" }}>
+          + Añadir ejercicios desde biblioteca
+        </button>
+      )}
       {abierto && (
         <div onClick={cerrarTodo} style={{ position: "fixed", inset: 0, zIndex: 60, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: lateralPanel ? "stretch" : "flex-end", justifyContent: lateralPanel ? "flex-end" : "center", padding: 0 }}>
           <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: lateralPanel ? 470 : 560, height: lateralPanel ? "100%" : "92dvh", display: "flex", flexDirection: "column", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: lateralPanel ? 0 : "20px 20px 0 0", boxShadow: "0 18px 40px rgba(0,0,0,0.55)", padding: 12, paddingBottom: "calc(12px + env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>Añadir a {titulo || bloque || "la sesión"}</span>
+              <span style={{ fontFamily: dsF.display, fontSize: 15, fontWeight: 700 }}>{soloModal ? titulo : `Añadir a ${titulo || bloque || "la sesión"}`}</span>
               <button type="button" aria-label="Cerrar" onClick={cerrarTodo} style={{ width: 44, height: 44, background: "none", border: "none", color: ds.inkMuted, fontSize: 24, cursor: "pointer", lineHeight: 1 }}>×</button>
             </div>
             {cuerpo}
@@ -1679,6 +1702,7 @@ function CajaCircuitoReal({ circuito, bloque, mostrarCarga, ejercicios, onEjerci
             <CampoResistenciaTareaReal key={t.key} tarea={t} orden={i + 1} onCambiar={(nueva) => actualizarTarea(t.key, nueva)} onEliminar={() => eliminarTarea(t.key)} onSubir={i > 0 ? () => mover(i, -1) : null} onBajar={i < tareas.length - 1 ? () => mover(i, 1) : null} jugadorReferencia={jugadorReferencia} ejercicios={ejercicios} onEjercicioCreado={onEjercicioCreado} onAmpliarVideo={onAmpliarVideo} />
           ) : (
             <FilaTareaReal
+              apilada
               key={t.key}
               tarea={t}
               orden={i + 1}
@@ -2596,6 +2620,32 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   };
   const removeFecha = (f) => setFechas((prev) => prev.filter((d) => d !== f));
 
+  // Sustituir: cambia solo el ejercicio; series, repeticiones, carga y recuperación se mantienen.
+  const sustituirTarea = (setLista, key) => async (ejercicioOClic) => {
+    let ejercicioId = ejercicioOClic.id;
+    let nombre = ejercicioOClic.nombre;
+    let gifUrl = ejercicioOClic.gif_url || "";
+    if (!ejercicioId) {
+      try {
+        const creado = await resolveEjercicio(ejercicios, { nombre, bloque: ejercicioOClic.bloque || "", tags_descriptivos: ejercicioOClic.tags_descriptivos || [] });
+        ejercicioId = creado.id;
+        gifUrl = creado.gif_url || "";
+        addEjercicioLocal(creado);
+      } catch (e) {
+        setError("No se pudo crear el ejercicio nuevo. Comprueba tu conexión e inténtalo de nuevo.");
+        return;
+      }
+    }
+    setLista((prev) => {
+      const anterior = prev.find((t) => t.key === key);
+      return prev.map((t) => {
+        if (t.key === key) return { ...t, nombre, ejercicioId, gif: gifUrl };
+        // la tarea anterior que se alternaba con la sustituida pasa a alternarse con la nueva
+        if (anterior && t.alternaCon && t.alternaCon === anterior.ejercicioId) return { ...t, alternaCon: ejercicioId, alternaConNombre: nombre };
+        return t;
+      });
+    });
+  };
   const agregarTarea = (bloqueSetter, base = null) => async (ejercicioOClic) => {
     let ejercicioId = ejercicioOClic.id;
     let nombre = ejercicioOClic.nombre;
@@ -3241,13 +3291,13 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     setTareasFuerza((prev) => prev.map(aplicar));
     setCircuitosFuerza((prev) => prev.map((c) => ({ ...c, tareas: (c.tareas || []).map(aplicar) })));
   };
-  const pastilla = (activo, aviso) => ({ flexShrink: 0, minHeight: 36, padding: "0 12px", borderRadius: 999, border: `1px solid ${aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontWeight: 600, fontSize: 12.5, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 });
+  const pastilla = (activo, aviso) => ({ flexShrink: 0, height: 30, padding: "0 11px", borderRadius: 9, border: `1px solid ${aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontWeight: 600, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 });
   const datosSesion = (
     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", pointerEvents: readOnly ? "none" : undefined }}>
       <button type="button" onClick={() => setAjustesAbiertos(true)} disabled={readOnly} style={pastilla(true, sinJugadores)}>
         {targetPlayerIds === null ? "Todos los jugadores" : targetPlayerIds.length ? `${targetPlayerIds.length} jugador${targetPlayerIds.length === 1 ? "" : "es"}` : "Elige jugadores"}
       </button>
-      <EtiquetaDesplegable rotulo={objetivoSesionId ? `Objetivo: ${OBJETIVOS_SESION.find((o) => o.id === objetivoSesionId)?.etiqueta} ▾` : "＋ Objetivo"} ariaLabel="Objetivo de la sesión" tono={objetivoSesionId ? "activo" : "vacio"} ancho={300}>
+      <EtiquetaDesplegable rotulo={objetivoSesionId ? `Objetivo: ${OBJETIVOS_SESION.find((o) => o.id === objetivoSesionId)?.etiqueta} ▾` : "＋ Objetivo"} ariaLabel="Objetivo de la sesión" tono={objetivoSesionId ? "activo" : "normal"} grande ancho={300}>
         {(cerrar) => (
           <>
             <Cabecera titulo="Objetivo de la sesión" subtitulo="las tareas de Fuerza lo heredan" />
@@ -3294,7 +3344,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     if (id === "cmj") return "medición";
     const b = resumenDiseno.bloques.find((x) => x.id === id);
     const n = id === "activacion" ? tareasCardioEf.length + tareasEstirEf.length : id === "preventivo" ? (b?.items || []).length : nContenidoBloque(id);
-    return `${n} ej. · ~${Math.round((b?.seg || 0) / 60)} min${avisosPorBloque[id] ? ` · ⚠ ${avisosPorBloque[id]}` : ""}`;
+    return `${n} ej. · ~${Math.round((b?.seg || 0) / 60)} min`;
   };
 
   // Filas de tarea con superseries agrupadas (1a/1b en un mismo recuadro).
@@ -3305,7 +3355,12 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         const t = lista[i];
         return (
           <FilaTareaReal
+            apilada
             key={t.key}
+            ejercicios={ejercicios}
+            onAsignarZona={asignarZonaYActualizar}
+            bloqueNombre={bloque}
+            onSustituir={sustituirTarea(setLista, t.key)}
             tarea={t}
             orden={datos[i].etiqueta}
             superserie={datos[i]}
@@ -3350,6 +3405,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                     {modoMovilidad === "manual" &&
                       (tareaMovilidadManual ? (
                         <FilaTareaReal
+                          apilada
                           tarea={tareaMovilidadManual}
                           mostrarCarga={false}
                           materialesDisponibles={materialesDisponibles}
@@ -3365,27 +3421,24 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   );
   const cuerpoActivacion = () => {
     const partes = PARTES_ACTIVACION.filter((x) => subAct[x.id]);
-    if (!partes.length) return <div style={estiloVacio}>Marca una parte de Activación en la lista de bloques.</div>;
+    if (!partes.length) return <VacioParte>Marca una parte de Activación en la lista de bloques.</VacioParte>;
     const minutosDe = (arr) => Math.round(estimarBloqueEfectivoSeg(arr, []) / 60);
     const parteConLista = (k, titulo, arr, setArr) => (
-      <div key={k} id={`parte-${k}`} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <TituloParte titulo={titulo} minutos={minutosDe(arr)} />
-        {ancho >= ANCHO_MIN_TABLA && arr.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
-        {arr.length ? filasDeTareas(arr, setArr, "Activación", false, false) : <div style={estiloVacio}>Sin ejercicios todavía</div>}
+      <ParteCaja key={k} id={`parte-${k}`} titulo={titulo} minutos={minutosDe(arr)}>
+        {arr.length ? filasDeTareas(arr, setArr, "Activación", false, false) : <VacioParte>Sin ejercicios todavía</VacioParte>}
         <SelectorEjercicioReal acoplable ejercicios={ejercicios} titulo={titulo} onAdd={agregarTarea(setArr, { modo: "minutos", series: "1", cantidad: "8" })} onAsignarZona={asignarZonaYActualizar} />
-      </div>
+      </ParteCaja>
     );
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <>
         {partes.map((x) =>
           x.id === "mov" ? (
-            <div key="mov" id="parte-mov" style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <TituloParte titulo="Movilidad" extra={modoMovilidad === "automatico" ? <span style={{ height: 26, padding: "0 10px", borderRadius: 9, border: `1px solid ${ds.accent}`, background: ds.accentSubtle, color: ds.accent, fontWeight: 600, fontSize: 12, display: "inline-flex", alignItems: "center" }}>Rotación automática</span> : null} />
+            <ParteCaja key="mov" id="parte-mov" titulo="Movilidad" extra={modoMovilidad === "automatico" ? <span style={{ height: 26, padding: "0 11px", borderRadius: 9, border: `1px solid ${ds.accent}`, background: ds.accentSubtle, color: ds.accent, fontWeight: 600, fontSize: 12, display: "inline-flex", alignItems: "center" }}>Rotación automática</span> : null}>
               {cuerpoMovilidad()}
-            </div>
+            </ParteCaja>
           ) : x.id === "cardio" ? parteConLista("cardio", "Cardiovascular", tareasCardio, setTareasCardio) : parteConLista("estir", "Estiramiento dinámico", tareasEstir, setTareasEstir)
         )}
-      </div>
+      </>
     );
   };
   const cuerpoPreventivo = () => (
@@ -3477,6 +3530,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {tareasPreventivoManual.map((t) => (
                           <FilaTareaReal
+                            apilada
                             key={t.key}
                             tarea={t}
                             mostrarCarga={false}
@@ -3494,7 +3548,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
   );
   const cuerpoCore = () => (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    {ancho >= ANCHO_MIN_TABLA && tareasCore.length > 0 && <EncabezadoTablaTareas mostrarCarga={false} />}
                     {filasDeTareas(tareasCore, setTareasCore, "Core", false, false)}
                     {circuitosCore.map((c) => (
                       <CajaCircuitoReal
@@ -3616,7 +3669,6 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                       />
                     )}
                     <ResumenAvisosCarga tareas={tareasFuerza} />
-                    {ancho >= ANCHO_MIN_TABLA && tareasFuerza.length > 0 && <EncabezadoTablaTareas mostrarCarga />}
                     {filasDeTareas(tareasFuerza, setTareasFuerza, "Fuerza", true, true)}
                     {circuitosFuerza.map((c) => (
                       <CajaCircuitoReal
@@ -3649,7 +3701,11 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
                     </div>
                   </div>
   );
-  const cuerposBloque = { activacion: cuerpoActivacion, preventivo: cuerpoPreventivo, core: cuerpoCore, resistencia: cuerpoResistencia, cmj: cuerpoCmj, fuerza: cuerpoFuerza };
+  const enCaja = (id, fn) => () => {
+    const b = resumenDiseno.bloques.find((x) => x.id === id);
+    return <ParteCaja id={`parte-${id}`} titulo="Ejercicios" minutos={Math.round((b?.seg || 0) / 60)}>{fn()}</ParteCaja>;
+  };
+  const cuerposBloque = { activacion: cuerpoActivacion, preventivo: enCaja("preventivo", cuerpoPreventivo), core: enCaja("core", cuerpoCore), resistencia: enCaja("resistencia", cuerpoResistencia), cmj: cuerpoCmj, fuerza: enCaja("fuerza", cuerpoFuerza) };
 
   const etiquetaGuardar = isEditing && sesionExistente?.enviada ? "Guardar cambios" : "Guardar en biblioteca";
   const botonGuardar = (corto) => (
@@ -3658,7 +3714,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       onClick={() => guardar(true)}
       disabled={guardando}
       title={isEditing && sesionExistente?.enviada ? "Guarda los cambios sin cambiar el estado: la sesión sigue publicada para los jugadores" : "Se guarda tal cual está, sin fecha obligatoria. No se envía a los jugadores: la asignación (para quién y cuándo) se hace en el paso siguiente."}
-      style={{ flexShrink: 0, minHeight: 44, padding: "0 16px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surfaceRaised, color: ds.ink, fontFamily: dsF.sans, fontWeight: 700, fontSize: 14, cursor: "pointer", whiteSpace: "nowrap", opacity: guardando ? 0.6 : 1 }}
+      style={{ flexShrink: 0, minHeight: 38, padding: "0 14px", borderRadius: 10, border: `1px solid ${ds.border}`, background: ds.surface, color: ds.ink, fontFamily: dsF.sans, fontWeight: 600, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap", opacity: guardando ? 0.6 : 1 }}
     >
       {guardando ? "Guardando..." : (corto || lateralBloques) ? "Guardar" : etiquetaGuardar}
     </button>
@@ -3668,7 +3724,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       type="button"
       onClick={() => setRevisandoEnvio(true)}
       disabled={guardando}
-      style={{ flexShrink: 0, minHeight: 44, padding: "0 18px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontFamily: dsF.sans, fontWeight: 700, fontSize: 14, cursor: "pointer", whiteSpace: "nowrap", opacity: guardando ? 0.6 : 1 }}
+      style={{ flexShrink: 0, minHeight: 38, padding: "0 14px", borderRadius: 10, border: "none", background: ds.accent, color: ds.accentInk, fontFamily: dsF.sans, fontWeight: 700, fontSize: 13, cursor: "pointer", whiteSpace: "nowrap", opacity: guardando ? 0.6 : 1 }}
     >
       {corto ? "Siguiente →" : "Siguiente: asignar →"}
     </button>
@@ -3682,7 +3738,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
         disabled={readOnly}
         placeholder="Nombre de la sesión"
         aria-label="Nombre de la sesión"
-        style={{ flex: "1 1 140px", minWidth: 0, maxWidth: 420, minHeight: 44, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, fontWeight: 700, padding: "0 12px", boxSizing: "border-box" }}
+        style={{ flex: "1 1 140px", minWidth: 0, maxWidth: 420, minHeight: 40, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, color: ds.ink, fontWeight: 700, padding: "0 12px", boxSizing: "border-box" }}
       />
     </>
   );
@@ -3693,19 +3749,19 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     <BibliotecaSlotContext.Provider value={null}>
     <>
     <PantallaBase rol="entrenador" maxWidth={lateralBloques ? 1320 : ancho >= 700 ? 900 : 640} layoutFijo>
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, border: `1px solid ${ds.border}`, borderRadius: 14, overflow: "hidden", background: ds.canvas }}>
         <div style={{ flexShrink: 0 }}>
-          <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 12, padding: "8px 10px", display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+          <div style={{ background: ds.bgElevated, borderBottom: `1px solid ${ds.border}`, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
             <div style={filaFlex}>{filaNombre}{!readOnly && <>{botonGuardar(true)}{botonSiguiente(true)}</>}</div>
           </div>
         {readOnly && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.accent }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", margin: "10px 14px 0", fontSize: 12.5, color: ds.accent }}>
             <Lock size={13} style={{ flexShrink: 0 }} />
             Un jugador ya envió esta sesión — solo lectura. Para cambiar algo, vuelve al listado y usa "Reutilizar como nueva".
           </div>
         )}
         {esReutilizacion && !isEditing && (
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "10px 12px", marginBottom: 18, fontSize: 12.5, color: ds.inkSecondary }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "10px 12px", margin: "10px 14px 0", fontSize: 12.5, color: ds.inkSecondary }}>
             <span style={{ fontWeight: 700, color: ds.ink }}>Progresión de carga</span>
             <span>Subir tareas de Fuerza pautadas por %1RM:</span>
             <select
@@ -3723,8 +3779,8 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
             </span>
           </div>
         )}
-          {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, marginBottom: 8 }}>{error}</div>}
-          {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, marginBottom: 8 }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
+          {!readOnly && error && <div style={{ color: ds.danger, fontSize: 13, margin: "10px 14px 0" }}>{error}</div>}
+          {!readOnly && ok && <div style={{ color: ds.success, fontSize: 13, margin: "10px 14px 0" }}>{ok === "borrador" ? (isEditing && sesionExistente?.enviada ? "Cambios guardados. La sesión sigue publicada." : "Guardado como borrador.") : "Guardado y enviado."}</div>}
           {ajustesAbiertos && (
             <div onClick={() => setAjustesAbiertos(false)} style={{ position: "fixed", inset: 0, zIndex: 56, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "72px 16px 16px" }}>
               <div onClick={(ev) => ev.stopPropagation()} className="ds-reset" style={{ width: "100%", maxWidth: 560, maxHeight: "calc(100dvh - 96px)", overflowY: "auto", background: ds.bgElevated, border: `1px solid ${ds.border}`, borderRadius: 14, padding: 16, display: "flex", flexDirection: "column", gap: 14, boxShadow: "0 18px 40px rgba(0,0,0,0.55)" }}>
@@ -3842,31 +3898,33 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
           )}
         </div>
 
-        <div style={{ display: "flex", gap: 14, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
+        {!lateralBloques && (
+          <div style={{ flexShrink: 0, padding: "10px 12px", borderBottom: `1px solid ${ds.border}`, background: ds.bgElevated }}>
+            <PestanasBloquesDiseno ids={idsMarcados} foco={bloqueActivo} avisos={avisosPorBloque} onFoco={irABloque} onMas={() => setHojaBloques(true)} />
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 0, flex: 1, minHeight: 0, alignItems: "stretch", overflow: "hidden" }}>
           {lateralBloques && (
-            <aside style={{ width: 300, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, paddingBottom: 6, pointerEvents: readOnly ? "none" : undefined }}>
+            <aside style={{ width: 288, flexShrink: 0, overflowY: "auto", display: "flex", flexDirection: "column", gap: 14, padding: 12, background: ds.bgElevated, borderRight: `1px solid ${ds.border}`, boxSizing: "border-box", pointerEvents: readOnly ? "none" : undefined }}>
               {datosSesion}
-              <span style={{ fontFamily: dsF.mono, fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted }}>Bloques</span>
+              <div><span style={{ fontFamily: dsF.mono, fontWeight: 600, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted }}>Bloques</span></div>
               {listaBloques(false)}
             </aside>
           )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 12, flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", paddingBottom: 6 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10, flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto", padding: 14, boxSizing: "border-box" }}>
             {!lateralBloques && (
-              <>
-                <PestanasBloquesDiseno ids={idsMarcados} foco={bloqueActivo} avisos={avisosPorBloque} onFoco={irABloque} onMas={() => setHojaBloques(true)} />
-                {datosSesion}
-              </>
+              <>{datosSesion}</>
             )}
             {mostrarResumen && panelResumenOrden}
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, pointerEvents: readOnly ? "none" : undefined }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10, pointerEvents: readOnly ? "none" : undefined }}>
               {idsMarcados.length ? (
                 idsMarcados.map((id) => {
                   const b = resumenDiseno.bloques.find((x) => x.id === id);
                   return (
                     <div key={id} id={`bloque-${id}`}>
-                      <TarjetaBloqueDiseno id={id} abierto={bloqueActivo === id} onToggle={() => setBloqueActivo((prev) => (prev === id ? null : id))} resumen={resumenCard(id)} vacio={!!b?.vacio} color={COLOR_BLOQUE_DISENO[id]}>
+                      <TarjetaBloque abierto={bloqueActivo === id} onToggle={() => setBloqueActivo((prev) => (prev === id ? null : id))} titulo={NOMBRE_BLOQUE[id]} resumen={resumenCard(id)} avisos={avisosPorBloque[id] || 0}>
                         {bloqueActivo === id && cuerposBloque[id]()}
-                      </TarjetaBloqueDiseno>
+                      </TarjetaBloque>
                     </div>
                   );
                 })
