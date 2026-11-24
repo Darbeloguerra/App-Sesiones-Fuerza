@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { evaluarCarga, avisoDeTarea, firmaCarga, sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia } from "./guiaObjetivo.js";
+import { evaluarCarga, avisoDeTarea, firmaCarga, sugerirCarga, aplicarSugerencia, OBJETIVOS_SESION, objetivoDeTexto, rtfDePct, guiaPorReps, evaluarTarea, tiraReferencia, textoSugerido } from "./guiaObjetivo.js";
 
 const fuerza = objetivoDeTexto("Fuerza");
 const hiper = objetivoDeTexto("hipertrofia");
@@ -88,13 +88,13 @@ test("potencia: RIR 1 -> bajo; RIR 3 y RIR 8 -> dentro (no hay techo)", () => {
   assert.equal(pot.zonas.length, 2);
 });
 
-test("sugerirCarga: fuerza 4 reps -> RIR 4 y 80 % (RTF 8); 7 reps -> RIR 4 sin %; potencia RIR 3 y % según tipo", () => {
+test("sugerirCarga: fuerza 4 reps -> RIR 4 y 80 % (RTF 8); 7 reps -> RIR 4 sin %; potencia sin RIR y % según tipo", () => {
   assert.deepEqual(sugerirCarga(fuerza, 4), { rir: 4, pct1rm: 80 });
   assert.deepEqual(sugerirCarga(fuerza, 7), { rir: 4, pct1rm: null });
   assert.deepEqual(sugerirCarga(hiper, 8), { rir: 2, pct1rm: 75 });
-  assert.deepEqual(sugerirCarga(pot, 3), { rir: 3, pct1rm: 50 });
-  assert.deepEqual(sugerirCarga(pot, 3, "pliometrico"), { rir: 3, pct1rm: 30 });
-  assert.deepEqual(sugerirCarga(pot, 3, "nopliometrico"), { rir: 3, pct1rm: 50 });
+  assert.deepEqual(sugerirCarga(pot, 3), { rir: null, pct1rm: 50 });
+  assert.deepEqual(sugerirCarga(pot, 3, "pliometrico"), { rir: null, pct1rm: 30 });
+  assert.deepEqual(sugerirCarga(pot, 3, "nopliometrico"), { rir: null, pct1rm: 50 });
   assert.equal(sugerirCarga(fuerza, ""), null);
 });
 
@@ -114,9 +114,9 @@ test("aplicarSugerencia: rellena vacíos, se actualiza si fue automático, nunca
 
 test("aplicarSugerencia potencia: cambia el % al cambiar el tipo mientras sea automático", () => {
   const a = aplicarSugerencia(pot, { modo: "reps", cantidad: "5", rir: "", pct1rm: "", tipoMov: "nopliometrico" });
-  assert.deepEqual([a.rir, a.pct1rm], ["3", "50"]);
+  assert.deepEqual([a.rir, a.pct1rm], ["", "50"]);
   const b = aplicarSugerencia(pot, { ...a, tipoMov: "pliometrico" });
-  assert.deepEqual([b.rir, b.pct1rm], ["3", "30"]);
+  assert.deepEqual([b.rir, b.pct1rm], ["", "30"]);
 });
 
 import { zonaPct, zonaRir, implicaciones } from "./guiaObjetivo.js";
@@ -255,8 +255,9 @@ test("rir: si el RIR elegido ya encaja en el rango del objetivo, se conserva", (
 
 test("rir sin %: propone el RIR por defecto y pide un % desde 75", () => {
   const f = sugerenciasPorObjetivo({ pct1rm: "", rir: "", cantidad: "" }, "rir");
-  assert.deepEqual(f.map((x) => x.aplicar.rir), ["4", "2", "3"]);
+  assert.deepEqual(f.map((x) => x.aplicar?.rir), ["4", "2", undefined]);
   assert.match(f[0].texto, /desde 75/);
+  assert.match(f[2].texto, /Sin RIR/);
 });
 
 test("pct: solo informa de la carga habitual y marca el objetivo activo", () => {
@@ -266,4 +267,23 @@ test("pct: solo informa de la carga habitual y marca el objetivo activo", () => 
   assert.match(f[2].texto, /30–70 %/);
   assert.deepEqual(f.map((x) => x.activo), [false, true, false]);
   assert.deepEqual(f[0].aplicar, {});
+});
+
+test("potencia no usa RIR: 60 %, 4 reps y un RIR cualquiera no generan aviso de RIR", () => {
+  assert.equal(pot.sinRir, true);
+  const e = evaluarCarga(pot, { reps: 4, rir: 3, pct1rm: 60, tipoMov: "nopliometrico" });
+  assert.equal(e.estado, "dentro");
+  const f = evaluarCarga(pot, { reps: 4, rir: 0, pct1rm: 60, tipoMov: "nopliometrico" });
+  assert.equal(f.estado, "dentro");
+});
+
+test("potencia: aviso de % fuera de zona propone solo el % y más de 6 reps avisa", () => {
+  const a = evaluarCarga(pot, { reps: 4, rir: "", pct1rm: 80, tipoMov: "nopliometrico" });
+  assert.equal(a.estado, "fuera");
+  assert.equal(a.campo, "pct");
+  assert.deepEqual(a.sugerido, { rir: null, pct1rm: 50 });
+  assert.equal(textoSugerido(a.sugerido), "50 %");
+  const b = evaluarCarga(pot, { reps: 8, rir: "", pct1rm: 50, tipoMov: "nopliometrico" });
+  assert.equal(b.estado, "fuera");
+  assert.equal(b.campo, "reps");
 });
