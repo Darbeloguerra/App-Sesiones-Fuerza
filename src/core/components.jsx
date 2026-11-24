@@ -14,6 +14,14 @@ import { fmtDateLabel, fmtDateShort } from "../calc/fechas.js";
 export function VideoEmbed({ url }) {
   const [estado, setEstado] = useState("cargando"); // cargando | listo | error
   useEffect(() => setEstado("cargando"), [url]);
+  // iOS Safari no siempre dispara "canplay" con preload="metadata" hasta que se
+  // pulsa play. Pasados unos segundos se quita el spinner igualmente: el vídeo
+  // ya está visible y se puede reproducir con sus controles.
+  useEffect(() => {
+    if (estado !== "cargando") return undefined;
+    const t = setTimeout(() => setEstado((e) => (e === "cargando" ? "listo" : e)), 3000);
+    return () => clearTimeout(t);
+  }, [estado, url]);
 
   if (!url) return null;
   const videoId = extractYouTubeId(url);
@@ -51,7 +59,7 @@ export function VideoEmbed({ url }) {
     return (
       <div style={{ marginTop: 8, position: "relative", width: "100%", borderRadius: 8, overflow: "hidden", background: "#000", minHeight: estado === "error" ? 0 : 160 }} onClick={(e) => e.stopPropagation()}>
         {estado === "cargando" && (
-          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, background: ds.surface }}>
+          <div style={{ position: "absolute", inset: 0, zIndex: 1, pointerEvents: "none", display: "flex", alignItems: "center", justifyContent: "center", color: ds.inkSecondary, background: ds.surface }}>
             <Loader2 size={22} style={{ animation: "spin 1s linear infinite" }} />
           </div>
         )}
@@ -62,13 +70,16 @@ export function VideoEmbed({ url }) {
           </div>
         ) : (
           <video
-            src={url}
+            src={url.includes("#") ? url : `${url}#t=0.1`}
             controls
             playsInline
             preload="metadata"
+            onLoadedMetadata={() => setEstado("listo")}
+            onLoadedData={() => setEstado("listo")}
             onCanPlay={() => setEstado("listo")}
+            onPlay={() => setEstado("listo")}
             onError={() => setEstado("error")}
-            style={{ width: "100%", maxHeight: 320, display: "block", opacity: estado === "listo" ? 1 : 0 }}
+            style={{ width: "100%", maxHeight: 320, display: "block" }}
           />
         )}
       </div>
