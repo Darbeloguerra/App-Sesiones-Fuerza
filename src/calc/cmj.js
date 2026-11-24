@@ -329,7 +329,7 @@ export function cmjMotivoDia(microResult, dayField, umbral) {
   return { status: worst, motivo: cmjNivelAccion(worstDelta, worst, u.ambarPct, u.rojoPct, dayField), nivel: cmjNivelPalabra(worstDelta, worst, u.ambarPct, u.rojoPct) };
 }
 export function cmjMotivoRecuperacion(recuperacion, umbral) {
-  if (!recuperacion) return { status: "gray", motivo: "Sin Inicio del microciclo anterior con el que comparar.", nivel: null };
+  if (!recuperacion) return { status: "gray", motivo: "Sin ningún Inicio anterior con el que comparar.", nivel: null };
   if (recuperacion.status === "gray") {
     return { status: "gray", nivel: null, motivo: "Aún sin datos suficientes para comparar con el Inicio anterior." };
   }
@@ -339,9 +339,12 @@ export function cmjMotivoRecuperacion(recuperacion, umbral) {
     if (mm.status === recuperacion.status && mm.delta != null && (worstDelta == null || Math.abs(mm.delta) > Math.abs(worstDelta))) { worstDelta = mm.delta; worstKey = metric.key; }
   });
   const u = umbral[worstKey] || umbral.altura;
+  const contra = recuperacion.salta && recuperacion.contraNumero != null
+    ? `del último Inicio disponible (microciclo ${recuperacion.contraNumero})`
+    : "del microciclo anterior";
   const prefijo = recuperacion.status === "green"
-    ? "En línea con el Inicio del microciclo anterior. "
-    : "Por debajo del Inicio del microciclo anterior. ";
+    ? `En línea con el Inicio ${contra}. `
+    : `Por debajo del Inicio ${contra}. `;
   return { status: recuperacion.status, motivo: prefijo + cmjNivelAccion(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct, "inicio"), nivel: cmjNivelPalabra(worstDelta, recuperacion.status, u.ambarPct, u.rojoPct) };
 }
 
@@ -473,8 +476,17 @@ export function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individual
     microList.forEach((meta, idx) => {
       const curr = microResults.get(meta.id);
       if (!curr || !curr.inicio || idx === 0) return;
-      const prev = microResults.get(microList[idx - 1].id);
-      if (!prev || !prev.inicio) return;
+      // Se compara con el Inicio más reciente que exista, no solo con el del
+      // microciclo inmediatamente anterior: si esa semana no hubo Inicio
+      // (jugador ausente, test no hecho), antes la comparación quedaba vacía.
+      // Se guarda contra qué microciclo se comparó para poder decirlo.
+      let prev = null;
+      let prevMeta = null;
+      for (let k = idx - 1; k >= 0; k--) {
+        const cand = microResults.get(microList[k].id);
+        if (cand && cand.inicio) { prev = cand; prevMeta = microList[k]; break; }
+      }
+      if (!prev) return;
 
       const recMetrics = {};
       let worst = "gray";
@@ -487,7 +499,13 @@ export function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individual
         recMetrics[metric.key] = { delta, status };
         if (CMJ_STATUS_ORDER[status] < CMJ_STATUS_ORDER[worst]) worst = status;
       });
-      curr.recuperacion = { metrics: recMetrics, status: worst, modo: "inicio_anterior" };
+      curr.recuperacion = {
+        metrics: recMetrics,
+        status: worst,
+        modo: "inicio_anterior",
+        contraNumero: prevMeta.numero,
+        salta: prevMeta.id !== microList[idx - 1].id,
+      };
       // CRÍTICO: el primer día de un microciclo (antes de que haya MD-2/MD+1
       // esa semana) solo tiene esta comparación (Inicio contra Inicio
       // anterior) — si no se refleja aquí, curr.status se queda "gray" y
