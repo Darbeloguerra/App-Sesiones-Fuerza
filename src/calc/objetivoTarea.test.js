@@ -42,7 +42,7 @@ test("deriva: fuerza con RIR 1 pasa a hipertrofia", () => {
 });
 
 test("objetivosEnZona para las notas del desplegable", () => {
-  assert.deepEqual(objetivosEnZona("rir", 4, T()), ["fuerza", "hipertrofia", "potencia"]);
+  assert.deepEqual(objetivosEnZona("rir", 4, T()), ["fuerza", "hipertrofia"]); // potencia no usa RIR
   assert.deepEqual(objetivosEnZona("rir", 1, T()), ["hipertrofia"]);
   assert.deepEqual(objetivosEnZona("pct", 85, T()), ["fuerza", "hipertrofia"]);
 });
@@ -66,9 +66,12 @@ test("elegir objetivo con % ya puesto respeta el % y rellena RIR y reps", () => 
 
 test("potencia sin tabla usa las repeticiones típicas; pliométrico limita a 30 %", () => {
   const a = aplicarObjetivo(T(), "potencia").tarea;
-  assert.deepEqual([a.pct1rm, a.rir, a.cantidad], ["60", "3", "4"]);
+  assert.deepEqual([a.pct1rm, a.rir, a.cantidad], ["50", "", "4"]);
+  assert.equal(a.modoCarga, "pct1rm");
   const b = aplicarObjetivo(T({ tipoMov: "pliometrico" }), "potencia").tarea;
   assert.equal(b.pct1rm, "30");
+  const c = aplicarObjetivo(T({ cantidad: "5", rir: "3" }), "potencia").tarea;
+  assert.deepEqual([c.cantidad, c.rir], ["5", ""]); // conserva las repeticiones y vacía el RIR
 });
 
 test("los valores típicos editados se usan", () => {
@@ -126,4 +129,13 @@ test("leer y guardar valores típicos en un almacén", () => {
   guardarTipicos({ ...VALORES_TIPICOS_INICIALES, hipertrofia: { pct: 70, rir: 1 } }, a);
   assert.deepEqual(leerTipicos(a).hipertrofia, { pct: 70, rir: 1 });
   assert.deepEqual(leerTipicos({ getItem: () => "no es json", setItem() {} }), VALORES_TIPICOS_INICIALES);
+});
+
+test("potencia: cambiar % o repeticiones no recalcula nada ni rellena RIR", () => {
+  const base = T({ objetivo: "potencia", pct1rm: "50", cantidad: "4", rir: "" });
+  const a = ligarCampo(base, "pct1rm", "60");
+  assert.deepEqual([a.tarea.pct1rm, a.tarea.cantidad, a.tarea.rir], ["60", "4", ""]);
+  assert.equal(a.mensaje, null);
+  const b = ligarCampo({ ...base, pct1rm: "80" }, "cantidad", "6");
+  assert.equal(b.tarea.rir, "");
 });
