@@ -13,13 +13,13 @@
 //    de partida de la app, no un dato científico; el entrenador los edita.
 //  - La conversión %1RM <-> repeticiones máximas usa la tabla de e1rm.js
 //    (fiable desde el 75 %); por debajo de 75 % no se calculan repeticiones.
-import { OBJETIVOS_SESION, RIR_DEFECTO, REPS_MAX_POTENCIA, rtfDePct } from "./guiaObjetivo.js";
+import { OBJETIVOS_SESION, RIR_DEFECTO, REPS_MAX_POTENCIA, PCT_POTENCIA_DEFECTO, rtfDePct } from "./guiaObjetivo.js";
 import { pct1RMporRTF } from "./e1rm.js";
 
 export const VALORES_TIPICOS_INICIALES = {
   fuerza: { pct: 80, rir: RIR_DEFECTO.fuerza },
   hipertrofia: { pct: 75, rir: RIR_DEFECTO.hipertrofia },
-  potencia: { pct: 60, rir: RIR_DEFECTO.potencia, reps: 4 },
+  potencia: { pct: PCT_POTENCIA_DEFECTO.nopliometrico, reps: 4 },
 };
 
 const CLAVE_TIPICOS = "asf.valoresTipicos.v1";
@@ -40,7 +40,7 @@ export function normalizarTipicos(crudo) {
     if (!c || typeof c !== "object") continue;
     const pct = Number(c.pct), rir = Number(c.rir), reps = Number(c.reps);
     if (Number.isFinite(pct) && pct >= 30 && pct <= 100) base[id].pct = pct;
-    if (Number.isFinite(rir) && rir >= 0 && rir <= 10) base[id].rir = rir;
+    if (Number.isFinite(rir) && rir >= 0 && rir <= 10 && id !== "potencia") base[id].rir = rir;
     if (id === "potencia" && Number.isFinite(reps) && reps >= 1 && reps <= REPS_MAX_POTENCIA) base[id].reps = reps;
   }
   return base;
@@ -115,7 +115,7 @@ export function objetivosQueEncajan(t) {
   if (!tienePct(t) && !Number.isFinite(rir) && !Number.isFinite(n)) return [];
   return OBJETIVOS_SESION.filter((o) => {
     if (tienePct(t) && !enZonaPct(o, p, t.tipoMov)) return false;
-    if (Number.isFinite(rir) && !enZonaRir(o, Math.round(rir))) return false;
+    if (!o.sinRir && Number.isFinite(rir) && !enZonaRir(o, Math.round(rir))) return false;
     if (o.zonas && Number.isFinite(n) && n > REPS_MAX_POTENCIA) return false;
     return true;
   }).map((o) => o.id);
@@ -135,7 +135,7 @@ export function derivaDeObjetivo(t) {
 export function objetivosEnZona(campo, valor, t) {
   return OBJETIVOS_SESION.filter((o) => {
     if (campo === "pct") return enZonaPct(o, valor, t.tipoMov);
-    if (campo === "rir") return enZonaRir(o, valor);
+    if (campo === "rir") return !o.sinRir && enZonaRir(o, valor);
     return enZonaReps(o, t, valor);
   }).map((o) => o.id);
 }
@@ -154,6 +154,16 @@ export function aplicarObjetivo(t, id, tipicos = VALORES_TIPICOS_INICIALES) {
   const pctTipico = o.zonas && t.tipoMov === "pliometrico" ? Math.min(d.pct, 30) : d.pct;
   const pct = tenia ? String(t.pct1rm) : String(pctTipico);
   const R = rtfDePct(pct);
+  if (o.sinRir) {
+    // Potencia: sin RIR. Se mantienen las repeticiones que ya hubiera (el tope de 6
+    // se avisa, no se impone) y, si no hay, se usa el valor típico.
+    const cantidadPot = esNum(t.cantidad) ? String(t.cantidad) : String(d.reps ?? 4);
+    const tareaPot = { ...t, objetivo: id, pct1rm: pct, pct1rmOrigen: undefined, rir: "", cantidad: cantidadPot, modoCarga: "pct1rm", cargaAuto: false };
+    const mensajePot = tenia
+      ? `${o.etiqueta} con tu ${pct} %: sin RIR. El % no se toca.`
+      : `${o.etiqueta}: ${pct} % recomendado · ${cantidadPot} reps · sin RIR. Ajusta lo que necesites.`;
+    return { tarea: tareaPot, mensaje: mensajePot };
+  }
   let cantidad;
   if (R != null) cantidad = String(Math.max(1, Math.round(R - d.rir)));
   else cantidad = String(d.reps ?? (esNum(t.cantidad) ? t.cantidad : (o.zonas ? 4 : 8)));
@@ -177,6 +187,12 @@ export function ligarCampo(t, campo, valor, tipicos = VALORES_TIPICOS_INICIALES)
   if ((t.modo || "reps") !== "reps") return { tarea: nueva, mensaje: null };
   const o = objetivoPorId(t.objetivo);
   const R = tienePct(nueva) ? rtfDePct(num(nueva.pct1rm)) : null;
+
+  if (o && o.sinRir) {
+    // Potencia: sin RIR, nada se recalcula al cambiar % o repeticiones.
+    if (campo !== "rir") nueva.rir = "";
+    return { tarea: nueva, mensaje: null };
+  }
 
   if (campo === "pct1rm" && o) {
     const d = tipicos[o.id] || VALORES_TIPICOS_INICIALES[o.id];
