@@ -776,7 +776,10 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const conGuia = !!objetivoGuia && mostrarCarga && modo === "reps";
   const conSugerencias = mostrarCarga && modo === "reps";
   const sug = conGuia ? sugerirCarga(objetivoGuia, tarea.cantidad, tarea.tipoMov) : null;
-  const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: RIR ${sug.rir}${sug.pct1rm != null ? ` · ${sug.pct1rm} %` : ""}` : null;
+  const textoSug = sug ? `Sugerido para ${Math.round(Number(tarea.cantidad))} reps: ${textoSugerido(sug)}` : null;
+  // Potencia no se pauta con RIR: no hay celda de RIR (en la tabla se deja el hueco
+  // en blanco para que las columnas sigan alineadas con el encabezado).
+  const sinRir = !!objetivoGuia?.sinRir && conGuia;
   const zr = conGuia ? zonaRir(objetivoGuia) : null;
   const zp = conGuia ? zonaPct(objetivoGuia, { reps: tarea.cantidad, tipoMov: tarea.tipoMov }) : null;
   const quienes = (campo, v) => objetivosEnZona(campo, v, tarea).map((id) => OBJETIVOS_SESION.find((o) => o.id === id).etiqueta).join(" · ");
@@ -843,8 +846,13 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   );
   const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={cambiarCampo("pct1rm")} opciones={pctOpc} extra={conSugerencias ? bloqueObj("pct") : null} pie={<Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} />} />;
   const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={cambiarCampo("rir")} opciones={rirOpc} extra={conSugerencias ? bloqueObj("rir") : null} pie={<Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} />} />;
+  const huecoRir = <div key="rir-hueco" aria-hidden="true" style={{ width: ANCHO_COL, flexShrink: 0 }} />;
   const celdas = mostrarCarga ? (
-    <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}</>
+    sinRir ? (
+      <>{celdaSeries}{celdaPct}{movil ? null : huecoRir}{celdaReps}</>
+    ) : (
+      <>{celdaSeries}{celdaPct}{celdaRir}{celdaReps}</>
+    )
   ) : (
     <>{celdaSeries}{celdaReps}</>
   );
@@ -859,7 +867,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
         </div>
         {etiquetas}
         {lineaAjuste}
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${mostrarCarga ? 4 : 2}, minmax(0, 1fr))`, gap: 4 }}>{celdas}</div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${mostrarCarga ? (sinRir ? 3 : 4) : 2}, minmax(0, 1fr))`, gap: 4 }}>{celdas}</div>
       </div>
     );
   }
