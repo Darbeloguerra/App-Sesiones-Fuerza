@@ -23,6 +23,7 @@ import {
 import { todayStr, fmtHaceDias } from "../calc/fechas.js";
 import { DisenoSesionReal } from "./DisenoSesion.jsx";
 import { ListaPlantillasReal } from "./BibliotecaSesiones.jsx";
+import { ListaEnlacesVideoReal, BotonSubirVideo } from "./SubidaVideos.jsx";
 
 const BLOQUES_BIBLIOTECA = ["Fuerza", "Específicas", "Core", "Movilidad", "Preventivo", "Resistencia"];
 // TAGS_DESCRIPTIVOS_BIBLIOTECA ahora en src/core/components.jsx — importada
@@ -466,6 +467,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
           )}
           {enlaceReconocido && <VideoEmbed url={videoUrl} />}
         </label>
+        <BotonSubirVideo onSubido={setVideoUrl} />
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>
             VÍDEOS POR VARIANTE (opcional — para cuando el gesto cambia según el material)
@@ -506,6 +508,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
                 />
                 {noReconocido && <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace.</span>}
                 {reconocido && <VideoEmbed url={f.url} />}
+                <BotonSubirVideo onSubido={(url) => actualizarFila(f.key, { url })} />
               </div>
             );
           })}
@@ -896,45 +899,6 @@ function FilasEjerciciosReal({ familias, onEditar, onToggleFavorito, onGuardarVi
 }
 
 const tieneVideoEjercicio = (e) => !!(e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean));
-
-// Vista rápida: solo los ejercicios sin vídeo, con un campo para pegar el
-// enlace y guardarlo al momento, sin abrir el panel completo de cada uno.
-function ListaEnlacesVideoReal({ ejercicios, onGuardar }) {
-  const [borradores, setBorradores] = useState({});
-  const [guardando, setGuardando] = useState("");
-  const [error, setError] = useState("");
-  const sin = ejercicios.filter((e) => !tieneVideoEjercicio(e));
-  if (!sin.length) return <div style={{ fontSize: 13, color: ds.inkSecondary, padding: 12 }}>Todos los ejercicios tienen vídeo. 🎉</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ fontSize: 12, color: ds.inkSecondary }}>{sin.length} ejercicios sin vídeo — pega el enlace (YouTube o vídeo directo) y pulsa Guardar.</div>
-      {error && <div style={{ color: ds.danger, fontSize: 12 }}>{error}</div>}
-      {sin.map((e) => (
-        <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", border: `1px solid ${ds.border}`, borderRadius: 8 }}>
-          <div style={{ flex: "1 1 180px", minWidth: 0 }}>
-            <div style={{ fontSize: 13, color: ds.ink }}>{e.nombre}</div>
-            <div style={{ fontSize: 10.5, color: ds.inkMuted, fontFamily: dsF.mono }}>{[e.bloque, ...(e.tags_descriptivos || [])].filter(Boolean).join(" · ")}</div>
-          </div>
-          <input value={borradores[e.id] || ""} onChange={(ev) => setBorradores((b) => ({ ...b, [e.id]: ev.target.value }))} placeholder="https://youtu.be/…" style={{ flex: "2 1 240px", background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 6, color: ds.ink, fontSize: 12.5, padding: "6px 8px" }} />
-          <button
-            type="button"
-            disabled={!(borradores[e.id] || "").trim() || guardando === e.id}
-            onClick={async () => {
-              setGuardando(e.id);
-              setError("");
-              const ok = await onGuardar(e, borradores[e.id].trim());
-              if (!ok) setError("No se pudo guardar. Inténtalo de nuevo.");
-              setGuardando("");
-            }}
-            style={{ fontSize: 12, fontWeight: 600, color: ds.accent, background: "transparent", border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 6, padding: "6px 12px", cursor: "pointer", opacity: (borradores[e.id] || "").trim() ? 1 : 0.5 }}
-          >
-            {guardando === e.id ? "Guardando…" : "Guardar"}
-          </button>
-        </div>
-      ))}
-    </div>
-  );
-}
 
 export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion }) {
   const [ejercicios, saveEjercicios, ejerciciosLoaded, ejerciciosError] = useEntityList("ejercicios");
