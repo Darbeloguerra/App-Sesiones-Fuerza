@@ -787,7 +787,7 @@ function TareaCardReal({ tarea, hecho, onToggle, registro, onCambiarRegistro, on
               // Carga ligera (<65% 1RM): a esa intensidad el RIR autopercibido
               // pierde fiabilidad, así que no se le pide al jugador. La carga
               // sugerida ya viene calculada a partir de su 1RM estimado.
-              <div style={{ fontSize: 11, color: ds.inkMuted }}>Carga ligera: no hace falta indicar RIR</div>
+              <div style={{ fontSize: 11, color: ds.inkMuted }}>{tarea.objetivoTarea === "potencia" ? "Potencia: no hace falta indicar RIR" : "Carga ligera: no hace falta indicar RIR"}</div>
             )}
           </div>
         </div>
@@ -1927,7 +1927,7 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
       nombre: e.nombre || "(ejercicio eliminado)",
       series: t.series,
       cantidad: t.cantidad,
-      rirObjetivo: t.rir !== "" && t.rir != null ? t.rir : null,
+      rirObjetivo: t.objetivo !== "potencia" && t.rir !== "" && t.rir != null ? t.rir : null,
       unidad: UNIDAD_POR_MODO[t.modo] || "reps",
       nota: t.nota || "",
       // Alternativa al RIR para pautar la carga: un % directo del 1RM
@@ -1953,7 +1953,7 @@ export function PantallaJugadorReal({ presetPlayerId, onExit }) {
       // esa intensidad el fallo está muy lejos y cuesta "sentir" cuántas
       // repeticiones quedan en la recámara), así que en cargas por %1RM por
       // debajo de ese umbral no se le pide RIR al jugador.
-      pideRir: !(!esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && Number(t.pct1rm) < 65),
+      pideRir: !(!esResistencia && t.objetivo === "potencia") && !(!esResistencia && t.modo_carga === "pct1rm" && t.pct1rm !== "" && t.pct1rm != null && Number(t.pct1rm) < 65),
       // Vídeo por variante (material + modo): si hay uno grabado para la
       // combinación exacta, se usa; si no, cae al vídeo genérico del
       // ejercicio. Cuando la tarea deja elegir material, no se fija un solo
