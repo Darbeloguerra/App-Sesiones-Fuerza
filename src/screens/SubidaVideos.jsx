@@ -1,455 +1,435 @@
-import React, { useState, useRef, useEffect } from "react";
-import { ds, dsF } from "../core/designSystem.jsx";
-import { api } from "../core/backend.js";
-import { optimizarVideo, soportaOptimizarVideo } from "../core/optimizarVideo.js";
+import { createClient } from "@supabase/supabase-js";
+import { tareaEsParaJugador } from "../calc/adherencia.js";
 
-// ───────────────────────────────────────────────────────────────────────────
-// Subida de vídeos de ejercicios desde el iPad.
-//  · Cada vídeo se optimiza en el propio dispositivo (720p, sin audio) antes de
-//    subirse, de uno en uno (ver core/optimizarVideo.js).
-//  · Se sube a Supabase Storage (bucket público "videos") y el enlace se guarda en
-//    el mismo campo de vídeo que ya usa la app (gif_url); YouTube sigue valiendo.
-//  · Límite de 50 MB por archivo (plan gratuito de Supabase), comprobado sobre el
-//    vídeo ya optimizado.
-// ───────────────────────────────────────────────────────────────────────────
-
-export const LIMITE_VIDEO_BYTES = 50 * 1024 * 1024;
-const mb = (b) => `${(b / 1048576).toFixed(1).replace(".", ",")} MB`;
-const seg = (d) => (d ? `${Math.round(d)} s` : "…");
-const sinVideoDe = (e) => !(e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean));
-const extDe = (file) => (file.name.includes(".") ? file.name.split(".").pop().toLowerCase() : "mp4");
-
-export function mensajeErrorSubida(e) {
-  const m = String(e?.message || e || "");
-  if (/row-level security|not authorized|unauthorized|403|permission/i.test(m)) return "No tienes permiso para subir vídeos. Comprueba que has entrado como entrenador y que el SQL de vídeos está aplicado en Supabase.";
-  if (/bucket not found|not found|404/i.test(m)) return "Falta crear el espacio de vídeos en Supabase (SQL de vídeos).";
-  if (/mime|not supported|invalid.*type/i.test(m)) return "Supabase no acepta este tipo de archivo. Debe ser MP4, WebM o MOV.";
-  if (/too large|exceeded|payload|413|size/i.test(m)) return "El archivo supera el límite de tamaño de Supabase (50 MB).";
-  return `No se pudo subir el vídeo: ${m || "error de conexión"}.`;
-}
-
-const chip = (extra = {}) => ({ fontSize: 11, fontWeight: 600, color: ds.inkSecondary, border: `1px solid ${ds.border}`, borderRadius: 999, padding: "2px 8px", whiteSpace: "nowrap", ...extra });
-const chipOk = chip({ color: ds.success, borderColor: ds.successBorderSubtle });
-const chipErr = chip({ color: ds.danger, borderColor: ds.dangerBorderSubtle, whiteSpace: "normal" });
-const botonBase = { minHeight: 44, padding: "0 14px", borderRadius: 10, fontSize: 13, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", whiteSpace: "nowrap" };
-const botonAcento = { ...botonBase, border: `1px solid ${ds.accentBorderSubtle}`, background: "transparent", color: ds.accent };
-const botonSolido = { ...botonBase, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700 };
-const botonSuave = { ...botonBase, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary };
-
-function Barra({ valor }) {
-  return (
-    <div style={{ height: 6, borderRadius: 4, background: ds.border, overflow: "hidden", minWidth: 90, flex: 1 }}>
-      <div style={{ height: "100%", width: `${Math.max(0, Math.min(100, valor))}%`, background: ds.accent, transition: "width .15s" }} />
-    </div>
-  );
-}
-
-// ---------- Cola de vídeos: optimiza de uno en uno y sube ----------
-function useColaVideos({ ejercicios, onGuardar }) {
-  const [items, setItems] = useState([]);
-  const itemsRef = useRef([]);
-  const colaRef = useRef([]);
-  const corriendoRef = useRef(false);
-  const contRef = useRef(0);
-  const ejerciciosRef = useRef(ejercicios);
-  ejerciciosRef.current = ejercicios;
-  const onGuardarRef = useRef(onGuardar);
-  onGuardarRef.current = onGuardar;
-
-  const fijar = (lista) => {
-    itemsRef.current = lista;
-    setItems(lista);
-  };
-  const actualizar = (id, cambios) => fijar(itemsRef.current.map((x) => (x.id === id ? { ...x, ...cambios } : x)));
-
-  useEffect(
-    () => () => {
-      itemsRef.current.forEach((x) => URL.revokeObjectURL(x.url));
+// ====== Backend remoto (Supabase) ======
+// Sustituye a Google Sheets/Apps Script. Las tablas viven ahora en Postgres
+// (ver schema_supabase.sql + fix_columnas_faltantes.sql + fix_ejercicios.sql,
+// que añaden columnas que faltaban del esquema original: sesiones.objetivo,
+// sesiones.tipo, sesiones.nombre, tareas.fecha, ejercicios.sin_lateralidad).
+// La clave "publishable" es pública a propósito — va dentro del código de la
+// app, igual que antes el token compartido de Apps Script — el candado real
+// de acceso son las políticas RLS creadas en Supabase (politicas_acceso.sql).
+export const SUPABASE_URL = "https://ozarscohvitkopamnbtt.supabase.co";
+export const SUPABASE_KEY = "sb_publishable_iUxpTZzSNfACaGacbUawFA_uZi3qpN-";
+// Pase de acceso (se obtiene al entrar con el código, ver PortalAccesoSeguro y
+// paso2_seguridad.sql). Va en la cabecera x-client-info —que el navegador ya
+// tiene permitida para Supabase— y las políticas RLS lo leen para saber quién
+// es (entrenador / jugador). Solo vive en memoria: al cerrar la pestaña hay que
+// volver a entrar, igual que antes.
+export const accesoSesion = { token: null, rol: null, jugadorId: null };
+export const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
+  global: {
+    fetch: (url, options = {}) => {
+      const headers = new Headers(options.headers || {});
+      if (accesoSesion.token) headers.set("x-client-info", `${headers.get("x-client-info") || "app"} acceso/${accesoSesion.token}`);
+      return fetch(url, { ...options, headers });
     },
-    []
-  );
+  },
+});
 
-  const subir = async (id) => {
-    const it = itemsRef.current.find((x) => x.id === id);
-    if (!it) return;
-    const origen = it.out || it.file;
-    const ext = it.out ? it.ext : extDe(it.file);
-    if (origen.size > LIMITE_VIDEO_BYTES) {
-      actualizar(id, { estado: "error", error: `Pesa ${mb(origen.size)}; el límite es 50 MB.` });
-      return;
+export const ENTITY_TABLE = {
+  jugadores: "jugadores",
+  ejercicios: "ejercicios",
+  categoriasPreventivas: "categorias_preventivas",
+  sesiones: "sesiones",
+  tareas: "tareas",
+  circuitos: "circuitos",
+  registros: "registros",
+  grupos: "grupos",
+  // Notas del entrenador sobre un jugador (pestaña "Notas" de la ficha,
+  // Fase 6 → Equipos y usuarios) — tabla nueva, mínima, mismo patrón que el
+  // resto (ver sql/add_notas_jugador.sql). Se apoya en la infraestructura
+  // genérica de api.list/save/delete, sin nada especial.
+  notasJugador: "notas_jugador",
+  // Peticiones del jugador de sesión para un día concreto (Calendario →
+  // "pídesela tú"), ver sql/add_solicitudes_sesion.sql. Mismo patrón
+  // genérico que notasJugador: tabla mínima, sin lógica especial aquí.
+  solicitudesSesion: "solicitudes_sesion",
+  // Marcas de referencia de fuerza que introduce el entrenador (tops de serie
+  // históricos o tests), ver sql/add_referencias_fuerza.sql.
+  referenciasFuerza: "referencias_fuerza",
+};
+
+export const ID_PREFIX = { jugadores: "jug", ejercicios: "ejc", categoriasPreventivas: "cat", sesiones: "ses", tareas: "tar", circuitos: "cir", registros: "reg", grupos: "grp", notasJugador: "nota", solicitudesSesion: "sol", referenciasFuerza: "ref" };
+export function idRegistroFijo(jugadorId, tareaId, fecha) {
+  return `reg_${jugadorId}_${tareaId}_${fecha}`;
+}
+export function genId(prefix) {
+  return prefix + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+}
+
+// Con Google Sheets, la columna "material" y "resistencia_data" de Tareas
+// NUNCA se interpretaban en el propio backend — el resto de la app las
+// trata como texto y las interpreta ella misma (parseMateriales /
+// parseResistenciaData). En Postgres esos dos campos son un array/jsonb de
+// verdad, así que aquí se hace la conversión de ida y vuelta.
+export function transformFromDb(entity, row) {
+  if (!row || entity !== "tareas") return row;
+  return {
+    ...row,
+    material: JSON.stringify(row.material || []),
+    resistencia_data: row.resistencia_data ? JSON.stringify(row.resistencia_data) : "",
+  };
+}
+
+// Con Sheets, un número o una referencia "vacíos" y "sin escribir" eran la
+// misma cosa: una celda en blanco. En Postgres, una columna numérica o una
+// referencia a otra tabla exigen un valor real o NULL — un texto vacío ""
+// las rompe. Esto lo traduce automáticamente para cada columna así de cada
+// tabla, en vez de tener que acordarse de arreglarlo cada vez que aparece
+// una nueva (fue precisamente lo que falló varias veces seguidas).
+export const NUMERIC_DEFAULTS = {
+  ejercicios: { orden_rotacion: null },
+  sesiones: { preventivo_activo: 0 },
+  circuitos: { rondas: null },
+  tareas: { series: null, cantidad: null, rir: null, pct1rm: null, orden_en_circuito: null, descanso_seg: null, orden: null },
+  registros: { reps_hechas: null, carga_kg: null, rir: null, series_hechas: null, ultima_reps: null, ultima_carga_kg: null, ultima_rir: null },
+  referenciasFuerza: { carga_kg: null, reps: null, rir: null },
+};
+export function sanitizeNumericos(entity, out) {
+  const cols = NUMERIC_DEFAULTS[entity];
+  if (!cols) return;
+  Object.keys(cols).forEach((col) => {
+    if (!(col in out)) return;
+    const val = out[col];
+    if (val === "" || val === undefined || val === null) {
+      out[col] = cols[col];
+    } else if (typeof val !== "number") {
+      const n = Number(val);
+      out[col] = Number.isFinite(n) ? n : cols[col];
     }
-    let url = it.urlSubida;
-    if (!url) {
-      actualizar(id, { estado: "subiendo", error: "" });
+  });
+}
+
+// Cuando eliges "Todo el equipo" al diseñar una sesión, la app guarda
+// internamente `null` como forma de decir "sin restricción" (en vez de una
+// lista vacía). Con Google Sheets esto nunca daba problema porque Code.gs
+// convertía automáticamente CUALQUIER campo de lista que llegara como
+// null/vacío en una lista vacía real antes de escribirlo (`value || []`,
+// igual para fechas, categorías, destinatarios...). Aquí se hace lo mismo,
+// en genérico, para no tener que acordarse columna por columna.
+export const ARRAY_COLUMNS = {
+  jugadores: ["categorias_preventivas", "grupos_ids"],
+  ejercicios: ["tags_descriptivos"],
+  sesiones: ["fechas", "jugadores_destino"],
+  tareas: ["material"],
+};
+export function sanitizeArrays(entity, out) {
+  const cols = ARRAY_COLUMNS[entity];
+  if (!cols) return;
+  cols.forEach((col) => {
+    if (!(col in out)) return;
+    if (out[col] === null || out[col] === undefined) out[col] = [];
+  });
+}
+
+export function transformToDb(entity, record) {
+  const out = { ...record };
+  if (entity === "tareas") {
+    if (typeof out.material === "string") {
       try {
-        const r = await api.subirVideoEjercicio(origen, ext);
-        url = r.url;
-        actualizar(id, { urlSubida: url });
-      } catch (e) {
-        actualizar(id, { estado: "error", error: mensajeErrorSubida(e) });
-        return;
+        out.material = JSON.parse(out.material || "[]");
+      } catch {
+        out.material = [];
       }
     }
-    const ej = ejerciciosRef.current.find((x) => x.id === it.ejId);
-    if (!ej) {
-      actualizar(id, { estado: "error", error: "Ese ejercicio ya no existe." });
-      return;
+    if (!out.material) out.material = [];
+    if (typeof out.resistencia_data === "string") {
+      out.resistencia_data = out.resistencia_data ? JSON.parse(out.resistencia_data) : null;
     }
-    actualizar(id, { estado: "guardando", error: "" });
-    let ok = false;
-    try {
-      ok = await onGuardarRef.current(ej, url);
-    } catch {
-      ok = false;
-    }
-    actualizar(id, ok ? { estado: "ok", error: "" } : { estado: "error", error: "Se subió, pero no se pudo guardar el enlace. Reintenta." });
-  };
+    if (out.resistencia_data === "") out.resistencia_data = null;
+    // "modo" tiene una lista cerrada de valores válidos en la base de datos
+    // (reps/tiempo/metros/minutos) — a diferencia de "bloque" en ejercicios,
+    // aquí "" NO está en la lista permitida. Las tareas de Movilidad y
+    // Preventivo (todavía sin usar) mandan "" para "no aplica"; en NULL sí
+    // es válido, así que se traduce aquí.
+    if (out.modo === "") out.modo = null;
+  }
+  if (entity === "ejercicios") {
+    // categoria_preventiva_id es una referencia a otra tabla: no admite
+    // texto vacío, solo NULL. ejercicio_base_id (variante de) es lo mismo.
+    if (out.categoria_preventiva_id === "") out.categoria_preventiva_id = null;
+    if (out.ejercicio_base_id === "") out.ejercicio_base_id = null;
+  }
+  if (entity === "sesiones") {
+    // lote_origen_id es una referencia a otra sesión (para cuando una
+    // sesión viene de duplicar un lote) — mismo caso que categoria_
+    // preventiva_id: "" no es una fila válida, solo NULL lo es.
+    if (out.lote_origen_id === "") out.lote_origen_id = null;
+  }
+  sanitizeNumericos(entity, out);
+  sanitizeArrays(entity, out);
+  return out;
+}
 
-  const procesar = async () => {
-    if (corriendoRef.current) return;
-    corriendoRef.current = true;
-    while (colaRef.current.length) {
-      const id = colaRef.current.shift();
-      const it = itemsRef.current.find((x) => x.id === id);
-      if (!it) continue;
-      actualizar(id, { estado: "opt", pOpt: 0 });
-      let ultimo = 0;
-      try {
-        const { blob, ext } = await optimizarVideo(it.file, (p) => {
-          const ahora = Date.now();
-          if (ahora - ultimo > 250) {
-            ultimo = ahora;
-            actualizar(id, { pOpt: p });
-          }
-        });
-        actualizar(id, { estado: "listo", out: blob, ext, pOpt: 100, optError: "" });
-        if (it.auto) subir(id);
-      } catch (e) {
-        const cabe = it.file.size <= LIMITE_VIDEO_BYTES;
-        if (cabe) {
-          actualizar(id, { estado: "listo", out: null, optError: `${e.message} Se subirá tal cual.` });
-          if (it.auto) subir(id);
-        } else {
-          actualizar(id, { estado: "error", error: `${e.message} Pesa ${mb(it.file.size)} y el límite es 50 MB.` });
-        }
+export function throwIfError(error) {
+  if (error) throw new Error(error.message);
+}
+
+export const MAX_IDS_POR_PETICION = 100;
+
+export function applyFilters(query, filters) {
+  Object.keys(filters || {}).forEach((key) => {
+    const value = filters[key];
+    if (value === undefined || value === null || value === "") return;
+    const values = String(value).split(",").map((s) => s.trim()).filter(Boolean);
+    query = values.length > 1 ? query.in(key, values) : query.eq(key, values[0]);
+  });
+  return query;
+}
+
+let registrosUnicoDisponible; // undefined = sin comprobar aún
+export const api = {
+  // CRÍTICO: Supabase/PostgREST devuelve como máximo 1000 filas por
+  // consulta si no se le pide explícitamente un rango — no da ningún error,
+  // simplemente corta ahí. Con tablas pequeñas nunca se nota, pero
+  // "registros" ya ha superado las 3000 filas y esa página de 1000 no
+  // tiene por qué ser la más reciente (puede devolver las primeras según
+  // el id, es decir las más ANTIGUAS) — así es como el entrenador dejó de
+  // ver sesiones enviadas hace poco: no faltaba el dato, es que nunca
+  // llegaba a pedirse. Aquí se pagina en bucle hasta traer la tabla
+  // entera, sea del tamaño que sea, para cualquier entidad.
+  list: async (entity, filters) => {
+    const PAGE = 1000;
+    // Un filtro con muchísimos ids (p. ej. las tareas de miles de registros)
+    // acabaría en una URL demasiado larga y la petición fallaría sin avisar.
+    // Se trocea en lotes de MAX_IDS_POR_PETICION y se juntan los resultados.
+    const clavesLargas = Object.keys(filters || {}).filter((k) => String(filters[k] ?? "").split(",").filter(Boolean).length > MAX_IDS_POR_PETICION);
+    if (clavesLargas.length) {
+      const clave = clavesLargas[0];
+      const ids = [...new Set(String(filters[clave]).split(",").map((x) => x.trim()).filter(Boolean))];
+      const lotes = [];
+      for (let i = 0; i < ids.length; i += MAX_IDS_POR_PETICION) lotes.push(ids.slice(i, i + MAX_IDS_POR_PETICION));
+      const resultados = [];
+      for (let i = 0; i < lotes.length; i += 4) {
+        const tandas = await Promise.all(lotes.slice(i, i + 4).map((lote) => api.list(entity, { ...filters, [clave]: lote.join(",") })));
+        tandas.forEach((t) => resultados.push(...t));
+      }
+      return resultados;
+    }
+    let from = 0;
+    let all = [];
+    while (true) {
+      let query = supabase.from(ENTITY_TABLE[entity]).select("*").range(from, from + PAGE - 1);
+      query = applyFilters(query, filters);
+      const { data, error } = await query;
+      throwIfError(error);
+      all = all.concat(data || []);
+      if (!data || data.length < PAGE) break;
+      from += PAGE;
+    }
+    return all.map((row) => transformFromDb(entity, row));
+  },
+  get: async (entity, id) => {
+    const { data, error } = await supabase.from(ENTITY_TABLE[entity]).select("*").eq("id", id).maybeSingle();
+    throwIfError(error);
+    return transformFromDb(entity, data);
+  },
+  save: async (entity, record) => {
+    const toSave = transformToDb(entity, record);
+    if (!toSave.id) toSave.id = genId(ID_PREFIX[entity] || "id");
+    // Registros: si en la base ya existe la restricción única (jugador, tarea, día)
+    // (paso3_integridad.sql), se actualiza por esa clave natural: nunca puede haber dos
+    // filas del mismo jugador, tarea y día. Si aún no existe, se usa el id (que ya es fijo).
+    let conflictKey = "id";
+    if (entity === "registros" && registrosUnicoDisponible !== false && toSave.jugador_id && toSave.tarea_id && toSave.fecha) conflictKey = "jugador_id,tarea_id,fecha";
+    let { data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: conflictKey }).select().maybeSingle();
+    if (error && conflictKey !== "id" && (error.code === "42P10" || /no unique or exclusion constraint/i.test(`${error.message || ""}`))) {
+      registrosUnicoDisponible = false;
+      conflictKey = "id";
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(toSave, { onConflict: "id" }).select().maybeSingle());
+    }
+    // Red de seguridad: si la columna nueva registros.series_hechas todavía
+    // no existe en la base de datos (falta ejecutar sql/add_series_hechas.sql),
+    // PostgREST rechaza el guardado entero. En vez de que el jugador pierda
+    // su registro, se reintenta sin ese campo.
+    if (error && entity === "registros" && "series_hechas" in toSave && /series_hechas/.test(`${error.message || ""} ${error.details || ""}`)) {
+      const { series_hechas: _omitido, ...sinSeries } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinSeries, { onConflict: conflictKey }).select().maybeSingle());
+    }
+    // Igual para las columnas de la última serie (sql_add_ultima_serie.sql):
+    // si aún no existen, se guarda el registro sin ellas en vez de perderlo.
+    if (error && entity === "registros" && ("ultima_reps" in toSave || "ultima_carga_kg" in toSave || "ultima_rir" in toSave) && /ultima_(reps|carga_kg|rir)/.test(`${error.message || ""} ${error.details || ""}`)) {
+      const { ultima_reps: _a, ultima_carga_kg: _b, ultima_rir: _c, ...sinUltima } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinUltima, { onConflict: conflictKey }).select().maybeSingle());
+    }
+    // Preventivo por jugador: tareas.para_jugadores. Si la columna aún no existe
+    // y el valor está vacío, se guarda sin ella; si tiene valor NO se puede
+    // ignorar (todos los jugadores verían la tarea) y se avisa del SQL.
+    if (error && entity === "tareas" && "para_jugadores" in toSave && /para_jugadores/.test(`${error.message || ""} ${error.details || ""}`)) {
+      if (toSave.para_jugadores) throw new Error("FALTA_SQL_PARA_JUGADORES");
+      const { para_jugadores: _omitido, ...sinPara } = toSave;
+      ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinPara, { onConflict: "id" }).select().maybeSingle());
+    }
+    // Orden de bloques, partes de Activación y objetivo por tarea
+    // (sql/add_orden_partes_objetivo.sql): sesiones.orden_bloques,
+    // tareas.parte / tareas.orden / tareas.objetivo. Si las columnas aún no
+    // existen: el orden de bloques y la parte de Activación no se pueden
+    // ignorar sin cambiar lo que ve el jugador (se avisa del SQL); orden y
+    // objetivo de la tarea sí se omiten y la sesión se guarda igualmente.
+    const colsNuevas = /orden_bloques|\bparte\b|\borden\b|\bobjetivo\b/;
+    if (error && (entity === "tareas" || entity === "sesiones") && colsNuevas.test(`${error.message || ""} ${error.details || ""}`)) {
+      if (entity === "sesiones" && "orden_bloques" in toSave) {
+        if (toSave.orden_bloques) throw new Error("FALTA_SQL_ORDEN_PARTES");
+        const { orden_bloques: _o, ...sinOrden } = toSave;
+        ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinOrden, { onConflict: "id" }).select().maybeSingle());
+      } else if (entity === "tareas") {
+        if (toSave.parte) throw new Error("FALTA_SQL_ORDEN_PARTES");
+        const { parte: _p, orden: _r, objetivo: _b, ...sinNuevas } = toSave;
+        ({ data, error } = await supabase.from(ENTITY_TABLE[entity]).upsert(sinNuevas, { onConflict: "id" }).select().maybeSingle());
       }
     }
-    corriendoRef.current = false;
-  };
-
-  const anadir = (files, ejId = "", auto = false) => {
-    const nuevos = [...files].map((file) => ({
-      id: `v${++contRef.current}`,
-      file,
-      url: URL.createObjectURL(file),
-      dur: 0,
-      ejId,
-      auto,
-      estado: "cola",
-      pOpt: 0,
-      out: null,
-      ext: "",
-      optError: "",
-      error: "",
-      urlSubida: "",
-    }));
-    fijar([...itemsRef.current, ...nuevos]);
-    nuevos.forEach((n) => colaRef.current.push(n.id));
-    procesar();
-  };
-  const quitar = (id) => {
-    const it = itemsRef.current.find((x) => x.id === id);
-    if (it) URL.revokeObjectURL(it.url);
-    fijar(itemsRef.current.filter((x) => x.id !== id));
-  };
-  const quitarGuardados = () => {
-    itemsRef.current.filter((x) => x.estado === "ok").forEach((x) => URL.revokeObjectURL(x.url));
-    fijar(itemsRef.current.filter((x) => x.estado !== "ok"));
-  };
-  return { items, anadir, quitar, quitarGuardados, subir, actualizar };
-}
-
-function Miniatura({ it, onDur, pequena = false }) {
-  return (
-    <video
-      src={`${it.url}#t=0.5`}
-      muted
-      playsInline
-      preload="metadata"
-      onLoadedMetadata={(e) => onDur(it.id, e.currentTarget.duration)}
-      style={{ width: pequena ? 64 : 96, height: pequena ? 36 : 54, borderRadius: 8, background: "#000", objectFit: "cover", flexShrink: 0 }}
-    />
-  );
-}
-
-function tamanoTxt(it) {
-  if (!it.out) return mb(it.file.size);
-  return (
-    <>
-      {mb(it.file.size)} → <b style={{ color: ds.success }}>{mb(it.out.size)}</b>
-    </>
-  );
-}
-
-function EstadoItem({ it }) {
-  if (it.estado === "cola") return <span style={chip()}>En cola</span>;
-  if (it.estado === "opt")
-    return (
-      <>
-        <Barra valor={it.pOpt} />
-        <span style={chip()}>Optimizando {Math.round(it.pOpt)} %</span>
-      </>
-    );
-  if (it.estado === "subiendo") return <span style={chip({ color: ds.accent, borderColor: ds.accentBorderSubtle })}>Subiendo…</span>;
-  if (it.estado === "guardando") return <span style={chip()}>Guardando…</span>;
-  if (it.estado === "ok") return <span style={chipOk}>Guardado</span>;
-  if (it.estado === "error") return <span style={chipErr}>{it.error}</span>;
-  if (it.optError) return <span style={chipErr}>{it.optError}</span>;
-  return null;
-}
-
-// Lista del prototipo: ejercicios sin vídeo, con enlace pegado o vídeo subido.
-export function ListaEnlacesVideoReal({ ejercicios, onGuardar }) {
-  const [borradores, setBorradores] = useState({});
-  const [guardando, setGuardando] = useState("");
-  const [error, setError] = useState("");
-  const { items, anadir, quitar, quitarGuardados, subir, actualizar } = useColaVideos({ ejercicios, onGuardar });
-  const sin = ejercicios.filter(sinVideoDe);
-  const lote = items.filter((x) => !x.auto);
-  const suelto = (ejId) => items.find((x) => x.auto && x.ejId === ejId);
-  const onDur = (id, d) => actualizar(id, { dur: d });
-  const usados = new Set(lote.map((x) => x.ejId).filter(Boolean));
-  const listos = lote.filter((x) => x.ejId && x.estado === "listo").length;
-  const enProceso = lote.some((x) => x.estado === "subiendo" || x.estado === "guardando");
-  const optimizando = lote.filter((x) => x.estado === "cola" || x.estado === "opt").length;
-  const conErrorReintentable = lote.filter((x) => x.estado === "error" && (x.urlSubida || (x.out || x.file).size <= LIMITE_VIDEO_BYTES)).length;
-  const hayGuardados = lote.some((x) => x.estado === "ok");
-
-  const asignarEnOrden = () => {
-    const libres = sin.filter((e) => !usados.has(e.id));
-    lote
-      .filter((x) => !x.ejId && x.estado !== "ok" && x.estado !== "error")
-      .forEach((x) => {
-        const e = libres.shift();
-        if (e) actualizar(x.id, { ejId: e.id });
+    throwIfError(error);
+    // Jugadores: el trigger hash_pin_jugador cifra el PIN en pin_hash y vacía pin.
+    // Con upsert, la parte INSERT ya borró el PIN antes de aplicar la actualización,
+    // así que un PIN nuevo no llegaba a cifrarse. Un UPDATE directo sí dispara el trigger.
+    if (entity === "jugadores" && toSave.pin != null && String(toSave.pin).trim() !== "") {
+      const res = await supabase.from(ENTITY_TABLE[entity]).update({ pin: String(toSave.pin).trim() }).eq("id", toSave.id).select().maybeSingle();
+      throwIfError(res.error);
+      if (res.data) data = res.data;
+    }
+    return transformFromDb(entity, data);
+  },
+  delete: async (entity, id) => {
+    const { error } = await supabase.from(ENTITY_TABLE[entity]).delete().eq("id", id);
+    throwIfError(error);
+    return { deleted: true };
+  },
+  materiales: async () => {
+    const { data, error } = await supabase.from("materiales").select("nombre").order("nombre");
+    throwIfError(error);
+    return (data || []).map((r) => r.nombre);
+  },
+  guardarMaterial: async (nombre) => {
+    const { error } = await supabase.from("materiales").upsert({ nombre }, { onConflict: "nombre" });
+    throwIfError(error);
+    return api.materiales();
+  },
+  eliminarMaterial: async (nombre) => {
+    const { error } = await supabase.from("materiales").delete().eq("nombre", nombre);
+    throwIfError(error);
+    return api.materiales();
+  },
+  categoriasPreventivas: async () => {
+    const { data, error } = await supabase.from("categorias_preventivas").select("*");
+    throwIfError(error);
+    return data || [];
+  },
+  config: async (clave) => {
+    const { data, error } = await supabase.from("config").select("valor").eq("clave", clave).maybeSingle();
+    throwIfError(error);
+    return data ? data.valor : null;
+  },
+  setConfig: async (clave, valor) => {
+    const { error } = await supabase.from("config").upsert({ clave, valor }, { onConflict: "clave" });
+    throwIfError(error);
+    return { clave, valor };
+  },
+  rotacion: async (categoriaId) => {
+    if (categoriaId) {
+      const { data, error } = await supabase.from("rotacion").select("*").eq("categoria_id", categoriaId).maybeSingle();
+      throwIfError(error);
+      return data || null;
+    }
+    const { data, error } = await supabase.from("rotacion").select("*");
+    throwIfError(error);
+    return data || [];
+  },
+  setRotacion: async (categoriaId, punteroActual) => {
+    const { error } = await supabase.from("rotacion").upsert({ categoria_id: categoriaId, puntero_actual: punteroActual }, { onConflict: "categoria_id" });
+    throwIfError(error);
+    return { categoria_id: categoriaId, puntero_actual: punteroActual };
+  },
+  // OJO: hace falta un bucket de Storage llamado "gifs" (público) en
+  // Supabase para que esto funcione — no está creado todavía. Ningún botón
+  // de la app llama a esto hoy, así que no bloquea nada.
+  uploadGif: async (dataUri) => {
+    const match = /^data:(.+?);base64,(.+)$/.exec(dataUri || "");
+    if (!match) throw new Error("dataUri inválida");
+    const [, mimeType, base64] = match;
+    const byteChars = atob(base64);
+    const bytes = new Uint8Array(byteChars.length);
+    for (let i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    const fileName = `ejercicio_${Date.now()}.gif`;
+    const { error } = await supabase.storage.from("gifs").upload(fileName, new Blob([bytes], { type: mimeType }), { contentType: mimeType, upsert: true });
+    throwIfError(error);
+    const { data } = supabase.storage.from("gifs").getPublicUrl(fileName);
+    return { fileId: fileName, url: data.publicUrl };
+  },
+  // Vídeos de ejercicios. Bucket público "videos" (lectura sin sesión, para que los
+  // jugadores los vean) cuyas subidas solo permite el entrenador (ver el SQL de
+  // storage entregado aparte). Nombre único y caché de un año: nunca se sobrescribe.
+  subirVideoEjercicio: async (blob, ext, poster) => {
+    const ruta = `ejercicios/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const tipo = blob.type || (ext === "mp4" ? "video/mp4" : "video/webm");
+    const { error } = await supabase.storage.from("videos").upload(ruta, blob, { contentType: tipo, cacheControl: "31536000", upsert: false });
+    throwIfError(error);
+    // Portada (opcional): misma ruta con extensión .jpg. Si falla, el vídeo igualmente queda subido.
+    if (poster && poster.size) {
+      try {
+        await supabase.storage.from("videos").upload(ruta.replace(/\.[^.]+$/, ".jpg"), poster, { contentType: "image/jpeg", cacheControl: "31536000", upsert: false });
+      } catch {
+        /* sin portada */
+      }
+    }
+    const { data } = supabase.storage.from("videos").getPublicUrl(ruta);
+    return { ruta, url: data.publicUrl };
+  },
+  bootstrapJugador: async (jugadorId, fecha) => {
+    const { data: todasSesiones, error: e1 } = await supabase.from("sesiones").select("*").eq("enviada", true);
+    throwIfError(e1);
+    const sesionesHoy = (todasSesiones || []).filter((s) => {
+      const fechas = s.fechas || [];
+      const destino = s.jugadores_destino || [];
+      return fechas.includes(fecha) && (!destino.length || destino.includes(jugadorId));
+    });
+    // Próxima sesión futura de este jugador (para el Dashboard): mismo
+    // conjunto de sesiones que ya se ha traído arriba para calcular las de
+    // hoy, así que no hace falta ninguna llamada extra — solo mirar, de
+    // las suyas, cuál es la fecha futura más próxima.
+    let proximaSesion = null;
+    (todasSesiones || []).forEach((s) => {
+      const destino = s.jugadores_destino || [];
+      if (destino.length && !destino.includes(jugadorId)) return;
+      (s.fechas || []).forEach((f) => {
+        if (f <= fecha) return;
+        if (!proximaSesion || f < proximaSesion.fecha) proximaSesion = { sesion: s, fecha: f };
       });
-  };
-
-  if (!sin.length && !lote.length) return <div style={{ fontSize: 13, color: ds.inkSecondary, padding: 12 }}>Todos los ejercicios tienen vídeo. 🎉</div>;
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: 12, color: ds.inkSecondary, flex: "1 1 240px" }}>{sin.length} ejercicios sin vídeo — pega un enlace (YouTube o vídeo directo) o sube el vídeo desde el iPad.</div>
-        <label style={{ ...botonSolido, cursor: "pointer" }}>
-          Subir varios vídeos
-          <input
-            type="file"
-            accept="video/*"
-            multiple
-            hidden
-            onChange={(ev) => {
-              anadir(ev.target.files);
-              ev.target.value = "";
-            }}
-          />
-        </label>
-      </div>
-      {!soportaOptimizarVideo() && (
-        <div style={{ fontSize: 11.5, color: ds.warning }}>Este navegador no puede optimizar vídeos: solo se subirán tal cual los que pesen menos de 50 MB.</div>
-      )}
-      {error && <div style={{ color: ds.danger, fontSize: 12 }}>{error}</div>}
-
-      {lote.length > 0 && (
-        <div style={{ border: `1.5px solid ${ds.accent}`, background: ds.accentSubtle, borderRadius: 13, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-          <b style={{ fontSize: 13, color: ds.accent }}>Vídeos elegidos ({lote.length})</b>
-          <div style={{ fontSize: 12, color: ds.inkSecondary }}>
-            Asigna cada vídeo a su ejercicio. Los que ya están en otra fila no se repiten.{optimizando ? ` ${optimizando} optimizándose: no cierres la pantalla.` : ""}
-          </div>
-          {lote.map((x) => (
-            <div key={x.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 10, padding: 8 }}>
-              <Miniatura it={x} onDur={onDur} />
-              <div style={{ flex: "1 1 150px", minWidth: 0, fontSize: 12, color: ds.inkSecondary }}>
-                <b style={{ display: "block", color: ds.ink, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{x.file.name}</b>
-                {tamanoTxt(x)} · {seg(x.dur)}
-              </div>
-              {x.estado === "ok" ? (
-                <span style={chip()}>{(ejercicios.find((e) => e.id === x.ejId) || {}).nombre || "Guardado"}</span>
-              ) : (
-                <select
-                  aria-label="Ejercicio"
-                  value={x.ejId}
-                  disabled={x.estado === "subiendo" || x.estado === "guardando"}
-                  onChange={(ev) => actualizar(x.id, { ejId: ev.target.value })}
-                  style={{ minHeight: 44, flex: "1 1 180px", minWidth: 0, background: ds.canvas, color: ds.ink, border: `1px solid ${ds.border}`, borderRadius: 8, padding: "0 8px", fontSize: 13, fontFamily: dsF.sans }}
-                >
-                  <option value="">¿Qué ejercicio?</option>
-                  {sin
-                    .filter((e) => e.id === x.ejId || !usados.has(e.id))
-                    .map((e) => (
-                      <option key={e.id} value={e.id}>
-                        {e.nombre}
-                      </option>
-                    ))}
-                </select>
-              )}
-              <EstadoItem it={x} />
-              {x.estado === "error" && (x.urlSubida || (x.out || x.file).size <= LIMITE_VIDEO_BYTES) && x.ejId && (
-                <button type="button" style={botonSuave} onClick={() => subir(x.id)}>
-                  Reintentar
-                </button>
-              )}
-              {x.estado !== "subiendo" && x.estado !== "guardando" && x.estado !== "ok" && (
-                <button type="button" aria-label="Quitar" style={botonSuave} onClick={() => quitar(x.id)}>
-                  ✕
-                </button>
-              )}
-            </div>
-          ))}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, justifyContent: "space-between" }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" style={botonSuave} disabled={enProceso} onClick={asignarEnOrden}>
-                Asignar en orden
-              </button>
-              {hayGuardados && (
-                <button type="button" style={botonSuave} onClick={quitarGuardados}>
-                  Quitar los guardados
-                </button>
-              )}
-            </div>
-            <button
-              type="button"
-              style={{ ...botonSolido, opacity: !listos || enProceso ? 0.4 : 1 }}
-              disabled={!listos || enProceso}
-              onClick={() => lote.filter((x) => x.ejId && x.estado === "listo").forEach((x) => subir(x.id))}
-            >
-              Subir {listos || ""} vídeo{listos === 1 ? "" : "s"}
-            </button>
-          </div>
-          {conErrorReintentable > 0 && <div style={{ fontSize: 12, color: ds.inkSecondary }}>{conErrorReintentable} con error: reinténtalos o quítalos.</div>}
-        </div>
-      )}
-
-      {sin.map((e) => {
-        const s = suelto(e.id);
-        return (
-          <div key={e.id} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "6px 8px", border: `1px solid ${ds.border}`, borderRadius: 8 }}>
-            <div style={{ flex: "1 1 170px", minWidth: 0 }}>
-              <div style={{ fontSize: 13, color: ds.ink }}>{e.nombre}</div>
-              <div style={{ fontSize: 10.5, color: ds.inkMuted, fontFamily: dsF.mono }}>{[e.bloque, ...(e.tags_descriptivos || [])].filter(Boolean).join(" · ")}</div>
-            </div>
-            {s ? (
-              <>
-                <Miniatura it={s} onDur={onDur} pequena />
-                <div style={{ flex: "1 1 120px", fontSize: 12, color: ds.inkSecondary }}>{tamanoTxt(s)}</div>
-                <EstadoItem it={s} />
-                {s.estado === "error" && (s.urlSubida || (s.out || s.file).size <= LIMITE_VIDEO_BYTES) && (
-                  <button type="button" style={botonSuave} onClick={() => subir(s.id)}>
-                    Reintentar
-                  </button>
-                )}
-                {(s.estado === "error" || s.estado === "listo" || s.estado === "cola" || s.estado === "opt") && (
-                  <button type="button" aria-label="Quitar" style={botonSuave} onClick={() => quitar(s.id)}>
-                    ✕
-                  </button>
-                )}
-              </>
-            ) : (
-              <>
-                <input
-                  aria-label={`Enlace de ${e.nombre}`}
-                  value={borradores[e.id] || ""}
-                  onChange={(ev) => setBorradores((b) => ({ ...b, [e.id]: ev.target.value }))}
-                  placeholder="https://youtu.be/…"
-                  style={{ flex: "2 1 200px", minHeight: 44, background: "transparent", border: `1px solid ${ds.border}`, borderRadius: 8, color: ds.ink, padding: "0 10px", fontSize: 13, fontFamily: dsF.sans }}
-                />
-                <button
-                  type="button"
-                  disabled={!(borradores[e.id] || "").trim() || guardando === e.id}
-                  onClick={async () => {
-                    setGuardando(e.id);
-                    setError("");
-                    const ok = await onGuardar(e, borradores[e.id].trim());
-                    if (!ok) setError("No se pudo guardar. Inténtalo de nuevo.");
-                    setGuardando("");
-                  }}
-                  style={{ ...botonAcento, opacity: !(borradores[e.id] || "").trim() || guardando === e.id ? 0.4 : 1 }}
-                >
-                  {guardando === e.id ? "Guardando…" : "Guardar"}
-                </button>
-                <label style={{ ...botonAcento, cursor: "pointer" }}>
-                  Subir vídeo
-                  <input
-                    type="file"
-                    accept="video/*"
-                    hidden
-                    onChange={(ev) => {
-                      const f = ev.target.files && ev.target.files[0];
-                      ev.target.value = "";
-                      if (f) anadir([f], e.id, true);
-                    }}
-                  />
-                </label>
-              </>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// Botón «Subir vídeo» para el panel de un ejercicio (vídeo genérico o de variante):
-// optimiza, sube y devuelve el enlace con onSubido(url). El enlace queda en el campo;
-// se conserva al guardar el ejercicio.
-export function BotonSubirVideo({ onSubido }) {
-  const [fase, setFase] = useState("reposo"); // reposo | opt | subiendo
-  const [progreso, setProgreso] = useState(0);
-  const [mensaje, setMensaje] = useState({ tipo: "", texto: "" });
-
-  const elegir = async (ev) => {
-    const file = ev.target.files && ev.target.files[0];
-    ev.target.value = "";
-    if (!file) return;
-    setMensaje({ tipo: "", texto: "" });
-    let origen = file;
-    let ext = extDe(file);
-    setFase("opt");
-    setProgreso(0);
-    try {
-      const r = await optimizarVideo(file, (p) => setProgreso(Math.round(p)));
-      origen = r.blob;
-      ext = r.ext;
-    } catch (e) {
-      if (file.size > LIMITE_VIDEO_BYTES) {
-        setFase("reposo");
-        setMensaje({ tipo: "error", texto: `${e.message} Pesa ${mb(file.size)} y el límite es 50 MB.` });
-        return;
-      }
+    });
+    const sesionIds = sesionesHoy.map((s) => s.id);
+    let tareas = [];
+    if (sesionIds.length) {
+      const filas = await api.list("tareas", { sesion_id: sesionIds.join(",") });
+      tareas = filas.filter((t) => tareaEsParaJugador(t, jugadorId));
     }
-    if (origen.size > LIMITE_VIDEO_BYTES) {
-      setFase("reposo");
-      setMensaje({ tipo: "error", texto: `Pesa ${mb(origen.size)}; el límite es 50 MB.` });
-      return;
+    const ejercicioIds = [...new Set(tareas.map((t) => t.ejercicio_id).filter(Boolean))];
+    const circuitoIds = [...new Set(tareas.map((t) => t.circuito_id).filter(Boolean))];
+    let ejercicios = [];
+    if (ejercicioIds.length) {
+      const { data, error } = await supabase.from("ejercicios").select("*").in("id", ejercicioIds);
+      throwIfError(error);
+      ejercicios = data || [];
     }
-    setFase("subiendo");
-    try {
-      const r = await api.subirVideoEjercicio(origen, ext);
-      setFase("reposo");
-      setMensaje({ tipo: "ok", texto: `Subido (${mb(origen.size)}). Pulsa Guardar para conservar el enlace.` });
-      onSubido(r.url);
-    } catch (e) {
-      setFase("reposo");
-      setMensaje({ tipo: "error", texto: mensajeErrorSubida(e) });
+    let circuitos = [];
+    if (circuitoIds.length) {
+      const { data, error } = await supabase.from("circuitos").select("*").in("id", circuitoIds);
+      throwIfError(error);
+      circuitos = data || [];
     }
-  };
-
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-      <label style={{ ...botonAcento, cursor: fase === "reposo" ? "pointer" : "default", opacity: fase === "reposo" ? 1 : 0.5 }}>
-        {fase === "opt" ? `Optimizando ${progreso} %` : fase === "subiendo" ? "Subiendo…" : "Subir vídeo"}
-        <input type="file" accept="video/*" hidden disabled={fase !== "reposo"} onChange={elegir} />
-      </label>
-      {mensaje.texto && <span style={{ fontSize: 11.5, color: mensaje.tipo === "error" ? ds.danger : ds.success }}>{mensaje.texto}</span>}
-    </div>
-  );
-}
+    return { sesiones: sesionesHoy, tareas, ejercicios, circuitos, proximaSesion };
+  },
+  bootstrapProgramacion: async () => {
+    const { data: sesiones, error: e1 } = await supabase.from("sesiones").select("*");
+    throwIfError(e1);
+    const sesionIds = (sesiones || []).map((s) => s.id);
+    let tareas = [];
+    if (sesionIds.length) {
+      // En lotes: con cientos de sesiones, un solo .in() desbordaría la URL.
+      tareas = await api.list("tareas", { sesion_id: sesionIds.join(",") });
+    }
+    const { data: ejercicios, error: e3 } = await supabase.from("ejercicios").select("*");
+    throwIfError(e3);
+    return { sesiones: sesiones || [], tareas, ejercicios: ejercicios || [] };
+  },
+};
+// ====== Fin backend remoto ======
