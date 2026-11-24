@@ -20,7 +20,7 @@ export function soportaOptimizarVideo() {
   return typeof document !== "undefined" && typeof HTMLCanvasElement !== "undefined" && !!HTMLCanvasElement.prototype.captureStream && !!tipoSoportado();
 }
 
-// Devuelve { blob, ext }. Rechaza con un Error de mensaje legible para el entrenador.
+// Devuelve { blob, ext, poster } (poster: JPEG del primer segundo, o null). Rechaza con un Error de mensaje legible para el entrenador.
 // onProgreso(0-100) se llama mientras se graba.
 export function optimizarVideo(file, onProgreso) {
   return new Promise((resolve, reject) => {
@@ -73,6 +73,17 @@ export function optimizarVideo(file, onProgreso) {
         return;
       }
       const partes = [];
+      // Imagen de portada: Safari no enseña ningún fotograma de un MP4 grabado
+      // así hasta pulsar play, por eso se guarda aparte una foto del vídeo.
+      let posterP = null;
+      const sacarPoster = () =>
+        new Promise((res) => {
+          try {
+            canvas.toBlob((b) => res(b && b.size ? b : null), "image/jpeg", 0.8);
+          } catch {
+            res(null);
+          }
+        });
       rec.ondataavailable = (e) => {
         if (e.data && e.data.size) partes.push(e.data);
       };
@@ -84,7 +95,8 @@ export function optimizarVideo(file, onProgreso) {
           return;
         }
         if (onProgreso) onProgreso(100);
-        resolve({ blob: salida, ext: mime.includes("mp4") ? "mp4" : "webm" });
+        const ext = mime.includes("mp4") ? "mp4" : "webm";
+        (posterP || sacarPoster()).then((poster) => resolve({ blob: salida, ext, poster }));
       };
       // Un fotograma de canvas por cada fotograma nuevo del vídeo (si el navegador lo permite).
       const siguiente = () => {
@@ -94,6 +106,7 @@ export function optimizarVideo(file, onProgreso) {
       const pintar = () => {
         if (!activo) return;
         ctx.drawImage(v, 0, 0, W, H);
+        if (!posterP && v.currentTime >= 0.4) posterP = sacarPoster();
         if (onProgreso && v.duration) onProgreso(Math.min(99, (v.currentTime / v.duration) * 100));
         siguiente();
       };
