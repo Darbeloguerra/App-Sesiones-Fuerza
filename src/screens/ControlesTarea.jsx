@@ -5,7 +5,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { ds, dsF } from "../core/designSystem.jsx";
-import { OBJETIVOS_SESION } from "../calc/guiaObjetivo.js";
+import { OBJETIVOS_SESION, PCT_POTENCIA_DEFECTO, textoSugerido } from "../calc/guiaObjetivo.js";
 
 export const ANCHO_COL = 66;
 export const ANCHO_FLECHAS = 92;
@@ -329,7 +329,7 @@ export function EtiquetaObjetivo({ objetivo, deriva = null, encajan = [], hayVal
   );
 }
 
-const etiquetaRirCorta = (o) => (o.rir.max == null ? `RIR ≥${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
+const etiquetaRirCorta = (o) => (o.sinRir ? "sin RIR" : o.rir.max == null ? `RIR ≥${o.rir.min}` : `RIR ${o.rir.min}–${o.rir.max}`);
 
 // Valores típicos que se rellenan al elegir un objetivo. Son criterio de la
 // app, no datos científicos: los edita el entrenador y se guardan en el dispositivo.
@@ -349,13 +349,13 @@ export function BotonValoresTipicos({ tipicos, onCambiar, onRestablecer }) {
                 <b style={{ fontSize: 12.5, color: ds.ink }}>{o.etiqueta}</b>
                 <div style={{ display: "flex", gap: 8 }}>
                   <CampoSelect etiqueta="%1RM" valor={String(d.pct)} opciones={pcts} onCambiar={(v) => onCambiar(o.id, "pct", Number(v))} />
-                  <CampoSelect etiqueta="RIR" valor={String(d.rir)} opciones={rirs} onCambiar={(v) => onCambiar(o.id, "rir", Number(v))} />
+                  {!o.sinRir && <CampoSelect etiqueta="RIR" valor={String(d.rir)} opciones={rirs} onCambiar={(v) => onCambiar(o.id, "rir", Number(v))} />}
                   {o.zonas && <CampoSelect etiqueta="Repeticiones" valor={String(d.reps ?? 4)} opciones={reps} onCambiar={(v) => onCambiar(o.id, "reps", Number(v))} />}
                 </div>
               </div>
             );
           })}
-          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Son un punto de partida de la app, no un dato científico. En fuerza e hipertrofia las repeticiones salen de la tabla (desde 75 %); en potencia las eliges tú. Se guardan en este dispositivo.</span>
+          <span style={{ fontSize: 10.5, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Son un punto de partida de la app, no un dato científico. En fuerza e hipertrofia las repeticiones salen de la tabla (desde 75 %); en potencia no hay RIR y las repeticiones las eliges tú (hasta 6). Se guardan en este dispositivo.</span>
           <button type="button" onClick={onRestablecer} style={{ height: 34, borderRadius: 9, border: `1px solid ${ds.border}`, background: "transparent", color: ds.inkSecondary, fontSize: 12.5, fontWeight: 600, fontFamily: dsF.sans, cursor: "pointer" }}>Restablecer valores iniciales</button>
         </>
       )}
@@ -426,7 +426,7 @@ export function EtiquetaTipo({ tarea, onCambiar }) {
       {(cerrar) => (
         <>
           <Cabecera titulo="Tipo de movimiento" subtitulo="Potencia" />
-          <ListaOpciones etiqueta="Tipo de movimiento" valor={plio ? "pliometrico" : "nopliometrico"} onElegir={(v) => { onCambiar({ ...tarea, tipoMov: v }); cerrar(); }}
+          <ListaOpciones etiqueta="Tipo de movimiento" valor={plio ? "pliometrico" : "nopliometrico"} onElegir={(v) => { onCambiar({ ...tarea, tipoMov: v, pct1rm: String(PCT_POTENCIA_DEFECTO[v === "pliometrico" ? "pliometrico" : "nopliometrico"]), modoCarga: "pct1rm", cargaAuto: false }); cerrar(); }}
             opciones={[{ v: "nopliometrico", t: "No pliométrico", nota: "30–70 %" }, { v: "pliometrico", t: "Pliométrico", nota: "≤30 %" }]} />
           <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Pliométrico: saltos con carga, lanzamientos. No pliométrico: sentadilla, press… Soriano et al., 2015 y 2017.</span>
         </>
@@ -460,13 +460,13 @@ export function EtiquetaNota({ tarea, onCambiar }) {
 export function EtiquetaAviso({ aviso, objetivo, onAplicar, onIgnorar }) {
   const rojo = aviso.estado === "inconsistente";
   const info = aviso.estado === "info";
-  const sug = aviso.sugerido ? `RIR ${aviso.sugerido.rir}${aviso.sugerido.pct1rm != null ? ` · ${aviso.sugerido.pct1rm} %` : ""}` : "";
+  const sug = aviso.sugerido ? textoSugerido(aviso.sugerido) : "";
   const botonBase = { height: 34, borderRadius: 9, fontSize: 12.5, fontFamily: dsF.sans, cursor: "pointer" };
   return (
     <EtiquetaDesplegable rotulo={`${info ? "ℹ" : "⚠"} ${aviso.corto} ▾`} tono={rojo ? "peligro" : info ? "normal" : "activo"} ancho={330} ariaLabel="Aviso de carga">
       {(cerrar) => (
         <>
-          <Cabecera titulo="Guía del objetivo" subtitulo={objetivo ? `${objetivo.etiqueta} · ${objetivo.rir.max == null ? `RIR ${objetivo.rir.min}+` : `RIR ${objetivo.rir.min}–${objetivo.rir.max}`}` : ""} />
+          <Cabecera titulo="Guía del objetivo" subtitulo={objetivo ? `${objetivo.etiqueta} · ${objetivo.sinRir ? "sin RIR" : objetivo.rir.max == null ? `RIR ${objetivo.rir.min}+` : `RIR ${objetivo.rir.min}–${objetivo.rir.max}`}` : ""} />
           <div style={{ border: `1px solid ${rojo ? ds.danger : info ? ds.border : ds.accentBorderSubtle}`, background: rojo || info ? "transparent" : ds.accentSubtle, borderRadius: 10, padding: "8px 10px", fontSize: 12, lineHeight: 1.45, color: ds.ink, display: "flex", flexDirection: "column", gap: 7 }}>
             <span>{aviso.mensaje}</span>
             {sug && onAplicar && <button type="button" onClick={() => { onAplicar(); cerrar(); }} style={{ ...botonBase, border: "none", background: ds.accent, color: ds.accentInk, fontWeight: 700 }}>Aplicar sugerido: {sug}</button>}
