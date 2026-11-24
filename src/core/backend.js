@@ -356,6 +356,17 @@ export const api = {
     const { data } = supabase.storage.from("gifs").getPublicUrl(fileName);
     return { fileId: fileName, url: data.publicUrl };
   },
+  // Vídeos de ejercicios. Bucket público "videos" (lectura sin sesión, para que los
+  // jugadores los vean) cuyas subidas solo permite el entrenador (ver el SQL de
+  // storage entregado aparte). Nombre único y caché de un año: nunca se sobrescribe.
+  subirVideoEjercicio: async (blob, ext) => {
+    const ruta = `ejercicios/${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const tipo = blob.type || (ext === "mp4" ? "video/mp4" : "video/webm");
+    const { error } = await supabase.storage.from("videos").upload(ruta, blob, { contentType: tipo, cacheControl: "31536000", upsert: false });
+    throwIfError(error);
+    const { data } = supabase.storage.from("videos").getPublicUrl(ruta);
+    return { ruta, url: data.publicUrl };
+  },
   bootstrapJugador: async (jugadorId, fecha) => {
     const { data: todasSesiones, error: e1 } = await supabase.from("sesiones").select("*").eq("enviada", true);
     throwIfError(e1);
