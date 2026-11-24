@@ -11,6 +11,10 @@ import { fmtDateLabel, fmtDateShort } from "../calc/fechas.js";
 //   responde — antes esto fallaba en silencio, ahora nunca lo hace.
 // - Cualquier otra cosa (GIF antiguo de Drive, de antes de este cambio):
 //   se muestra como imagen normal, para no romper lo que ya hubiera.
+// Portada de un vídeo subido por la app: misma ruta con extensión .jpg.
+// Solo para vídeos propios (Supabase Storage); si no existe, no se muestra nada.
+const urlPortada = (u) => (/\/storage\/v1\/object\/public\/videos\//.test(u) ? u.replace(/\.(mp4|webm|mov|m4v)(\?.*)?$/i, ".jpg") : undefined);
+
 export function VideoEmbed({ url }) {
   const [estado, setEstado] = useState("cargando"); // cargando | listo | error
   useEffect(() => setEstado("cargando"), [url]);
@@ -70,7 +74,8 @@ export function VideoEmbed({ url }) {
           </div>
         ) : (
           <video
-            src={url.includes("#") ? url : `${url}#t=0.1`}
+            src={url}
+            poster={urlPortada(url)}
             controls
             playsInline
             preload="metadata"
