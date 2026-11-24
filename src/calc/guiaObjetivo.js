@@ -37,8 +37,12 @@ export const OBJETIVOS_SESION = [
     id: "potencia",
     etiqueta: "Potencia",
     rir: { min: 3, max: null },
-    fuente: "criterio de la app: lejos del fallo",
-    nota: "Lejos del fallo y a máxima velocidad intencionada. Los cortes de carga son aproximados.",
+    // Potencia no se pauta con RIR: se pauta con % recomendado según el tipo de
+    // movimiento y un tope de repeticiones. El RIR no se puede contrastar con la
+    // carga por debajo del 75 % (la tabla de repeticiones máximas no llega).
+    sinRir: true,
+    fuente: "criterio de la app: sin RIR, % según el tipo de movimiento",
+    nota: "A máxima velocidad intencionada, series cortas. Los cortes de carga son aproximados.",
     zonas: [
       { id: "pliometrico", tipo: "Pliométrico", ejemplos: "saltos con carga, lanzamientos", rango: "≤30 %" },
       { id: "nopliometrico", tipo: "No pliométrico", ejemplos: "sentadilla, press, peso muerto…", rango: "30–70 %" },
@@ -67,6 +71,9 @@ export const PCT_POTENCIA_DEFECTO = { pliometrico: 30, nopliometrico: 50 };
 export function sugerirCarga(objetivo, reps, tipo) {
   const n = Math.round(Number(reps));
   if (!objetivo || !Number.isFinite(n) || n < 1) return null;
+  if (objetivo.sinRir) {
+    return { rir: null, pct1rm: PCT_POTENCIA_DEFECTO[tipo === "pliometrico" ? "pliometrico" : "nopliometrico"] };
+  }
   const rir = RIR_DEFECTO[objetivo.id];
   if (rir == null) return null;
   const rtf = n + rir;
@@ -84,7 +91,7 @@ export function aplicarSugerencia(objetivo, t, forzar = false) {
   if (!forzar && !(t.cargaAuto || (vacio(t.rir) && vacio(t.pct1rm)))) return t;
   const s = sugerirCarga(objetivo, t.cantidad, t.tipoMov);
   if (!s) return t;
-  return { ...t, rir: String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
+  return { ...t, rir: s.rir == null ? "" : String(s.rir), pct1rm: s.pct1rm == null ? "" : String(s.pct1rm), cargaAuto: true };
 }
 
 // Solo coincidencia exacta con la etiqueta: un objetivo escrito a mano ("fuerza
@@ -231,14 +238,18 @@ export function implicaciones(campo, objetivo) {
 //   campo:  "rir" | "pct" | "ambos" (qué celda se señala)
 // ---------------------------------------------------------------------------
 export function textoSugerido(s) {
-  return s ? `RIR ${s.rir}${s.pct1rm != null ? ` · ${s.pct1rm} %` : ""}` : "";
+  if (!s) return "";
+  const partes = [];
+  if (s.rir != null) partes.push(`RIR ${s.rir}`);
+  if (s.pct1rm != null) partes.push(`${s.pct1rm} %`);
+  return partes.join(" · ");
 }
 
 export function evaluarCarga(objetivo, { reps, rir, pct1rm, tipoMov } = {}) {
   if (!objetivo) return null;
   const n = Math.round(Number(reps));
   if (!Number.isFinite(n) || n < 1) return null;
-  const tieneRir = rir !== "" && rir != null && Number.isFinite(Number(rir));
+  const tieneRir = !objetivo.sinRir && rir !== "" && rir != null && Number.isFinite(Number(rir));
   const p = Number(pct1rm);
   const tienePct = pct1rm !== "" && pct1rm != null && Number.isFinite(p) && p > 0;
   const avisoReps = () => {
@@ -269,7 +280,7 @@ export function evaluarCarga(objetivo, { reps, rir, pct1rm, tipoMov } = {}) {
 
   // 2) Zona de RIR (el declarado o el que implica el %).
   const rirEf = tieneRir ? r : rirDePct;
-  if (rirEf != null && Number.isFinite(rirEf)) {
+  if (!objetivo.sinRir && rirEf != null && Number.isFinite(rirEf)) {
     const rango = textoRir(objetivo);
     const campo = tieneRir ? "rir" : "pct";
     const quien = tieneRir ? `RIR ${r}` : `${Math.round(p)} %`;
@@ -331,7 +342,7 @@ export function sugerenciasPorObjetivo(t, campo) {
   return OBJETIVOS_SESION.map((o) => {
     const pot = !!o.zonas;
     const base = { id: o.id, etiqueta: o.etiqueta, activo: t.objetivo === o.id, bloqueado: false, aplicar: null, boton: "", texto: "" };
-    const rirTxt = textoRir(o);
+    const rirTxt = pot ? "Sin RIR" : textoRir(o);
     if (pot && potFuera) {
       return { ...base, bloqueado: true, texto: `${Math.round(p)} % queda ${p > zonaPot.max ? "por encima" : "por debajo"} de la zona de potencia (${zonaPot.min === 0 ? `hasta ${zonaPot.max}` : `${zonaPot.min}–${zonaPot.max}`} %).` };
     }
@@ -341,6 +352,9 @@ export function sugerenciasPorObjetivo(t, campo) {
       else if (o.id === "fuerza") zona = `${Math.round(TABLA_PCT_1RM_POR_RTF[RTF_TABLA_MAX] * 100)}–${Math.round(pct1RMporRTF(1 + o.rir.min) * 100)} %`;
       else zona = `sin rango fijo (la tabla cubre ${Math.round(TABLA_PCT_1RM_POR_RTF[RTF_TABLA_MAX] * 100)}–100 %)`;
       return { ...base, texto: `${rirTxt}. Carga habitual: ${zona}.`, aplicar: {} };
+    }
+    if (campo === "rir" && pot) {
+      return { ...base, texto: "Sin RIR: la potencia se pauta con el % y las repeticiones (hasta 6)." };
     }
     if (campo === "rir") {
       if (R != null) {
@@ -365,7 +379,7 @@ export function sugerenciasPorObjetivo(t, campo) {
       return { ...base, texto: `${rirTxt}: a ${Math.round(p)} % son ${rangoTxt(Math.min(lo, tope), tope)} reps.${conRir}`, boton: `${reps} ${plural(reps)} · RIR ${rir}`, aplicar: { cantidad: String(reps), rir: String(rir) } };
     }
     const general = o.reps ? (o.reps.suave ? `hasta ${o.reps.max} reps (referencia)` : `hasta ${o.reps.max} reps`) : "sin límite de reps";
-    const nota = tienePct && p < 75 ? " Por debajo del 75 % no calculo repeticiones exactas." : " Elige un % desde 75 para calcularlas.";
+    const nota = pot ? "" : tienePct && p < 75 ? " Por debajo del 75 % no calculo repeticiones exactas." : " Elige un % desde 75 para calcularlas.";
     return { ...base, texto: `${rirTxt}: ${general}.${nota}` };
   });
 }
