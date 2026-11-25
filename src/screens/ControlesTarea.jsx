@@ -4,6 +4,7 @@
 // se abren hacia arriba si abajo no hay sitio y tienen scroll propio.
 import React, { useState, useEffect, useLayoutEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { ChevronDown } from "lucide-react";
 import { ds, dsF } from "../core/designSystem.jsx";
 import { OBJETIVOS_SESION, PCT_POTENCIA_DEFECTO, textoSugerido } from "../calc/guiaObjetivo.js";
 
@@ -251,6 +252,34 @@ export function EtiquetaDesplegable({ rotulo, tono = "normal", ancho = 300, aria
 }
 
 // Lado visible en la línea de etiquetas (antes estaba dentro de Repeticiones).
+// Celda de dato de la cabecera de la sesión (Jugadores, Fecha, Objetivo, Duración):
+// todas del mismo tamaño. Con `info` no es un botón (Duración). Con `children`
+// (función que recibe "cerrar") abre un desplegable; con `onClick`, hace esa acción.
+export function CeldaDato({ icono, rotulo, valor, tono = "normal", info = false, sinFlecha = false, onClick = null, ariaLabel, titulo, ancho = 300, children = null }) {
+  const [abierto, setAbierto] = useState(false);
+  const ref = useRef(null);
+  const colorValor = tono === "atencion" ? ds.accent : tono === "vacio" ? ds.inkSecondary : ds.ink;
+  const contenido = (
+    <>
+      <span style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, fontWeight: 600, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, fontFamily: dsF.sans, whiteSpace: "nowrap" }}>{icono}{rotulo}</span>
+      <span style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, minWidth: 0 }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14, fontWeight: tono === "vacio" || info ? 500 : 600, color: info ? ds.inkSecondary : colorValor, fontFamily: info ? dsF.mono : dsF.sans }}>{valor}</span>
+        {!info && !sinFlecha && <ChevronDown size={16} color={ds.inkMuted} style={{ flexShrink: 0 }} />}
+      </span>
+    </>
+  );
+  const base = { height: 64, boxSizing: "border-box", width: "100%", minWidth: 0, padding: "0 12px", borderRadius: 12, display: "flex", flexDirection: "column", justifyContent: "center", gap: 2, textAlign: "left" };
+  if (info) return <div title={titulo} style={{ ...base, border: `1px dashed ${ds.border}`, background: "transparent" }}>{contenido}</div>;
+  return (
+    <div style={{ minWidth: 0 }}>
+      <button ref={ref} type="button" title={titulo} aria-label={ariaLabel || rotulo} aria-haspopup={children ? "dialog" : undefined} aria-expanded={children ? abierto : undefined}
+        onClick={() => (children ? setAbierto((v) => !v) : onClick && onClick())}
+        style={{ ...base, border: `1px solid ${tono === "atencion" ? ds.accent : ds.border}`, background: ds.surface, cursor: "pointer", fontFamily: dsF.sans }}>{contenido}</button>
+      {children && abierto && <Desplegable ancla={ref} onCerrar={() => setAbierto(false)} ancho={ancho}>{children(() => setAbierto(false))}</Desplegable>}
+    </div>
+  );
+}
+
 export function EtiquetaLado({ tarea, onCambiar }) {
   const uni = tarea.lateralidad === "unilateral";
   return (
