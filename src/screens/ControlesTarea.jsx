@@ -177,7 +177,7 @@ export function CampoSelect({ etiqueta, valor, opciones, onCambiar }) {
 
 // Celda numérica: muestra el valor y abre un desplegable con valores rápidos,
 // "Otro valor" (teclado) y, opcionalmente, campos extra y la explicación.
-export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false, aviso = null, avisoInfo = null }) {
+export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo, subtitulo, extra = null, pie = null, placeholder = "—", sufijo = "", alerta = false, apagada = false, resaltar = false, autoOpcion = null, textoOpcionesVacio, movil = false, aviso = null, avisoInfo = null, estimado = false }) {
   const [abierto, setAbierto] = useState(false);
   const [teclado, setTeclado] = useState(false);
   const [borrador, setBorrador] = useState("");
@@ -204,6 +204,7 @@ export function CeldaDesplegable({ etiqueta, valor, onCambiar, opciones, titulo,
         {tiene ? valor : placeholder}
         {sufijo && tiene && <span style={{ position: "absolute", right: 5, bottom: 2, fontSize: 9, color: ds.inkMuted }}>{sufijo}</span>}
         {aviso && <span aria-hidden="true" style={{ position: "absolute", top: -7, right: -4, fontSize: 10, lineHeight: "14px", padding: "0 3px", borderRadius: 6, background: aviso === "inconsistente" ? ds.danger : ds.accent, color: ds.accentInk }}>⚠</span>}
+        {estimado && !aviso && <span title="Estimación: por debajo del 75 % la tabla de repeticiones es menos precisa" style={{ position: "absolute", top: -7, right: -4, fontSize: 10, lineHeight: "14px", padding: "0 4px", borderRadius: 6, background: ds.border, color: ds.inkSecondary }}>≈</span>}
       </button>
       {abierto && (
         <Desplegable ancla={ref} onCerrar={cerrar} ancho={330}>
