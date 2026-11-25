@@ -789,6 +789,8 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const tipoTxt = objetivoGuia?.zonas ? (tarea.tipoMov === "pliometrico" ? "Pliométrico" : "No pliométrico") : "";
   // Entre 64 y 75 % las repeticiones máximas son estimaciones (la tabla verificada llega al 75 %).
   const estimadoPct = conGuia && !objetivoGuia.sinRir && Number(tarea.pct1rm) > 0 && Number(tarea.pct1rm) < 75 && rtfDePct(Number(tarea.pct1rm)) != null;
+  // Opción para volver a dejar la celda vacía (sin valor ni recálculo).
+  const vaciar = (v) => (v !== "" && v != null ? "Dejar vacío" : null);
   const rirAlto = tarea.rir !== "" && tarea.rir != null && Number(tarea.rir) > 10;
   const avRir = aviso && (aviso.campo === "rir" || aviso.campo === "ambos") ? aviso.estado : null;
   const avPct = aviso && (aviso.campo === "pct" || aviso.campo === "ambos") ? aviso.estado : null;
@@ -835,7 +837,7 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
   const flechas = <FlechasTarea onSubir={onSubir} onBajar={onBajar} onEliminar={onEliminar} />;
   const celdaSeries = <CeldaDesplegable key="series" movil={movil} etiqueta="Series" titulo="Series" valor={tarea.series} onCambiar={(v) => onCambiar({ ...tarea, series: v })} opciones={nums([1, 2, 3, 4, 5, 6, 8])} />;
   const celdaReps = (
-    <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={cambiarCampo("cantidad")} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), zona: conGuia && objetivosEnZona("reps", v, tarea).includes(objetivoGuia.id), nota: conGuia ? quienes("reps", v) : "" }))}
+    <CeldaDesplegable key="reps" movil={movil} etiqueta="Repeticiones" titulo={etqModo[modo] || "Cantidad"} subtitulo={conGuia && objetivoGuia.reps ? `${objetivoGuia.etiqueta} · hasta ${objetivoGuia.reps.max}` : "por serie"} aviso={avReps} avisoInfo={avReps ? infoAviso : null} valor={tarea.cantidad} sufijo={tarea.lateralidad === "unilateral" && modo === "reps" ? "/lado" : unidad} onCambiar={cambiarCampo("cantidad")} autoOpcion={modo === "reps" ? vaciar(tarea.cantidad) : null} opciones={valoresCant.map((v) => ({ v: String(v), t: String(v), zona: conGuia && objetivosEnZona("reps", v, tarea).includes(objetivoGuia.id), nota: conGuia ? quienes("reps", v) : "" }))}
       extra={conGuia ? bloqueObj("reps") : null}
       pie={() => (
         <>
@@ -846,8 +848,8 @@ function ControlesFilaTabla({ tarea, onCambiar, mostrarCarga, objetivoGuia, avis
         </>
       )} />
   );
-  const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={cambiarCampo("pct1rm")} opciones={pctOpc} extra={conGuia ? bloqueObj("pct") : null} estimado={estimadoPct} pie={conGuia ? <Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} /> : null} />;
-  const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={cambiarCampo("rir")} opciones={rirOpc} extra={conGuia ? bloqueObj("rir") : null} pie={conGuia ? <Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} /> : null} />;
+  const celdaPct = <CeldaDesplegable key="pct" movil={movil} etiqueta="%1RM" titulo="% del 1RM" subtitulo={conGuia && textoZonaPct ? `${objetivoGuia.etiqueta}${tipoTxt ? ` · ${tipoTxt}` : ""} · zona ${textoZonaPct}` : ""} valor={tarea.pct1rm} aviso={avPct} avisoInfo={avPct ? infoAviso : null} onCambiar={cambiarCampo("pct1rm")} autoOpcion={vaciar(tarea.pct1rm)} opciones={pctOpc} extra={conGuia ? bloqueObj("pct") : null} estimado={estimadoPct} pie={conGuia ? <Implicaciones datos={implicaciones("pct", objetivoGuia)} sugerencia={textoSug} /> : null} />;
+  const celdaRir = <CeldaDesplegable key="rir" movil={movil} etiqueta="RIR" titulo="RIR" subtitulo={conGuia ? `${objetivoGuia.etiqueta} · zona ${etiquetaRir(objetivoGuia).replace("RIR ", "")}` : "repeticiones en reserva"} valor={tarea.rir} alerta={rirAlto} aviso={avRir} avisoInfo={avRir ? infoAviso : null} onCambiar={cambiarCampo("rir")} autoOpcion={vaciar(tarea.rir)} opciones={rirOpc} extra={conGuia ? bloqueObj("rir") : null} pie={conGuia ? <Implicaciones datos={implicaciones("rir", objetivoGuia)} sugerencia={textoSug} /> : null} />;
   const huecoRir = <div key="rir-hueco" aria-hidden="true" style={{ width: ANCHO_COL, flexShrink: 0 }} />;
   const celdas = mostrarCarga ? (
     sinRir ? (
