@@ -180,3 +180,12 @@ test("potencia: cambiar % o repeticiones no recalcula nada ni rellena RIR", () =
   const b = ligarCampo({ ...base, pct1rm: "80" }, "cantidad", "6");
   assert.equal(b.tarea.rir, "");
 });
+
+test("con objetivo, vaciar un campo lo deja vacío y no recalcula los otros", () => {
+  const base = T({ objetivo: "hipertrofia", pct1rm: "70", rir: "2", cantidad: "10" });
+  for (const campo of ["pct1rm", "rir", "cantidad"]) {
+    const r = ligarCampo(base, campo, "");
+    assert.equal(r.mensaje, null);
+    for (const k of ["pct1rm", "rir", "cantidad"]) assert.equal(r.tarea[k], k === campo ? "" : base[k]);
+  }
+});
