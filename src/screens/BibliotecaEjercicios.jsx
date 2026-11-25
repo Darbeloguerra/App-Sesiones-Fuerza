@@ -41,6 +41,10 @@ const LATERALIDAD_BIBLIOTECA = ["Bilateral", "Unilateral"];
 // TagChipReal y campoSelectReal ahora en src/core/components.jsx —
 // importadas arriba.
 
+const etiquetaMonoEj = { fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, fontWeight: 600 };
+const selectEstiloEj = { height: 38, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: dsR.md, color: ds.ink, fontSize: 13, padding: "0 10px", minWidth: 0 };
+const botonSecEj = { height: 38, padding: "0 14px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" };
+
 const btnIconoReal = { background: "transparent", border: `1px solid ${ds.border}`, borderRadius: dsR.sm, color: ds.inkMuted, width: 26, height: 26, cursor: "pointer", fontSize: 12.5 };
 
 // Un color/ícono decorativo por bloque, para que la miniatura de cada
@@ -276,6 +280,7 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
       return { key: Math.random().toString(36).slice(2), material: material === "std" ? "" : material, unilateral: modo === "uni", url };
     })
   );
+  const [materialAbierto, setMaterialAbierto] = useState(() => Object.keys(ejercicioEditar?.videos_variantes || {}).length > 0);
   const [guardando, setGuardando] = useState(false);
   const [confirmandoBorrado, setConfirmandoBorrado] = useState(false);
   const [borrando, setBorrando] = useState(false);
@@ -303,288 +308,235 @@ function PanelNuevoEjercicioReal({ categorias, ejercicios, onGuardar, onCerrar, 
   // columna izquierda con la miniatura grande y la lista de variantes
   // hermanas (misma matriz), columna derecha con el formulario de siempre.
   const anchoDesktopPanel = useAnchoVentana() >= 900;
-  const colorBloquePanel = BLOQUE_COLOR_REAL[bloque] || ds.chart2;
-  const IconoBloquePanel = BLOQUE_ICONO_REAL[bloque] || Dumbbell;
   const esVariante = !!ejercicioEditar?.ejercicio_base_id;
   const idMatrizReal = ejercicioEditar?.ejercicio_base_id || (ejercicioEditar && !esVariante ? ejercicioEditar.id : "") || matrizPreset?.id || "";
   const matrizHermana = esVariante && idMatrizReal ? (ejercicios || []).find((e) => e.id === idMatrizReal) : null;
   const variantesHermanas = idMatrizReal ? (ejercicios || []).filter((e) => e.ejercicio_base_id === idMatrizReal && e.id !== ejercicioEditar?.id) : [];
   const matrizParaNuevaVariante = matrizHermana || (ejercicioEditar && !esVariante ? ejercicioEditar : matrizPreset) || null;
 
+  const etiq = (txt, hijo, extra) => (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, minWidth: 0, ...extra }}>
+      <span style={etiquetaMonoEj}>{txt}</span>
+      {hijo}
+    </label>
+  );
+  const tarjeta = (titulo, aside, hijos, extra) => (
+    <div style={{ background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: dsR.xl, padding: 12, ...extra }}>
+      {titulo && (
+        <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+          <h2 style={{ margin: 0, fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>{titulo}</h2>
+          {aside && <span style={{ fontSize: 12, color: ds.inkMuted }}>{aside}</span>}
+        </div>
+      )}
+      {hijos}
+    </div>
+  );
+  const rejilla = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 10 };
+  const campoTxt = (extra) => ({ ...selectEstiloEj, height: 42, width: "100%", ...extra });
+  const lateralidadValor = sinLateralidad ? "na" : lateralidad;
+  const cambiarLateralidad = (v) => {
+    if (v === "na") { setSinLateralidad(true); setLateralidad(""); }
+    else { setSinLateralidad(false); setLateralidad(v); }
+  };
+  const filaVariantePadre = (ej, etiquetaExtra) => (
+    <div key={ej.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: "8px 10px" }}>
+      <span style={{ fontSize: 13.5, fontWeight: 600, color: ds.ink }}>
+        {etiquetaExtra ? "" : "↳ "}{ej.nombre}{etiquetaExtra && <span style={{ color: ds.inkMuted, fontSize: 11.5, fontWeight: 500 }}> {etiquetaExtra}</span>}
+      </span>
+      <button type="button" onClick={() => onEditarOtro && onEditarOtro(ej)} style={{ ...botonSecEj, height: 32, fontSize: 12 }}>Editar</button>
+    </div>
+  );
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14, maxWidth: 820 }}>
       <button
         onClick={onCerrar}
         style={{ display: "flex", alignItems: "center", gap: 6, alignSelf: "flex-start", background: "transparent", border: "none", color: ds.inkSecondary, fontSize: 13, fontWeight: 600, cursor: "pointer", padding: 0 }}
       >
         <ChevronLeft size={16} /> Volver a Ejercicios
       </button>
-      <div style={{ display: "grid", gridTemplateColumns: anchoDesktopPanel ? "1fr 1fr" : "1fr", gap: 20, alignItems: "start" }}>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div style={{ borderRadius: dsR.xl, overflow: "hidden", border: `1px solid ${ds.borderSoft}` }}>
-            <MiniaturaEjercicioReal ejercicio={{ gif_url: videoUrl }} color={colorBloquePanel} Icono={IconoBloquePanel} variantesCount={0} />
-          </div>
-          {(idMatrizReal || ejercicioEditar) && (
-            <div>
-              <div style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, marginBottom: 8 }}>VARIANTES</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {esVariante && matrizHermana && (
-                  <button
-                    onClick={() => onEditarOtro && onEditarOtro(matrizHermana)}
-                    style={{ textAlign: "left", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, color: ds.ink, cursor: "pointer" }}
-                  >
-                    {matrizHermana.nombre} <span style={{ color: ds.inkMuted, fontSize: 11 }}>(principal)</span>
-                  </button>
-                )}
-                {variantesHermanas.map((v) => (
-                  <button
-                    key={v.id}
-                    onClick={() => onEditarOtro && onEditarOtro(v)}
-                    style={{ textAlign: "left", background: ds.surfaceRaised, border: `1px solid ${ds.borderSoft}`, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, color: ds.ink, cursor: "pointer" }}
-                  >
-                    {v.nombre}
-                  </button>
-                ))}
-                {variantesHermanas.length === 0 && !esVariante && <div style={{ fontSize: 12, color: ds.inkMuted }}>Sin variantes todavía</div>}
-              </div>
-              {matrizParaNuevaVariante && onCrearVariante && (
-                <button
-                  onClick={() => onCrearVariante(matrizParaNuevaVariante)}
-                  style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 5, justifyContent: "center", width: "100%", background: "transparent", border: `1px dashed ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
-                >
-                  <Plus size={13} /> Añadir variante
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        <div style={{ fontSize: 15, fontWeight: 600, color: ds.ink }}>{ejercicioEditar ? "Editar ejercicio" : "Nuevo ejercicio"}</div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NOMBRE</span>
-          <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Sentadilla frontal" style={campoSelectReal()} />
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VARIANTE DE (OPCIONAL — SOLO PARA AGRUPARLO EN LA BIBLIOTECA)</span>
-          <select value={ejercicioBaseId} onChange={(e) => setEjercicioBaseId(e.target.value)} style={campoSelectReal()}>
-            <option value="">Ninguno — es un ejercicio matriz</option>
-            {(ejercicios || [])
-              .filter((e) => !e.ejercicio_base_id && e.id !== ejercicioEditar?.id)
-              .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
-              .map((e) => (
-                <option key={e.id} value={e.id}>
-                  {e.nombre}
-                </option>
-              ))}
-          </select>
-        </label>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BLOQUE (único, obligatorio)</span>
-          <select value={bloque} onChange={(e) => setBloque(e.target.value)} style={campoSelectReal()}>
-            {BLOQUES_BIBLIOTECA.map((b) => (
-              <option key={b} value={b}>
-                {b}
-              </option>
-            ))}
-          </select>
-        </label>
-        {esPreventivo && (
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>CATEGORÍA PREVENTIVA (obligatoria, solo aplica a este bloque)</span>
-            <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} style={campoSelectReal()}>
+      <div>
+        <div style={etiquetaMonoEj}>{ejercicioEditar ? "Editar ejercicio" : "Ejercicios"}</div>
+        <h1 style={{ fontFamily: dsF.display, fontSize: 24, fontWeight: 700, margin: "2px 0 0", overflowWrap: "anywhere" }}>{ejercicioEditar ? ejercicioEditar.nombre : "Nuevo ejercicio"}</h1>
+      </div>
+
+      {tarjeta("Datos", null, (
+        <div style={rejilla}>
+          {etiq("Nombre", <input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Sentadilla frontal" style={campoTxt()} />, { gridColumn: "span 2" })}
+          {etiq("Bloque", (
+            <select value={bloque} onChange={(e) => setBloque(e.target.value)} style={campoTxt()}>
+              {BLOQUES_BIBLIOTECA.map((b) => <option key={b} value={b}>{b}</option>)}
+            </select>
+          ))}
+          {etiq("Zona corporal", (
+            <select value={zonaSelEd} onChange={(e) => seleccionarZona(e.target.value)} style={campoTxt({ borderColor: faltante && !zonaSelEd ? ds.danger : ds.border })}>
+              {!zonaSelEd && <option value="">Elige la zona</option>}
+              {TAGS_DESCRIPTIVOS_BIBLIOTECA.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          ))}
+          {zonaSelEd === "Movilidad" && etiq("Región", (
+            <select value={regionSelEd} onChange={(e) => seleccionarRegion(e.target.value)} style={campoTxt()}>
+              <option value="">Sin especificar</option>
+              {TAGS_MOVILIDAD.map((t) => <option key={t} value={t}>{t}</option>)}
+            </select>
+          ))}
+          {etiq("Lateralidad", (
+            <select value={lateralidadValor} onChange={(e) => cambiarLateralidad(e.target.value)} style={campoTxt()}>
+              <option value="">Sin especificar</option>
+              {LATERALIDAD_BIBLIOTECA.map((l) => <option key={l} value={l}>{l}</option>)}
+              <option value="na">No aplica (sin etiqueta)</option>
+            </select>
+          ))}
+          {bloque === "Fuerza" && etiq("Naturaleza", (
+            <select value={naturaleza} onChange={(e) => setNaturaleza(e.target.value)} style={campoTxt()}>
+              <option value="">Sin especificar</option>
+              {NATURALEZA_BIBLIOTECA.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          ))}
+          {esPreventivo && etiq("Categoría preventiva", (
+            <select value={categoriaId} onChange={(e) => setCategoriaId(e.target.value)} style={campoTxt()}>
               {TIPOS_TEJIDO_BIBLIOTECA.map((tipo) => (
                 <optgroup key={tipo} label={tipo}>
-                  {categorias
-                    .filter((c) => c.tipo_tejido === tipo)
-                    .map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.nombre}
-                      </option>
-                    ))}
+                  {categorias.filter((c) => c.tipo_tejido === tipo).map((c) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
                 </optgroup>
               ))}
             </select>
-          </label>
-        )}
-        {bloque === "Fuerza" && (
-          <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>NATURALEZA (solo aplica a Fuerza, opcional)</span>
-            <select value={naturaleza} onChange={(e) => setNaturaleza(e.target.value)} style={campoSelectReal()}>
-              <option value="">Sin especificar</option>
-              {NATURALEZA_BIBLIOTECA.map((n) => (
-                <option key={n} value={n}>
-                  {n}
-                </option>
-              ))}
+          ))}
+          {etiq("Variante de (opcional)", (
+            <select value={ejercicioBaseId} onChange={(e) => setEjercicioBaseId(e.target.value)} style={campoTxt()}>
+              <option value="">Ninguno: es un ejercicio principal</option>
+              {(ejercicios || [])
+                .filter((e) => !e.ejercicio_base_id && e.id !== ejercicioEditar?.id)
+                .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""))
+                .map((e) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
             </select>
-          </label>
-        )}
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>LATERALIDAD (opcional)</span>
-          <select value={lateralidad} onChange={(e) => setLateralidad(e.target.value)} style={campoSelectReal()}>
-            <option value="">Sin especificar</option>
-            {LATERALIDAD_BIBLIOTECA.map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.accent }}>ZONA CORPORAL (obligatoria)</span>
-          <SelectorZonaRegion zona={zonaSelEd} region={regionSelEd} onZona={seleccionarZona} onRegion={seleccionarRegion} alerta={!!faltante && !zonaSelEd} tituloVisible={false} />
+          ), { gridColumn: "span 2" })}
         </div>
-        <div onClick={() => setSinLateralidad((v) => !v)} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-          <span
-            style={{
-              width: 18,
-              height: 18,
-              borderRadius: 5,
-              border: `1.5px solid ${sinLateralidad ? ds.accent : ds.border}`,
-              background: sinLateralidad ? ds.accent : "transparent",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              color: ds.accentInk,
-              fontSize: 12,
-            }}
-          >
-            {sinLateralidad ? "✓" : ""}
-          </span>
-          <span style={{ fontSize: 12.5, color: ds.inkSecondary }}>Sin lateralidad (ej. bici estática — no mostrar etiqueta Bilateral/Unilateral)</span>
-        </div>
-        <label style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>VÍDEO GENÉRICO (respaldo si una variante no tiene el suyo propio)</span>
-          <input
-            value={videoUrl}
-            onChange={(e) => setVideoUrl(e.target.value)}
-            placeholder="https://youtu.be/... o https://pub-xxxx.r2.dev/....mp4"
-            style={{ ...campoSelectReal(), borderColor: enlaceNoReconocido ? ds.danger : undefined }}
-          />
-          {enlaceNoReconocido && (
-            <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace — debe ser de YouTube, de Google Drive (drive.google.com/file/d/…) o terminar en .mp4/.webm/.mov.</span>
-          )}
-          {enlaceReconocido && <VideoEmbed url={videoUrl} />}
-        </label>
-        <BotonSubirVideo onSubido={setVideoUrl} />
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>
-            VÍDEOS POR VARIANTE (opcional — para cuando el gesto cambia según el material)
-          </span>
-          {filasVariantes.map((f) => {
-            const idValido = extractYouTubeId(f.url);
-            const directoValido = esVideoDirecto(f.url);
-            const reconocido = !!idValido || directoValido;
-            const noReconocido = f.url.trim().length > 0 && !reconocido;
-            return (
-              <div key={f.key} style={{ border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <select value={f.material} onChange={(e) => actualizarFila(f.key, { material: e.target.value })} style={{ ...campoSelectReal(), flex: 1 }}>
-                    <option value="">— Material —</option>
-                    {materialesDisponibles.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                  <select
-                    value={f.unilateral ? "uni" : "bi"}
-                    onChange={(e) => actualizarFila(f.key, { unilateral: e.target.value === "uni" })}
-                    style={{ fontSize: 11, padding: "0 8px", borderRadius: dsR.sm, border: `1px solid ${f.unilateral ? ds.accent : ds.border}`, background: f.unilateral ? ds.accentSubtle : "transparent", color: f.unilateral ? ds.accent : ds.inkSecondary, cursor: "pointer", whiteSpace: "nowrap" }}
-                  >
-                    <option value="bi">Bilateral</option>
-                    <option value="uni">Unilateral</option>
-                  </select>
-                  <button onClick={() => quitarFila(f.key)} style={{ background: "transparent", border: `1px solid ${ds.border}`, color: ds.danger, borderRadius: dsR.sm, padding: "0 10px", cursor: "pointer" }}>
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-                <input
-                  value={f.url}
-                  onChange={(e) => actualizarFila(f.key, { url: e.target.value })}
-                  placeholder="https://youtu.be/... de esta variante"
-                  style={{ ...campoSelectReal(), borderColor: noReconocido ? ds.danger : undefined }}
-                />
-                {noReconocido && <span style={{ fontSize: 11, color: ds.danger }}>No reconozco este enlace.</span>}
-                {reconocido && <VideoEmbed url={f.url} />}
-                <BotonSubirVideo onSubido={(url) => actualizarFila(f.key, { url })} />
-              </div>
-            );
-          })}
-          <button
-            onClick={anadirFila}
-            style={{ display: "flex", alignItems: "center", gap: 5, justifyContent: "center", background: "transparent", border: `1px dashed ${ds.border}`, color: ds.inkSecondary, borderRadius: dsR.md, padding: "8px 10px", fontSize: 12.5, cursor: "pointer" }}
-          >
-            <Plus size={13} /> Añadir variante
-          </button>
-        </div>
-        {onEliminar && (
-          <div style={{ borderTop: `1px solid ${ds.border}`, paddingTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
-            {errorEliminando && <div style={{ color: ds.danger, fontSize: 12 }}>{errorEliminando}</div>}
-            {confirmandoBorrado ? (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 12, color: ds.inkSecondary }}>¿Eliminar este ejercicio? No se puede deshacer.</span>
-                <DsButton
-                  variant="danger"
-                  size="sm"
-                  disabled={borrando}
-                  onClick={async () => {
-                    setBorrando(true);
-                    await onEliminar();
-                    setBorrando(false);
-                  }}
-                >
-                  {borrando ? "Eliminando..." : "Sí, eliminar"}
-                </DsButton>
-                <DsButton variant="secondary" size="sm" onClick={() => setConfirmandoBorrado(false)}>
-                  Cancelar
-                </DsButton>
-              </div>
-            ) : (
-              <DsButton variant="danger" size="sm" onClick={() => setConfirmandoBorrado(true)} style={{ alignSelf: "flex-start" }}>
-                Eliminar ejercicio
-              </DsButton>
+      ))}
+
+      {tarjeta("Vídeo", "principal", (
+        <div style={{ display: "grid", gridTemplateColumns: enlaceReconocido && anchoDesktopPanel ? "220px minmax(0,1fr)" : "1fr", gap: 12 }}>
+          {enlaceReconocido && <div style={{ minWidth: 0 }}><VideoEmbed url={videoUrl} /></div>}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, alignContent: "start", minWidth: 0 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <input
+                value={videoUrl}
+                onChange={(e) => setVideoUrl(e.target.value)}
+                placeholder="Enlace de YouTube, Drive o .mp4"
+                style={campoTxt({ flex: "1 1 200px", width: "auto", borderColor: enlaceNoReconocido ? ds.danger : ds.border })}
+              />
+              <BotonSubirVideo onSubido={setVideoUrl} />
+            </div>
+            {enlaceNoReconocido && (
+              <span style={{ fontSize: 11.5, color: ds.danger }}>No reconozco este enlace: debe ser de YouTube, de Google Drive (drive.google.com/file/d/…) o terminar en .mp4/.webm/.mov.</span>
             )}
           </div>
-        )}
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 4 }}>
-          {(faltante || error) && <div role="alert" style={{ color: ds.danger, fontSize: 12.5, flex: 1, alignSelf: "center" }}>{faltante || error}</div>}
-          <DsButton variant="secondary" onClick={onCerrar}>Cancelar</DsButton>
-          <DsButton
-            disabled={guardando}
-            onClick={async () => {
-              if (!nombre.trim()) { setFaltante("Escribe el nombre del ejercicio."); return; }
-              if (!zonaSelEd) { setFaltante("Elige la zona corporal: es obligatoria."); return; }
-              setFaltante("");
-              setGuardando(true);
-              await onGuardar({
-                id: ejercicioEditar?.id,
-                nombre: nombre.trim(),
-                bloque,
-                categoria_preventiva_id: esPreventivo ? categoriaId : "",
-                ejercicio_base_id: ejercicioBaseId || "",
-                tags_descriptivos: tagsDeZonaRegion(zonaSelEd, regionSelEd),
-                sin_lateralidad: sinLateralidad ? "si" : "",
-                naturaleza: bloque === "Fuerza" ? naturaleza || null : null,
-                lateralidad: lateralidad || null,
-                gif_url: videoUrl,
-                videos_variantes: Object.fromEntries(
-                  filasVariantes.filter((f) => f.material && f.url.trim()).map((f) => [claveVideoVariante(f.material, f.unilateral), f.url.trim()])
-                ),
-                orden_rotacion: ejercicioEditar?.orden_rotacion || "",
-              });
-              setGuardando(false);
-            }}
-          >
-            {guardando ? "Guardando..." : ejercicioEditar ? "Guardar cambios" : "Guardar ejercicio"}
-          </DsButton>
         </div>
+      ))}
+
+      {ejercicioEditar && tarjeta("Variantes", null, (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {esVariante && matrizHermana && filaVariantePadre(matrizHermana, "(principal)")}
+          {variantesHermanas.map((v) => filaVariantePadre(v))}
+          {variantesHermanas.length === 0 && !esVariante && (
+            <div style={{ border: `1px dashed ${ds.border}`, borderRadius: dsR.md, padding: 12, textAlign: "center", fontSize: 12.5, color: ds.inkSecondary }}>Sin variantes todavía.</div>
+          )}
+          {matrizParaNuevaVariante && onCrearVariante && (
+            <button type="button" onClick={() => onCrearVariante(matrizParaNuevaVariante)} style={{ ...botonSecEj, width: "100%", borderStyle: "dashed", height: 40, color: ds.inkSecondary }}>+ Añadir variante</button>
+          )}
         </div>
+      ))}
+
+      {tarjeta(null, null, (
+        <>
+          <button type="button" onClick={() => setMaterialAbierto((v) => !v)} aria-expanded={materialAbierto} style={{ width: "100%", display: "flex", justifyContent: "space-between", alignItems: "center", background: "none", border: 0, padding: 0, color: ds.ink, cursor: "pointer" }}>
+            <span style={{ fontFamily: dsF.display, fontSize: 14, fontWeight: 700 }}>
+              Vídeo según material <span style={{ fontFamily: dsF.sans, fontSize: 12, fontWeight: 500, color: ds.inkMuted }}>{filasVariantes.length ? filasVariantes.length : "opcional"}</span>
+            </span>
+            <span style={{ color: ds.inkSecondary }}>{materialAbierto ? "▴" : "▾"}</span>
+          </button>
+          {materialAbierto && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
+              {filasVariantes.map((f) => {
+                const reconocido = !!extractYouTubeId(f.url) || esVideoDirecto(f.url);
+                const noReconocido = f.url.trim().length > 0 && !reconocido;
+                return (
+                  <div key={f.key} style={{ background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: dsR.md, padding: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={rejilla}>
+                      {etiq("Material", (
+                        <select value={f.material} onChange={(e) => actualizarFila(f.key, { material: e.target.value })} style={campoTxt()}>
+                          <option value="">— Material —</option>
+                          {materialesDisponibles.map((m) => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      ))}
+                      {etiq("Modo", (
+                        <select value={f.unilateral ? "uni" : "bi"} onChange={(e) => actualizarFila(f.key, { unilateral: e.target.value === "uni" })} style={campoTxt()}>
+                          <option value="bi">Bilateral</option>
+                          <option value="uni">Unilateral</option>
+                        </select>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <input value={f.url} onChange={(e) => actualizarFila(f.key, { url: e.target.value })} placeholder="Enlace de vídeo de este material" style={campoTxt({ flex: "1 1 200px", width: "auto", borderColor: noReconocido ? ds.danger : ds.border })} />
+                      <BotonSubirVideo onSubido={(url) => actualizarFila(f.key, { url })} />
+                      <button type="button" onClick={() => quitarFila(f.key)} style={{ ...botonSecEj, color: ds.danger }}>Quitar</button>
+                    </div>
+                    {noReconocido && <span style={{ fontSize: 11.5, color: ds.danger }}>No reconozco este enlace.</span>}
+                    {reconocido && <VideoEmbed url={f.url} />}
+                  </div>
+                );
+              })}
+              <button type="button" onClick={anadirFila} style={{ ...botonSecEj, width: "100%", borderStyle: "dashed", height: 40, color: ds.inkSecondary }}>+ Añadir vídeo por material</button>
+            </div>
+          )}
+        </>
+      ))}
+
+      <div style={{ position: "sticky", bottom: 0, zIndex: 5, background: ds.bgElevated, borderTop: `1px solid ${ds.border}`, padding: "10px 0", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {onEliminar && (confirmandoBorrado ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginRight: "auto" }}>
+            <span style={{ fontSize: 12, color: ds.inkSecondary }}>¿Eliminar este ejercicio? No se puede deshacer.</span>
+            <DsButton variant="danger" size="sm" disabled={borrando} onClick={async () => { setBorrando(true); await onEliminar(); setBorrando(false); }}>{borrando ? "Eliminando..." : "Sí, eliminar"}</DsButton>
+            <DsButton variant="secondary" size="sm" onClick={() => setConfirmandoBorrado(false)}>Cancelar</DsButton>
+          </div>
+        ) : (
+          <button type="button" onClick={() => setConfirmandoBorrado(true)} style={{ background: "none", border: 0, padding: "0 4px", height: 44, color: ds.danger, fontSize: 13, fontWeight: 600, cursor: "pointer", marginRight: "auto" }}>Eliminar ejercicio</button>
+        ))}
+        {!onEliminar && <span style={{ marginRight: "auto" }} />}
+        {(faltante || error || errorEliminando) && <div role="alert" style={{ color: ds.danger, fontSize: 12.5, flex: "1 1 100%", order: -1 }}>{faltante || error || errorEliminando}</div>}
+        <DsButton
+          disabled={guardando}
+          onClick={async () => {
+            if (!nombre.trim()) { setFaltante("Escribe el nombre del ejercicio."); return; }
+            if (!zonaSelEd) { setFaltante("Elige la zona corporal: es obligatoria."); return; }
+            setFaltante("");
+            setGuardando(true);
+            await onGuardar({
+              id: ejercicioEditar?.id,
+              nombre: nombre.trim(),
+              bloque,
+              categoria_preventiva_id: esPreventivo ? categoriaId : "",
+              ejercicio_base_id: ejercicioBaseId || "",
+              tags_descriptivos: tagsDeZonaRegion(zonaSelEd, regionSelEd),
+              sin_lateralidad: sinLateralidad ? "si" : "",
+              naturaleza: bloque === "Fuerza" ? naturaleza || null : null,
+              lateralidad: lateralidad || null,
+              gif_url: videoUrl,
+              videos_variantes: Object.fromEntries(
+                filasVariantes.filter((f) => f.material && f.url.trim()).map((f) => [claveVideoVariante(f.material, f.unilateral), f.url.trim()])
+              ),
+              orden_rotacion: ejercicioEditar?.orden_rotacion || "",
+            });
+            setGuardando(false);
+          }}
+        >
+          {guardando ? "Guardando..." : ejercicioEditar ? "Guardar cambios" : "Guardar ejercicio"}
+        </DsButton>
       </div>
     </div>
   );
 }
+
 
 function VistaOrdenRotacionReal({ ejercicios, categorias, onReordenar }) {
   const [categoriaSel, setCategoriaSel] = useState(categorias[0]?.id || "");
@@ -849,7 +801,6 @@ function VistaSesionesBibliotecaReal({ onAbrirModulo }) {
 // Lista con el aspecto de la biblioteca de sesiones: secciones por bloque y filas
 // de acordeón. Al abrir una fila aparecen su vídeo (enlace o subida), sus
 // variantes y las acciones.
-const etiquetaMonoEj = { fontFamily: dsF.mono, fontSize: 10.5, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, fontWeight: 600 };
 
 function PastillaEj({ children, color, bloque }) {
   return (
@@ -902,7 +853,6 @@ function CampoVideoEj({ ejercicio, onGuardarVideo }) {
   );
 }
 
-const botonSecEj = { height: 38, padding: "0 14px", borderRadius: dsR.md, border: `1px solid ${ds.border}`, background: "transparent", color: ds.ink, fontSize: 13, fontWeight: 600, cursor: "pointer" };
 
 function FilaEjercicio({ matriz, variantes, abierta, onToggle, onEditar, onToggleFavorito, onGuardarVideo, onCrearVariante }) {
   const [menu, setMenu] = useState(false);
@@ -1040,7 +990,6 @@ function FilasEjerciciosReal({ familias, onEditar, onToggleFavorito, onGuardarVi
   );
 }
 
-const selectEstiloEj = { height: 38, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: dsR.md, color: ds.ink, fontSize: 13, padding: "0 10px", minWidth: 0 };
 
 const tieneVideoEjercicio = (e) => !!(e.gif_url || Object.values(e.videos_variantes || {}).some(Boolean));
 
@@ -1146,7 +1095,7 @@ export function BibliotecaEjerciciosReal({ onBack, onAbrirModulo, onCerrarSesion
   return (
     <PantallaEntrenadorAncha activo="biblioteca" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
       <div>
-        {(vistaPrincipal === "sesiones" || panelAbierto) && (
+        {vistaPrincipal === "sesiones" && (
         <label style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 14, width: 200 }}>
           <span style={{ fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted }}>BIBLIOTECA</span>
           <select value={vistaPrincipal} onChange={(e) => setVistaPrincipal(e.target.value)} style={campoSelectReal({ maxWidth: 200 })}>
