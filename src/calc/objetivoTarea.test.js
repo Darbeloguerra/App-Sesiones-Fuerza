@@ -5,6 +5,7 @@ import {
   zonaPctObjetivo, enZonaPct, enZonaRir, rangoReps, objetivosQueEncajan, derivaDeObjetivo,
   objetivosEnZona, aplicarObjetivo, ligarCampo, objetivoPorId,
 } from "./objetivoTarea.js";
+import { rtfDePct } from "./guiaObjetivo.js";
 
 const T = (o = {}) => ({ modo: "reps", pct1rm: "", rir: "", cantidad: "", objetivo: "", ...o });
 
@@ -30,7 +31,8 @@ test("RIR: hipertrofia 0-5, fuerza 3-5, potencia 3 o más", () => {
 test("rangoReps sale de la tabla y respeta el tope de potencia", () => {
   const f = rangoReps(objetivoPorId("fuerza"), T({ pct1rm: "80" }));
   assert.deepEqual(f, [3, 5]); // RTF 8 - RIR 5..3
-  assert.equal(rangoReps(objetivoPorId("hipertrofia"), T({ pct1rm: "70" })), null); // sin tabla
+  assert.deepEqual(rangoReps(objetivoPorId("hipertrofia"), T({ pct1rm: "70" })), [7, 12]); // RTF 12 (estimación) - RIR 5..0
+  assert.equal(rangoReps(objetivoPorId("hipertrofia"), T({ pct1rm: "60" })), null); // por debajo del 64 %: sin tabla
   assert.equal(rangoReps(objetivoPorId("potencia"), T({ pct1rm: "80" })), null); // fuera de zona
 });
 
@@ -99,13 +101,52 @@ test("elegir % con objetivo y RIR fuera de zona lo sustituye por el típico", ()
   assert.equal(tarea.cantidad, "4");
 });
 
-test("cambiar RIR recalcula repeticiones; cambiar repeticiones recalcula RIR", () => {
-  const a = ligarCampo(T({ pct1rm: "80", rir: "4", cantidad: "4" }), "rir", "3");
+test("con objetivo: cambiar RIR recalcula repeticiones; cambiar repeticiones recalcula %", () => {
+  const a = ligarCampo(T({ objetivo: "fuerza", pct1rm: "80", rir: "4", cantidad: "4" }), "rir", "3");
   assert.equal(a.tarea.cantidad, "5");
-  assert.match(a.mensaje, /Repeticiones 4 → 5/);
-  const b = ligarCampo(T({ pct1rm: "80", rir: "4", cantidad: "4" }), "cantidad", "6");
-  assert.equal(b.tarea.rir, "2");
-  assert.match(b.mensaje, /RIR 4 → 2/);
+  assert.match(a.mensaje, /5 reps/);
+  const b = ligarCampo(T({ objetivo: "fuerza", pct1rm: "80", rir: "4", cantidad: "4" }), "cantidad", "6");
+  assert.equal(b.tarea.rir, "4"); // el RIR está en zona: se respeta
+  assert.equal(b.tarea.pct1rm, "75"); // 6 + 4 = RTF 10
+});
+
+test("SIN objetivo no actúa nada: % , RIR y repeticiones son independientes", () => {
+  const base = T({ pct1rm: "80", rir: "4", cantidad: "4" });
+  for (const [campo, valor] of [["pct1rm", "60"], ["rir", "1"], ["cantidad", "12"]]) {
+    const r = ligarCampo(base, campo, valor);
+    assert.equal(r.mensaje, null);
+    for (const k of ["pct1rm", "rir", "cantidad"]) assert.equal(r.tarea[k], k === campo ? valor : base[k]);
+  }
+});
+
+test("hipertrofia por debajo del 75 %: % -> RIR y repeticiones; repeticiones -> RIR y %", () => {
+  const a = ligarCampo(T({ objetivo: "hipertrofia" }), "pct1rm", "70");
+  assert.deepEqual([a.tarea.rir, a.tarea.cantidad], ["2", "10"]); // RTF 12 - RIR 2
+  const b = ligarCampo(T({ objetivo: "hipertrofia" }), "cantidad", "12");
+  assert.deepEqual([b.tarea.rir, b.tarea.pct1rm], ["2", "66"]); // RTF 14
+  const c = ligarCampo(T({ objetivo: "hipertrofia" }), "cantidad", "14");
+  assert.deepEqual([c.tarea.rir, c.tarea.pct1rm], ["1", "64"]); // RIR 2 no cabe: baja a 1
+  const d = ligarCampo(T({ objetivo: "hipertrofia" }), "pct1rm", "60");
+  assert.match(d.mensaje, /no calcula/);
+});
+
+test("con objetivo, repeticiones + RIR = repeticiones máximas del % en todas las combinaciones", () => {
+  for (const id of ["fuerza", "hipertrofia"]) {
+    for (let p = 100; p >= 64; p--) {
+      const t = ligarCampo(T({ objetivo: id }), "pct1rm", String(p)).tarea;
+      assert.ok(Math.abs(rtfDePct(p) - (Number(t.cantidad) + Number(t.rir))) <= 0.5, `${id} ${p} %`);
+    }
+    for (let n = 1; n <= 15; n++) {
+      const t = ligarCampo(T({ objetivo: id }), "cantidad", String(n)).tarea;
+      if (t.pct1rm === "") continue;
+      assert.ok(Math.abs(rtfDePct(t.pct1rm) - (n + Number(t.rir))) <= 0.5, `${id} ${n} reps`);
+    }
+  }
+});
+
+test("elegir hipertrofia con 70 % ya puesto: rellena RIR y repeticiones sin tocar el %", () => {
+  const r = aplicarObjetivo(T({ pct1rm: "70" }), "hipertrofia").tarea;
+  assert.deepEqual([r.pct1rm, r.rir, r.cantidad], ["70", "2", "10"]);
 });
 
 test("sin tabla (menos de 75 %) o sin repeticiones no se ligan valores", () => {
