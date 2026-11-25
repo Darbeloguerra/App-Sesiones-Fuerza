@@ -16,7 +16,9 @@ test("rtfDePct: inverso de la tabla; fuera de tabla -> null", () => {
   assert.equal(rtfDePct(90), 4);
   assert.equal(rtfDePct(80), 8);
   assert.equal(rtfDePct(75), 10);
-  assert.equal(rtfDePct(70), null);
+  assert.equal(rtfDePct(70), 12); // entre 64 y 75 %: estimación (tabla ampliada del motor)
+  assert.equal(rtfDePct(64), 15);
+  assert.equal(rtfDePct(60), null);
   assert.equal(rtfDePct(101), null);
   assert.ok(Math.abs(rtfDePct(88.5) - 4.5) < 1e-9);
 });
@@ -29,9 +31,9 @@ test("guiaPorReps fuerza: 4 reps con RIR 3-5 -> 77-83 %; 1 rep -> 85-90 %", () =
 });
 
 test("guiaPorReps: RTF fuera de tabla -> parcial o null", () => {
-  assert.equal(guiaPorReps(fuerza, 5).parcial, false); // 5+5 = 10 cabe justo
-  assert.equal(guiaPorReps(fuerza, 6).parcial, true); // 6+5 = 11 se sale de la tabla
-  assert.equal(guiaPorReps(fuerza, 8), null); // 8+3 = 11 no cabe
+  assert.equal(guiaPorReps(fuerza, 10).parcial, false); // 10+5 = 15 cabe justo
+  assert.equal(guiaPorReps(fuerza, 11).parcial, true); // 11+5 = 16 se sale de la tabla
+  assert.equal(guiaPorReps(fuerza, 13), null); // 13+3 = 16 no cabe
   assert.equal(guiaPorReps(fuerza, 0), null);
 });
 
@@ -74,7 +76,7 @@ test("potencia: RIR >= 3 sin techo; la guía da solo un máximo de %1RM", () => 
   const g = guiaPorReps(pot, 3);
   assert.equal(g.soloTecho, true);
   assert.equal(g.pctMax, 85); // 3 reps + RIR 3 = RTF 6 -> 85 %
-  assert.equal(guiaPorReps(pot, 8), null); // 8+3 = 11 fuera de tabla
+  assert.equal(guiaPorReps(pot, 13), null); // 13+3 = 16 fuera de tabla
   assert.equal(tiraReferencia(pot, 3)[2].texto, "≤85 %");
 });
 
@@ -90,7 +92,9 @@ test("potencia: RIR 1 -> bajo; RIR 3 y RIR 8 -> dentro (no hay techo)", () => {
 
 test("sugerirCarga: fuerza 4 reps -> RIR 4 y 80 % (RTF 8); 7 reps -> RIR 4 sin %; potencia sin RIR y % según tipo", () => {
   assert.deepEqual(sugerirCarga(fuerza, 4), { rir: 4, pct1rm: 80 });
-  assert.deepEqual(sugerirCarga(fuerza, 7), { rir: 4, pct1rm: null });
+  assert.deepEqual(sugerirCarga(fuerza, 7), { rir: 4, pct1rm: 73 }); // RTF 11: estimación
+  assert.deepEqual(sugerirCarga(fuerza, 12), { rir: 3, pct1rm: 64 }); // RIR 4 no cabe: baja al mínimo (3)
+  assert.deepEqual(sugerirCarga(fuerza, 13), { rir: 3, pct1rm: null }); // ni RIR 3 cabe en la tabla
   assert.deepEqual(sugerirCarga(hiper, 8), { rir: 2, pct1rm: 75 });
   assert.deepEqual(sugerirCarga(pot, 3), { rir: null, pct1rm: 50 });
   assert.deepEqual(sugerirCarga(pot, 3, "pliometrico"), { rir: null, pct1rm: 30 });
@@ -126,7 +130,7 @@ test("zonaPct: fuerza 4 reps -> 77-83; potencia por tipo; sin objetivo -> null",
   assert.deepEqual(zonaPct(pot, { tipoMov: "pliometrico" }), { min: 0, max: 30 });
   assert.deepEqual(zonaPct(pot, { tipoMov: "nopliometrico" }), { min: 30, max: 70 });
   assert.equal(zonaPct(null, { reps: 4 }), null);
-  assert.equal(zonaPct(fuerza, { reps: 9 }), null);
+  assert.equal(zonaPct(fuerza, { reps: 13 }), null);
 });
 
 test("zonaRir e implicaciones", () => {
@@ -228,7 +232,7 @@ test("reps por debajo del 75 %: solo criterio por objetivo, sin cifras exactas",
   assert.match(f[0].texto, /hasta 8 reps/);
   assert.match(f[1].texto, /sin límite/);
   assert.match(f[2].texto, /hasta 6 reps/);
-  assert.match(f[1].texto, /Por debajo del 75 %/);
+  assert.match(f[1].texto, /Por debajo del 64 %/);
 });
 
 test("potencia dentro de su zona: tope de 6 repeticiones", () => {
@@ -256,7 +260,7 @@ test("rir: si el RIR elegido ya encaja en el rango del objetivo, se conserva", (
 test("rir sin %: propone el RIR por defecto y pide un % desde 75", () => {
   const f = sugerenciasPorObjetivo({ pct1rm: "", rir: "", cantidad: "" }, "rir");
   assert.deepEqual(f.map((x) => x.aplicar?.rir), ["4", "2", undefined]);
-  assert.match(f[0].texto, /desde 75/);
+  assert.match(f[0].texto, /desde 64/);
   assert.match(f[2].texto, /Sin RIR/);
 });
 
