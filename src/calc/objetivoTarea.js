@@ -11,9 +11,11 @@
 //    potencia y tope de 6 repeticiones en potencia: criterio de la app.
 //  - Los VALORES TÍPICOS que se rellenan al elegir un objetivo son un punto
 //    de partida de la app, no un dato científico; el entrenador los edita.
-//  - La conversión %1RM <-> repeticiones máximas usa la tabla de e1rm.js
-//    (fiable desde el 75 %); por debajo de 75 % no se calculan repeticiones.
-import { OBJETIVOS_SESION, RIR_DEFECTO, REPS_MAX_POTENCIA, PCT_POTENCIA_DEFECTO, rtfDePct } from "./guiaObjetivo.js";
+//  - La conversión %1RM <-> repeticiones máximas usa la tabla de e1rm.js:
+//    verificada desde el 75 %; entre 64 y 75 % son estimaciones (se marcan con
+//    «≈» en pantalla); por debajo de 64 % no se calculan repeticiones.
+//  - SIN objetivo no actúa nada: %, RIR y repeticiones son independientes.
+import { OBJETIVOS_SESION, RIR_DEFECTO, REPS_MAX_POTENCIA, PCT_POTENCIA_DEFECTO, RTF_TABLA_MAX, rtfDePct, pctPorRtf } from "./guiaObjetivo.js";
 import { pct1RMporRTF } from "./e1rm.js";
 
 export const VALORES_TIPICOS_INICIALES = {
@@ -28,6 +30,18 @@ const num = (v) => (v === "" || v == null ? NaN : Number(v));
 const esNum = (v) => Number.isFinite(num(v));
 const tienePct = (t) => esNum(t.pct1rm) && num(t.pct1rm) > 0;
 const copia = (o) => JSON.parse(JSON.stringify(o));
+
+// Invariante del motor: con un % calculable, repeticiones + RIR = repeticiones
+// máximas de ese % (redondeado). Si no cuadra, se corrige el RIR y se explica.
+function cuadrar(t, R) {
+  const meta = Math.round(R);
+  const reps = Math.max(1, num(t.cantidad));
+  const rir = num(t.rir);
+  t.cantidad = String(reps);
+  if (reps + rir === meta) return "";
+  t.rir = String(Math.max(0, meta - reps));
+  return ` A ese % solo caben ${reps} rep${reps === 1 ? "" : "s"} con RIR ${t.rir}.`;
+}
 
 export const objetivoPorId = (id) => OBJETIVOS_SESION.find((o) => o.id === id) || null;
 
@@ -85,7 +99,7 @@ export const enZonaRir = (o, r) => {
 };
 
 // Rango de repeticiones [lo, hi] que deja el RIR del objetivo al % de la tarea.
-// null si no hay % o cae por debajo de 75 % (sin tabla), o si en potencia el %
+// null si no hay % o cae por debajo de 64 % (sin tabla), o si en potencia el %
 // queda fuera de su zona.
 export function rangoReps(o, t) {
   if (!o || !tienePct(t)) return null;
@@ -164,58 +178,80 @@ export function aplicarObjetivo(t, id, tipicos = VALORES_TIPICOS_INICIALES) {
       : `${o.etiqueta}: ${pct} % recomendado · ${cantidadPot} reps · sin RIR. Ajusta lo que necesites.`;
     return { tarea: tareaPot, mensaje: mensajePot };
   }
-  let cantidad;
-  if (R != null) cantidad = String(Math.max(1, Math.round(R - d.rir)));
-  else cantidad = String(d.reps ?? (esNum(t.cantidad) ? t.cantidad : (o.zonas ? 4 : 8)));
-  const tarea = { ...t, objetivo: id, pct1rm: pct, pct1rmOrigen: undefined, rir: String(d.rir), cantidad, cargaAuto: false };
-  const mensaje = tenia
-    ? `${o.etiqueta} con tu ${pct} %: RIR ${d.rir} y ${cantidad} reps rellenados. El % no se toca.`
-    : `${o.etiqueta}: ${pct} % · RIR ${d.rir} · ${cantidad} reps (valores típicos). Ajusta lo que necesites.`;
+  if (R == null) {
+    const cantidadSin = String(d.reps ?? (esNum(t.cantidad) ? t.cantidad : (o.zonas ? 4 : 8)));
+    const tareaSin = { ...t, objetivo: id, pct1rm: pct, pct1rmOrigen: undefined, rir: String(d.rir), cantidad: cantidadSin, cargaAuto: false };
+    return { tarea: tareaSin, mensaje: `${o.etiqueta}: con ${pct} % la tabla no calcula repeticiones (cubre desde 64 %). RIR ${d.rir} puesto; las repeticiones no se tocan.` };
+  }
+  const tarea = { ...t, objetivo: id, pct1rm: pct, pct1rmOrigen: undefined, rir: String(d.rir), cantidad: String(Math.max(1, Math.round(R - d.rir))), cargaAuto: false };
+  const resto = cuadrar(tarea, R);
+  const mensaje = (tenia
+    ? `${o.etiqueta} con tu ${pct} %: RIR ${tarea.rir} y ${tarea.cantidad} reps rellenados. El % no se toca.`
+    : `${o.etiqueta}: ${pct} % · RIR ${tarea.rir} · ${tarea.cantidad} reps (valores típicos). Ajusta lo que necesites.`) + resto;
   return { tarea, mensaje };
 }
 
 // ---- cambiar % / RIR / repeticiones ----
-// Con objetivo: al elegir un % se rellenan RIR y repeticiones para ese objetivo
-// (se respeta el RIR actual si ya está en su zona). Sin objetivo, o al cambiar
-// RIR o repeticiones, el tercer valor se recalcula con la tabla (RTF = reps +
-// RIR) cuando el % está en tabla (>= 75 %).
+// SIN objetivo no actúa nada: el campo cambia y los otros dos no se tocan.
+// CON objetivo, repeticiones + RIR = repeticiones máximas del % (tabla hasta
+// 15; por debajo del 75 % son estimaciones). Al cambiar uno, se recalculan los otros:
+//  - %: se respeta el RIR si está en la zona del objetivo (si no, el típico) y
+//    se recalculan las repeticiones.
+//  - repeticiones: igual con el RIR; sale el %. Si no cabe en la tabla, se baja el RIR
+//    hasta el mínimo del objetivo.
+//  - RIR: con % se recalculan las repeticiones; sin %, sale el % de las repeticiones.
+// Potencia no tiene RIR: nada se recalcula.
 // campo: "pct1rm" | "rir" | "cantidad". Devuelve { tarea, mensaje }.
 export function ligarCampo(t, campo, valor, tipicos = VALORES_TIPICOS_INICIALES) {
-  const antes = { cantidad: t.cantidad, rir: t.rir };
   const nueva = { ...t, [campo]: valor };
   if (campo === "pct1rm") nueva.pct1rmOrigen = undefined;
   if ((t.modo || "reps") !== "reps") return { tarea: nueva, mensaje: null };
   const o = objetivoPorId(t.objetivo);
-  const R = tienePct(nueva) ? rtfDePct(num(nueva.pct1rm)) : null;
-
-  if (o && o.sinRir) {
-    // Potencia: sin RIR, nada se recalcula al cambiar % o repeticiones.
+  if (!o) return { tarea: nueva, mensaje: null };
+  if (o.sinRir) {
     if (campo !== "rir") nueva.rir = "";
     return { tarea: nueva, mensaje: null };
   }
+  if (valor === "" || valor == null) return { tarea: nueva, mensaje: null };
+  const d = tipicos[o.id] || VALORES_TIPICOS_INICIALES[o.id];
 
-  if (campo === "pct1rm" && o) {
-    const d = tipicos[o.id] || VALORES_TIPICOS_INICIALES[o.id];
+  if (campo === "pct1rm") {
+    const R = tienePct(nueva) ? rtfDePct(num(nueva.pct1rm)) : null;
+    if (R == null) return { tarea: nueva, mensaje: tienePct(nueva) ? `Con ${nueva.pct1rm} % la tabla no calcula repeticiones (cubre desde 64 %). No se toca nada más.` : null };
     if (!enZonaRir(o, nueva.rir)) nueva.rir = String(d.rir);
-    if (R != null) nueva.cantidad = String(Math.max(1, Math.round(R - num(nueva.rir))));
-    else if (!esNum(nueva.cantidad)) nueva.cantidad = String(d.reps ?? (o.zonas ? 4 : 8));
-    const resto = R != null ? ` (máximo del %: ${Math.round(R)} reps)` : "";
-    return { tarea: nueva, mensaje: tienePct(nueva) ? `${o.etiqueta} a ${nueva.pct1rm} %: RIR ${nueva.rir} y ${nueva.cantidad} reps${resto}.` : null };
+    nueva.cantidad = String(Math.max(1, Math.round(R - num(nueva.rir))));
+    const resto = cuadrar(nueva, R);
+    return { tarea: nueva, mensaje: `${o.etiqueta} a ${nueva.pct1rm} %: RIR ${nueva.rir} y ${nueva.cantidad} reps (máximo del %: ${Math.round(R)} reps).${resto}` };
   }
 
-  if (R == null) return { tarea: nueva, mensaje: null };
-  if (campo === "pct1rm" || campo === "rir") {
-    if (!esNum(nueva.rir)) return { tarea: nueva, mensaje: null };
-    const n = String(Math.max(1, Math.round(R - num(nueva.rir))));
-    if (n === String(antes.cantidad)) return { tarea: nueva, mensaje: null };
-    nueva.cantidad = n;
-    return { tarea: nueva, mensaje: `Repeticiones ${esNum(antes.cantidad) ? antes.cantidad : "—"} → ${n} (máximo a ${nueva.pct1rm} %: ${Math.round(R)} reps, RIR ${nueva.rir}).` };
+  if (campo === "cantidad") {
+    const n = num(nueva.cantidad);
+    if (!Number.isFinite(n) || n < 1) return { tarea: nueva, mensaje: null };
+    let rir = enZonaRir(o, nueva.rir) ? num(nueva.rir) : d.rir;
+    if (n + rir > RTF_TABLA_MAX) rir = Math.max(o.rir.min, RTF_TABLA_MAX - n);
+    nueva.rir = String(rir);
+    if (n + rir > RTF_TABLA_MAX) {
+      nueva.pct1rm = "";
+      return { tarea: nueva, mensaje: `Con ${n} repeticiones ni el RIR mínimo de ${o.etiqueta.toLowerCase()} cabe en la tabla (máximo ${RTF_TABLA_MAX} reps hasta el fallo). Sin % calculado.` };
+    }
+    nueva.pct1rm = String(Math.round(pctPorRtf(n + rir) * 100));
+    return { tarea: nueva, mensaje: `${n} reps con RIR ${rir}: ${nueva.pct1rm} %.` };
   }
-  if (campo === "cantidad" && esNum(nueva.cantidad)) {
-    const rir = String(Math.max(0, Math.round(R - num(nueva.cantidad))));
-    if (rir === String(antes.rir)) return { tarea: nueva, mensaje: null };
-    nueva.rir = rir;
-    return { tarea: nueva, mensaje: `RIR ${esNum(antes.rir) ? antes.rir : "—"} → ${rir} (máximo a ${nueva.pct1rm} %: ${Math.round(R)} reps).` };
+
+  // campo === "rir"
+  const R = tienePct(nueva) ? rtfDePct(num(nueva.pct1rm)) : null;
+  if (R != null) {
+    nueva.cantidad = String(Math.max(1, Math.round(R - num(nueva.rir))));
+    const resto = cuadrar(nueva, R);
+    return { tarea: nueva, mensaje: `RIR ${nueva.rir} a ${nueva.pct1rm} %: ${nueva.cantidad} reps.${resto}` };
+  }
+  if (esNum(nueva.cantidad)) {
+    const total = num(nueva.cantidad) + num(nueva.rir);
+    if (total <= RTF_TABLA_MAX) {
+      nueva.pct1rm = String(Math.round(pctPorRtf(total) * 100));
+      return { tarea: nueva, mensaje: `${nueva.cantidad} reps con RIR ${nueva.rir}: ${nueva.pct1rm} %.` };
+    }
+    return { tarea: nueva, mensaje: `${nueva.cantidad} reps con RIR ${nueva.rir} superan la tabla (${RTF_TABLA_MAX}). Sin % calculado.` };
   }
   return { tarea: nueva, mensaje: null };
 }
