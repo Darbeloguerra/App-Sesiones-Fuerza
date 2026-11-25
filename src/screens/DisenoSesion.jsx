@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
-import { ChevronDown, BookOpen, Lock, Play } from "lucide-react";
+import { ChevronDown, BookOpen, Lock, Play, Users, Calendar, Target, Clock, ListChecks, AlertTriangle } from "lucide-react";
 import { ds, dsF, dsR, DsBadge } from "../core/designSystem.jsx";
 import { useAnchoVentana, PantallaBase } from "../core/layout.jsx";
 import { LoadingBlock, VideoEmbed, CerrablePorFuera, TagChipReal, campoSelectReal, ChipReal, TAGS_DESCRIPTIVOS_BIBLIOTECA, SelectCompacto, SelectorZonaRegion, TAGS_MOVILIDAD, tagsDeZonaRegion } from "../core/components.jsx";
@@ -42,7 +42,7 @@ import { avisoDeTarea, firmaCarga, textoSugerido, etiquetaRir, aplicarSugerencia
 import { aplicarObjetivo, ligarCampo, derivaDeObjetivo, objetivosQueEncajan, objetivosEnZona, textoZonaObjetivo, leerTipicos, guardarTipicos, normalizarTipicos, VALORES_TIPICOS_INICIALES } from "../calc/objetivoTarea.js";
 import { ajustarRecuperaciones, aplicarDescansos, formatearMinutosDiseno } from "../calc/tiempoDisponible.js";
 import { ListaBloquesDiseno, PestanasBloquesDiseno, HojaBloquesDiseno, CajaRecuperacion, GrupoSuperserie, gruposSuperserie, ParteCaja, TarjetaBloque, VacioParte, NOMBRE_BLOQUE } from "./DisenoBloques.jsx";
-import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueObjetivo, BotonValoresTipicos, Cabecera, ListaOpciones } from "./ControlesTarea.jsx";
+import { ANCHO_MIN_TABLA, EtiquetaAccion, ANCHO_COL, ANCHO_FLECHAS, CeldaDesplegable, CampoSelect, Implicaciones, EtiquetaFija, EtiquetaMaterial, EtiquetaTipo, EtiquetaNota, EtiquetaDesplegable, FlechasTarea, EtiquetaLado, EtiquetaSuperserie, EtiquetaObjetivo, BloqueObjetivo, BotonValoresTipicos, Cabecera, ListaOpciones, CeldaDato } from "./ControlesTarea.jsx";
 import {
   aSegundosDiseno,
   descansoEfectivoSeg,
@@ -3303,29 +3303,38 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
     setTareasFuerza((prev) => prev.map(aplicar));
     setCircuitosFuerza((prev) => prev.map((c) => ({ ...c, tareas: (c.tareas || []).map(aplicar) })));
   };
-  const pastilla = (activo, aviso) => ({ flexShrink: 0, height: 30, padding: "0 11px", borderRadius: 9, border: `1px solid ${aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.border}`, background: activo ? ds.accentSubtle : "transparent", color: aviso ? ds.warning || ds.danger : activo ? ds.accent : ds.inkSecondary, fontFamily: dsF.sans, fontWeight: 600, fontSize: 12, cursor: "pointer", whiteSpace: "nowrap", display: "inline-flex", alignItems: "center", gap: 5 });
-  const datosSesion = (
-    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", pointerEvents: readOnly ? "none" : undefined }}>
-      <button type="button" onClick={() => setAjustesAbiertos(true)} disabled={readOnly} style={pastilla(true, sinJugadores)}>
-        {targetPlayerIds === null ? "Todos los jugadores" : targetPlayerIds.length ? `${targetPlayerIds.length} jugador${targetPlayerIds.length === 1 ? "" : "es"}` : "Elige jugadores"}
-      </button>
-      <EtiquetaDesplegable rotulo={objetivoSesionId ? `Objetivo: ${OBJETIVOS_SESION.find((o) => o.id === objetivoSesionId)?.etiqueta} ▾` : "＋ Objetivo"} ariaLabel="Objetivo de la sesión" tono={objetivoSesionId ? "activo" : "normal"} grande ancho={300}>
-        {(cerrar) => (
-          <>
-            <Cabecera titulo="Objetivo de la sesión" subtitulo="las tareas de Fuerza lo heredan" />
-            <ListaOpciones etiqueta="Objetivo de la sesión" valor={objetivoSesionId} onElegir={(v) => { elegirObjetivoSesion(v); cerrar(); }} opciones={[{ v: "", t: "Sin objetivo", tenue: true }, ...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta, nota: `RIR ${etiquetaRir(o).replace("RIR ", "")}` }))]} />
-            <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Se aplica a las tareas nuevas de Fuerza y a las que aún no tienen objetivo. Cada tarea conserva el suyo y puedes cambiarlo en ella.</span>
-          </>
-        )}
-      </EtiquetaDesplegable>
-      <button type="button" onClick={() => setDetallesAbiertos(true)} title="Fechas de la sesión y clasificación MD" style={pastilla(false, false)}>
-        {fechas.length ? `${fechas.length} fecha${fechas.length === 1 ? "" : "s"}` : "Fechas"}{md ? ` · ${md}` : ""}
-      </button>
-      <span title="Duración efectiva: solo tiempo de trabajo, sin recuperación ni transiciones" style={{ ...pastilla(false, false), cursor: "default", fontFamily: dsF.mono }}>~{Math.round(resumenDiseno.totalSeg / 60)} min efectivos</span>
+  // Cabecera de la sesión: cuatro celdas iguales (Jugadores, Fecha, Objetivo, Duración).
+  // Resumen y avisos van en la fila del nombre (o, en pantalla estrecha, sobre las celdas).
+  const columnasDatos = lateralBloques ? 1 : ancho >= 760 ? 4 : 2;
+  const resumenEnNombre = lateralBloques || ancho >= 560;
+  const textoJugadores = targetPlayerIds === null ? "Todos los jugadores" : targetPlayerIds.length ? `${targetPlayerIds.length} jugador${targetPlayerIds.length === 1 ? "" : "es"}` : "Elige jugadores";
+  const textoFechas = fechas.length ? `${fechas.length} fecha${fechas.length === 1 ? "" : "s"}${md ? ` · ${md}` : ""}` : "Sin fecha";
+  const botonIcono = { minWidth: 44, height: 44, boxSizing: "border-box", padding: "0 12px", borderRadius: 11, display: "inline-flex", alignItems: "center", justifyContent: "center", gap: 7, fontFamily: dsF.sans, fontWeight: 600, fontSize: 13, cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" };
+  const botonesResumen = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0, pointerEvents: readOnly ? "none" : undefined }}>
       {totalAvisos > 0 && (
-        <button type="button" onClick={() => setMostrarResumen(true)} style={pastilla(false, true)}>⚠ {totalAvisos}</button>
+        <button type="button" aria-label={`${totalAvisos} avisos`} onClick={() => setMostrarResumen(true)} style={{ ...botonIcono, fontWeight: 700, border: `1px solid ${ds.accentBorderSubtle || ds.accent}`, background: ds.accentSubtle, color: ds.accent }}><AlertTriangle size={16} />{totalAvisos}</button>
       )}
-      <button type="button" aria-pressed={mostrarResumen} onClick={() => setMostrarResumen((v) => !v)} style={pastilla(mostrarResumen, false)}>Resumen</button>
+      <button type="button" aria-label="Resumen" aria-pressed={mostrarResumen} onClick={() => setMostrarResumen((v) => !v)} style={{ ...botonIcono, border: `1px solid ${mostrarResumen ? ds.accentBorderSubtle || ds.accent : ds.border}`, background: mostrarResumen ? ds.accentSubtle : "transparent", color: mostrarResumen ? ds.accent : ds.inkSecondary }}><ListChecks size={16} />{ancho >= 600 ? "Resumen" : null}</button>
+    </div>
+  );
+  const datosSesion = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, pointerEvents: readOnly ? "none" : undefined }}>
+      {!resumenEnNombre && <div style={{ display: "flex", justifyContent: "flex-end" }}>{botonesResumen}</div>}
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${columnasDatos}, minmax(0, 1fr))`, gap: 8 }}>
+        <CeldaDato icono={<Users size={14} />} rotulo="Jugadores" valor={textoJugadores} tono={sinJugadores ? "atencion" : "normal"} sinFlecha={columnasDatos === 2} onClick={() => !readOnly && setAjustesAbiertos(true)} />
+        <CeldaDato icono={<Calendar size={14} />} rotulo="Fecha" valor={textoFechas} tono={fechas.length ? "normal" : "vacio"} sinFlecha={columnasDatos === 2} titulo="Fechas de la sesión y clasificación MD" onClick={() => !readOnly && setDetallesAbiertos(true)} />
+        <CeldaDato icono={<Target size={14} />} rotulo="Objetivo" valor={objetivoSesionId ? OBJETIVOS_SESION.find((o) => o.id === objetivoSesionId)?.etiqueta : "Opcional"} tono={objetivoSesionId ? "normal" : "vacio"} sinFlecha={columnasDatos === 2} ariaLabel="Objetivo de la sesión" ancho={300}>
+          {(cerrar) => (
+            <>
+              <Cabecera titulo="Objetivo de la sesión" subtitulo="las tareas de Fuerza lo heredan" />
+              <ListaOpciones etiqueta="Objetivo de la sesión" valor={objetivoSesionId} onElegir={(v) => { elegirObjetivoSesion(v); cerrar(); }} opciones={[{ v: "", t: "Sin objetivo", tenue: true }, ...OBJETIVOS_SESION.map((o) => ({ v: o.id, t: o.etiqueta, nota: `RIR ${etiquetaRir(o).replace("RIR ", "")}` }))]} />
+              <span style={{ fontSize: 11, color: ds.inkMuted, padding: "0 4px", lineHeight: 1.4 }}>Se aplica a las tareas nuevas de Fuerza y a las que aún no tienen objetivo. Cada tarea conserva el suyo y puedes cambiarlo en ella.</span>
+            </>
+          )}
+        </CeldaDato>
+        <CeldaDato info icono={<Clock size={14} />} rotulo="Duración" valor={`~${Math.round(resumenDiseno.totalSeg / 60)} min`} titulo="Duración efectiva: solo tiempo de trabajo, sin recuperación ni transiciones" />
+      </div>
     </div>
   );
   const panelResumenOrden = (
@@ -3764,7 +3773,7 @@ export function DisenoSesionReal({ sesionExistente, plantilla, fechasSugeridas, 
       <div style={{ display: "flex", flexDirection: "column", flex: 1, minHeight: 0, border: `1px solid ${ds.border}`, borderRadius: 14, overflow: "hidden", background: ds.canvas }}>
         <div style={{ flexShrink: 0 }}>
           <div style={{ background: ds.bgElevated, borderBottom: `1px solid ${ds.border}`, padding: "12px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-            <div style={filaFlex}>{filaNombre}{!readOnly && <>{botonGuardar(true)}{botonSiguiente(true)}</>}</div>
+            <div style={filaFlex}>{filaNombre}{resumenEnNombre && botonesResumen}{!readOnly && <>{botonGuardar(true)}{botonSiguiente(true)}</>}</div>
           </div>
         {readOnly && (
           <div style={{ display: "flex", alignItems: "center", gap: 8, background: ds.accentSubtle, border: `1px solid ${ds.accentBorderSubtle}`, borderRadius: 8, padding: "10px 12px", margin: "10px 14px 0", fontSize: 12.5, color: ds.accent }}>
