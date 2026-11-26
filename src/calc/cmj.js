@@ -301,14 +301,15 @@ export function cmjFilasDia(microResult, dayField, umbral) {
     const delta = mm[`${dayField}Delta`];
     const status = mm[`${dayField}Status`];
     const u = umbral[metric.key];
-    return { key: metric.key, label: metric.label, delta, status, explicacion: cmjExplicacionMetrica(metric.key, delta, status, u.ambarPct, u.rojoPct) };
+    const actual = microResult[dayField] ? metric.get(microResult[dayField]) : null;
+    return { key: metric.key, label: metric.label, delta, status, base: mm.base, actual, decimales: metric.decimals, unidad: metric.unit, explicacion: cmjExplicacionMetrica(metric.key, delta, status, u.ambarPct, u.rojoPct) };
   });
 }
 export function cmjFilasRecuperacion(recuperacion, umbral) {
   return CMJ_METRIC_LIST.filter((x) => x.drivesStatus).map((metric) => {
     const mm = recuperacion ? recuperacion.metrics[metric.key] : { delta: null, status: "gray" };
     const u = umbral[metric.key];
-    return { key: metric.key, label: metric.label, delta: mm.delta, status: mm.status, explicacion: cmjExplicacionMetrica(metric.key, mm.delta, mm.status, u.ambarPct, u.rojoPct) };
+    return { key: metric.key, label: metric.label, delta: mm.delta, status: mm.status, base: mm.base ?? null, actual: mm.actual ?? null, decimales: metric.decimals, unidad: metric.unit, explicacion: cmjExplicacionMetrica(metric.key, mm.delta, mm.status, u.ambarPct, u.rojoPct) };
   });
 }
 
@@ -465,7 +466,8 @@ export function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individual
       // altura por sí sola — potencia o fuerza están delatando fatiga que
       // la altura, saltando con otra estrategia, está enmascarando.
       const divergente = CMJ_STATUS_ORDER[worstStatus] < CMJ_STATUS_ORDER[heightStatus];
-      microResults.set(id, { ...b, metrics, status: worstStatus, heightStatus, divergente });
+      const metaMicro = microList.find((x) => x.id === id);
+      microResults.set(id, { ...b, metrics, status: worstStatus, heightStatus, divergente, numero: metaMicro ? metaMicro.numero : null });
     });
 
     // El Inicio de cada microciclo se compara con el Inicio del microciclo
@@ -496,7 +498,7 @@ export function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individual
         const delta = (baseVal != null && nowVal != null) ? cmjPct(nowVal, baseVal) : null;
         const u = umbral[metric.key] || { ambarPct, rojoPct };
         const status = cmjStatusFromDelta(delta, u.ambarPct, u.rojoPct);
-        recMetrics[metric.key] = { delta, status };
+        recMetrics[metric.key] = { delta, status, base: baseVal, actual: nowVal };
         if (CMJ_STATUS_ORDER[status] < CMJ_STATUS_ORDER[worst]) worst = status;
       });
       curr.recuperacion = {
@@ -504,7 +506,9 @@ export function cmjBuildPlayers(rows, microciclos, ambarPct, rojoPct, individual
         status: worst,
         modo: "inicio_anterior",
         contraNumero: prevMeta.numero,
+        contraFecha: prev.inicio.dateKey || null,
         salta: prevMeta.id !== microList[idx - 1].id,
+        saltadoNumero: microList[idx - 1].numero,
       };
       // CRÍTICO: el primer día de un microciclo (antes de que haya MD-2/MD+1
       // esa semana) solo tiene esta comparación (Inicio contra Inicio
@@ -572,6 +576,18 @@ const CMJ_TAG_LABELS = { inicio: "Inicio microciclo", md2: "MD-2", md1: "MD+1" }
 // semana (ese sí existe siempre, es el primer test de la semana); si no hay
 // test programado hoy, se enseña la última lectura disponible de esta
 // semana (a modo de contexto).
+// Contra qué test se calcula la diferencia que se muestra: los días MD-2/MD+1
+// contra el Inicio de la misma semana; el Inicio contra el último Inicio
+// anterior disponible (indicando si se ha saltado algún microciclo).
+export function cmjReferenciaDia(m, dayField) {
+  return { modo: "semana", numero: m?.numero ?? null, fecha: m?.inicio?.dateKey || null, momento: CMJ_TAG_LABELS[dayField], columnaBase: "Inicio" };
+}
+export function cmjReferenciaRecuperacion(m) {
+  const rec = m?.recuperacion;
+  if (!rec) return null;
+  return { modo: "anterior", numero: rec.contraNumero ?? null, fecha: rec.contraFecha || null, salta: !!rec.salta, saltadoNumero: rec.saltadoNumero ?? null, momento: "Inicio", columnaBase: "Antes" };
+}
+
 export function cmjHoyDe(player, todayTag) {
   const m = player.lastMicro;
   if (!todayTag) {
@@ -584,21 +600,21 @@ export function cmjHoyDe(player, todayTag) {
       // hecho, por ejemplo cualquier día después del propio día de Inicio.
       if (m?.inicio) {
         const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
-        return { status: r.status, motivo: `Última lectura (Inicio): ${r.motivo}`, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m };
+        return { status: r.status, motivo: `Última lectura (Inicio): ${r.motivo}`, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m) };
       }
       return { status: "gray", motivo: "Sin tests registrados en este microciclo todavía.", rows: [], nivel: null };
     }
     const d = cmjMotivoDia(m, dayField, player.umbral);
-    return { status: d.status, motivo: `Última lectura (${CMJ_TAG_LABELS[dayField]}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m };
+    return { status: d.status, motivo: `Última lectura (${CMJ_TAG_LABELS[dayField]}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, dayField) };
   }
   if (todayTag === "inicio") {
     if (!m || !m.inicio) return { status: "gray", motivo: "Test de inicio de hoy aún no registrado.", rows: [], nivel: null };
     const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
-    return { status: r.status, motivo: r.motivo, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m };
+    return { status: r.status, motivo: r.motivo, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m) };
   }
   if (!m || !m[todayTag]) return { status: "gray", motivo: `Test de hoy (${CMJ_TAG_LABELS[todayTag]}) aún no registrado.`, rows: [], nivel: null };
   const d = cmjMotivoDia(m, todayTag, player.umbral);
-  return { status: d.status, motivo: d.motivo, rows: cmjFilasDia(m, todayTag, player.umbral), nivel: d.nivel, m };
+  return { status: d.status, motivo: d.motivo, rows: cmjFilasDia(m, todayTag, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, todayTag) };
 }
 
 // ---------- Fase 2 · carga de fuerza por microciclo ----------
