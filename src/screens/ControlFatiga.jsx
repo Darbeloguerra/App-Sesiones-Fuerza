@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { ds, dsF, dsR, DsButton, DsCard, DsBadge, DsInput, DsSelect, DsTabSwitcher, DsToggle } from "../core/designSystem.jsx";
+import { ds, dsF, dsR, dsSh, DsButton, DsCard, DsBadge, DsInput, DsSelect, DsTabSwitcher, DsToggle } from "../core/designSystem.jsx";
 import { LoadingBlock } from "../core/components.jsx";
 import { PantallaEntrenadorAncha } from "../core/layoutEntrenador.jsx";
 import { CMJ_STATUS_META, CMJ_TAG_META, CMJ_METRIC_CHART_COLOR } from "../core/cmjDisplay.jsx";
@@ -13,6 +13,9 @@ import {
   CMJ_POSICIONES,
   CMJ_UMBRAL_DEFECTO,
   cmjBuildPlayers,
+  cmjComparacionManual,
+  cmjTestId,
+  cmjTestsDelJugador,
   cmjDateKeyFromDate,
   cmjFindCurrentMicroId,
   cmjFmt,
@@ -344,6 +347,10 @@ function CmjEstadoActualReal() {
   const [filtroEstado, setFiltroEstado] = useState(new Set(["red", "amber", "green", "gray"]));
   const [expandedCards, setExpandedCards] = useState(new Set());
   const [expandedMetrics, setExpandedMetrics] = useState(new Set());
+  // Referencia elegida a mano por jugador (jugadorId -> id del test). Solo vale
+  // mientras la pantalla está abierta; no se guarda ni cambia las alertas.
+  const [refManual, setRefManual] = useState(new Map());
+  const [menuRefId, setMenuRefId] = useState(null);
   const [mostrarAjustes, setMostrarAjustes] = useState(false);
 
   const cargar = useCallback(async () => {
@@ -462,20 +469,19 @@ function CmjEstadoActualReal() {
       {cabecera}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 8 }}>
-          Microciclo Nº {meta.numero} · inicio {meta.inicio ? fmtDateShort(meta.inicio) : "—"}
+          Microciclo Nº {meta.numero} · inicio {meta.inicio ? fmtDateShort(meta.inicio) : "—"} · {todayTag ? `hoy: ${CMJ_TAG_META[todayTag]?.label || "Inicio microciclo"}` : "hoy no hay test programado"}
         </div>
-        <div style={{ display: "flex", gap: 10, alignItems: "stretch", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "10px 12px", marginBottom: 10 }}>
-          <span style={{ width: 8, borderRadius: 4, background: ds.accent, flexShrink: 0 }} />
-          <div style={{ fontSize: 13, color: ds.ink }}>
-            {todayTag === "inicio" ? (
-              <><b>Hoy: test de Inicio.</b> Se compara con el Inicio del microciclo anterior.</>
-            ) : todayTag ? (
-              <><b>Hoy: {CMJ_TAG_META[todayTag]?.label}.</b> Se compara con el Inicio de esta semana.</>
-            ) : (
-              <><b>Hoy no hay test programado.</b> Se muestra la última lectura de la semana, comparada con el Inicio de esta semana (o con el Inicio anterior si aún no hay otra).</>
-            )}
-            <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>Cada tarjeta indica con qué test y qué fecha se compara.</div>
+        <div style={{ display: "flex", gap: 10, alignItems: "center", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "10px 12px", marginBottom: 10 }}>
+          <span style={{ width: 8, alignSelf: "stretch", borderRadius: 4, background: ds.accent, flexShrink: 0 }} />
+          <div style={{ flex: 1, fontSize: 13, color: ds.ink }}>
+            <b>Comparación automática.</b> MD-2 y MD+1 se comparan con el Inicio de su mismo microciclo. El Inicio, con el Inicio anterior.
+            <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>Puedes cambiar la referencia de cada tarjeta. Los avisos de otras pantallas siguen usando la regla automática.</div>
           </div>
+          {refManual.size > 0 && (
+            <button type="button" onClick={() => { setRefManual(new Map()); setMenuRefId(null); }} style={{ background: "none", border: `1px solid ${ds.border}`, borderRadius: dsR.md, color: ds.inkSecondary, fontSize: 12, fontWeight: 600, height: 30, padding: "0 10px", whiteSpace: "nowrap", cursor: "pointer" }}>
+              Volver a automático ({refManual.size})
+            </button>
+          )}
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {["red", "amber", "green", "gray"].map((s) => {
@@ -518,10 +524,43 @@ function CmjEstadoActualReal() {
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
               {lista
                 .sort((a, b) => a.jugador.name.localeCompare(b.jugador.name))
-                .map(({ p, hoy }) => {
+                .map(({ p, hoy: hoyAuto }) => {
                   const cardId = p.jugadorId;
                   const cardOpen = expandedCards.has(cardId);
+                  const refAutoId = hoyAuto.ref && hoyAuto.ref.base.fecha ? `${hoyAuto.ref.base.fecha}|${hoyAuto.ref.base.tag}` : null;
+                  const testsJugador = menuRefId === cardId || refManual.has(cardId) ? cmjTestsDelJugador(p) : [];
+                  const manualId = refManual.get(cardId);
+                  const manualTest = manualId && manualId !== refAutoId ? testsJugador.find((x) => x.id === manualId) : null;
+                  const res = manualTest && hoyAuto.testActual ? cmjComparacionManual(p, hoyAuto.testActual, manualTest.row) : null;
+                  const hoy = res
+                    ? { ...hoyAuto, status: res.status, rows: res.rows, nivel: null, motivo: null, ref: { ...hoyAuto.ref, base: { tag: manualTest.tag, numero: manualTest.numero, fecha: manualTest.fecha } } }
+                    : hoyAuto;
+                  const esManual = !!res;
                   const statusMeta = CMJ_STATUS_META[hoy.status];
+                  const nombreTag = { inicio: "Inicio", md2: "MD-2", md1: "MD+1" };
+                  const etiquetaTest = (x) => `${nombreTag[x.tag] || ""}${x.numero != null ? ` Nº${x.numero}` : ""}`;
+                  const idActual = hoyAuto.testActual ? cmjTestId(hoyAuto.testActual) : null;
+                  const otros = testsJugador.filter((x) => x.id !== refAutoId && x.id !== idActual);
+                  const conNumero = hoy.ref && hoy.ref.base.numero !== hoy.ref.actual.numero;
+                  const columnas = "minmax(0,1fr) 58px 52px 50px";
+                  const abreviar = (l) => l.replace("Potencia relativa", "Potencia rel.").replace("Fuerza relativa", "Fuerza rel.");
+                  const elegir = (id) => {
+                    setRefManual((prev) => { const n = new Map(prev); if (id) n.set(cardId, id); else n.delete(cardId); return n; });
+                    setMenuRefId(null);
+                  };
+                  const botonMenu = (key, etiqueta, fecha, activo, onClick) => (
+                    <button key={key} type="button" role="menuitem" onClick={onClick} style={{ display: "flex", justifyContent: "space-between", gap: 10, width: "100%", textAlign: "left", background: "none", border: 0, borderRadius: 8, padding: "8px 10px", color: activo ? ds.accent : ds.ink, fontSize: 12.5, fontWeight: 500, cursor: "pointer" }}>
+                      <span>{etiqueta}</span>
+                      <span style={{ color: ds.inkMuted, fontFamily: dsF.mono, fontSize: 11 }}>{fecha}</span>
+                    </button>
+                  );
+                  const rotuloMenu = (txt) => <div style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, padding: "8px 10px 2px" }}>{txt}</div>;
+                  const cabCol = (tag, numero, fecha, extra) => (
+                    <>
+                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: CMJ_TAG_META[tag]?.color }}>{nombreTag[tag]}{conNumero ? ` Nº${numero ?? "—"}` : ""}{extra}</span>
+                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, whiteSpace: "nowrap" }}>{fecha ? fmtDateShort(fecha) : "—"}</span>
+                    </>
+                  );
                   return (
                     <DsCard
                       key={cardId}
@@ -534,29 +573,39 @@ function CmjEstadoActualReal() {
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 13, fontWeight: 700, color: ds.ink }}>{p.nombre}</span>
+                        {esManual && <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: ds.accent, border: `1px solid ${ds.accent}`, borderRadius: 5, padding: "0 4px" }}>Manual</span>}
                         {hoy.nivel && <span style={{ fontSize: 10.5, color: ds.inkMuted }}>|</span>}
                         {hoy.nivel && <span style={{ fontSize: 10.5, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase" }}>{hoy.nivel}</span>}
-                        {hoy.m?.divergente && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 12 }}>⚠</span>}
+                        {hoy.m?.divergente && !esManual && <span title="Divergencia: la altura no muestra fatiga, pero potencia y/o fuerza sí caen." style={{ color: ds.warning, fontSize: 12 }}>⚠</span>}
                         <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase", letterSpacing: "0.03em" }}>{statusMeta.label}</span>
                       </div>
 
-                      {hoy.ref && hoy.rows.length > 0 && (
-                        <span style={{ alignSelf: "flex-start", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", minHeight: 22, padding: "2px 8px", borderRadius: 7, border: `1px dashed ${ds.border}`, fontSize: 11, fontWeight: 600, color: ds.inkSecondary }}>
-                          {hoy.ref.modo === "semana"
-                            ? `vs Inicio de esta semana${hoy.ref.numero != null ? ` · Mic. Nº ${hoy.ref.numero}` : ""}${hoy.ref.fecha ? ` · ${fmtDateShort(hoy.ref.fecha)}` : ""}`
-                            : `vs Inicio del Mic. Nº ${hoy.ref.numero ?? "—"}${hoy.ref.fecha ? ` · ${fmtDateShort(hoy.ref.fecha)}` : ""}`}
-                          {hoy.ref.salta && hoy.ref.saltadoNumero != null && <span style={{ color: ds.inkMuted, fontWeight: 500 }}>(sin Inicio en el Nº {hoy.ref.saltadoNumero})</span>}
-                        </span>
-                      )}
                       {hoy.rows.length > 0 ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 2, position: "relative" }}>
                           {hoy.ref && (
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 8, fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: ds.inkMuted, paddingBottom: 2, borderBottom: `1px solid ${ds.border}` }}>
+                            <div style={{ display: "grid", gridTemplateColumns: columnas, gap: 6, alignItems: "end", paddingBottom: 3, borderBottom: `1px solid ${ds.border}` }}>
                               <span />
-                              <span style={{ textAlign: "right", minWidth: 40 }}>{hoy.ref.columnaBase}</span>
-                              <span style={{ textAlign: "right", minWidth: 40 }}>{hoy.ref.momento}</span>
-                              <span style={{ textAlign: "right", minWidth: 52 }}>Dif.</span>
+                              <button type="button" onClick={() => setMenuRefId(menuRefId === cardId ? null : cardId)} aria-label="Cambiar el test de referencia" aria-expanded={menuRefId === cardId} style={{ background: "none", border: `1px dashed ${ds.border}`, borderRadius: 7, padding: "1px 4px", textAlign: "right", lineHeight: 1.15, cursor: "pointer", color: "inherit" }}>
+                                {cabCol(hoy.ref.base.tag, hoy.ref.base.numero, hoy.ref.base.fecha, " ▾")}
+                              </button>
+                              <span style={{ textAlign: "right", lineHeight: 1.15 }}>{cabCol(hoy.ref.actual.tag, hoy.ref.actual.numero, hoy.ref.actual.fecha, "")}</span>
+                              <span style={{ textAlign: "right", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: ds.inkMuted }}>Dif.</span>
                             </div>
+                          )}
+                          {menuRefId === cardId && hoy.ref && (
+                            <>
+                              <div onClick={() => setMenuRefId(null)} style={{ position: "fixed", inset: 0, zIndex: 19 }} />
+                              <div role="menu" style={{ position: "absolute", right: 0, top: 42, zIndex: 20, background: ds.surfaceRaised, border: `1px solid ${ds.border}`, borderRadius: 10, padding: 4, minWidth: 230, maxHeight: 280, overflowY: "auto", boxShadow: dsSh.elevation3 }}>
+                                {refAutoId && (
+                                  <>
+                                    {rotuloMenu("Automático")}
+                                    {botonMenu("auto", etiquetaTest(hoyAuto.ref.base), `${fmtDateShort(hoyAuto.ref.base.fecha)} · por defecto`, !esManual, () => elegir(null))}
+                                  </>
+                                )}
+                                {otros.length > 0 && rotuloMenu("Otro test de este jugador")}
+                                {otros.map((x) => botonMenu(x.id, etiquetaTest(x), fmtDateShort(x.fecha), esManual && manualId === x.id, () => elegir(x.id)))}
+                              </div>
+                            </>
                           )}
                           {hoy.rows.map((row) => {
                             const mkey = `${cardId}::${row.key}`;
@@ -564,11 +613,11 @@ function CmjEstadoActualReal() {
                             const rowMeta = CMJ_STATUS_META[row.status];
                             return (
                               <div key={row.key}>
-                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 8, alignItems: "baseline", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
-                                  <span style={{ color: ds.inkSecondary }}>› {row.label}</span>
-                                  <span style={{ color: ds.inkMuted, fontFamily: dsF.mono, fontSize: 11, textAlign: "right", minWidth: 40 }}>{cmjFmt(row.base, row.decimales ?? 1)}</span>
-                                  <span style={{ color: ds.ink, fontFamily: dsF.mono, fontSize: 11, textAlign: "right", minWidth: 40 }}>{cmjFmt(row.actual, row.decimales ?? 1)}</span>
-                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono, textAlign: "right", minWidth: 52 }}>{cmjSigned(row.delta)}</span>
+                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "grid", gridTemplateColumns: columnas, gap: 6, alignItems: "baseline", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
+                                  <span title={row.label} style={{ color: ds.inkSecondary, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>› {abreviar(row.label)}</span>
+                                  <span style={{ color: ds.inkMuted, fontFamily: dsF.mono, fontSize: 11, textAlign: "right" }}>{cmjFmt(row.base, row.decimales ?? 1)}</span>
+                                  <span style={{ color: ds.ink, fontFamily: dsF.mono, fontSize: 11, textAlign: "right" }}>{cmjFmt(row.actual, row.decimales ?? 1)}</span>
+                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono, textAlign: "right" }}>{cmjSigned(row.delta)}</span>
                                 </div>
                                 {mOpen && <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 12px" }}>{row.explicacion}</div>}
                               </div>
