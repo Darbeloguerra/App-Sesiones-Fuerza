@@ -27,6 +27,7 @@ import {
   cmjHoyDe,
   cmjReferenciaDia,
   cmjReferenciaRecuperacion,
+  cmjComparacionManual,
   cmjVentanasMicrociclo,
   cmjMicroDeFecha,
   CMJ_METRICS,
@@ -222,12 +223,24 @@ test("cmjDeltaMismoDiaCicloAnterior: compara el mismo tag entre los dos últimos
 });
 
 test("cmjReferenciaDia: MD-2 se compara con el Inicio de la misma semana", () => {
-  const r = cmjReferenciaDia({ numero: 12, inicio: { dateKey: "2026-11-09" } }, "md2");
-  assert.deepEqual([r.modo, r.numero, r.fecha, r.momento, r.columnaBase], ["semana", 12, "2026-11-09", "MD-2", "Inicio"]);
+  const r = cmjReferenciaDia({ numero: 12, inicio: { dateKey: "2026-11-09" }, md2: { dateKey: "2026-11-11" } }, "md2");
+  assert.deepEqual(r.base, { tag: "inicio", numero: 12, fecha: "2026-11-09" });
+  assert.deepEqual(r.actual, { tag: "md2", numero: 12, fecha: "2026-11-11" });
 });
 
 test("cmjReferenciaRecuperacion: indica el Inicio anterior y si se ha saltado un microciclo", () => {
-  const r = cmjReferenciaRecuperacion({ recuperacion: { contraNumero: 10, contraFecha: "2026-10-26", salta: true, saltadoNumero: 11 } });
-  assert.deepEqual([r.modo, r.numero, r.salta, r.saltadoNumero], ["anterior", 10, true, 11]);
+  const r = cmjReferenciaRecuperacion({ numero: 12, inicio: { dateKey: "2026-11-09" }, recuperacion: { contraNumero: 10, contraFecha: "2026-10-26", salta: true, saltadoNumero: 11 } });
+  assert.deepEqual([r.modo, r.base.numero, r.base.fecha, r.salta, r.saltadoNumero, r.actual.numero], ["anterior", 10, "2026-10-26", true, 11, 12]);
   assert.equal(cmjReferenciaRecuperacion({}), null);
+});
+
+test("cmjComparacionManual: calcula la diferencia contra el test elegido con los umbrales del jugador", () => {
+  const player = { umbral: Object.fromEntries(["altura", "potenciaRel", "fuerzaRel"].map((k) => [k, { ambarPct: 6, rojoPct: 12 }])) };
+  const base = { altura: 40, peso: 80, kineticsValid: true, potencia: 4000, fuerza: 2000 };
+  const actual = { altura: 34, peso: 80, kineticsValid: true, potencia: 3600, fuerza: 1960 };
+  const r = cmjComparacionManual(player, actual, base);
+  const alt = r.rows.find((x) => x.key === "altura");
+  assert.equal(alt.delta, -15);
+  assert.equal(alt.status, "red");
+  assert.equal(r.status, "red");
 });
