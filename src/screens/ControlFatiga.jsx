@@ -66,7 +66,7 @@ export function ControlFatigaModuloReal({ onBack, onAbrirModulo, onCerrarSesion 
     { id: "ranking", label: "Ranking" },
   ];
   return (
-    <PantallaEntrenadorAncha activo="fatiga" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion}>
+    <PantallaEntrenadorAncha activo="fatiga" onAbrirModulo={onAbrirModulo} onCerrarSesion={onCerrarSesion} anchoMaximo={vista === "estado" ? 1240 : 860}>
       <div>
         <div style={{ marginBottom: 16 }}>
           <div style={{ fontFamily: dsF.mono, fontSize: 11, letterSpacing: "0.08em", color: ds.inkSecondary, marginBottom: 4 }}>CONTROL DE FATIGA</div>
@@ -521,7 +521,7 @@ function CmjEstadoActualReal() {
               <span style={{ fontSize: 11.5, fontWeight: 700, color: ds.inkSecondary, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
               <span style={{ fontSize: 11, color: ds.inkMuted, fontFamily: dsF.mono }}>{lista.length}</span>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
               {lista
                 .sort((a, b) => a.jugador.name.localeCompare(b.jugador.name))
                 .map(({ p, hoy: hoyAuto }) => {
@@ -542,7 +542,8 @@ function CmjEstadoActualReal() {
                   const idActual = hoyAuto.testActual ? cmjTestId(hoyAuto.testActual) : null;
                   const otros = testsJugador.filter((x) => x.id !== refAutoId && x.id !== idActual);
                   const conNumero = hoy.ref && hoy.ref.base.numero !== hoy.ref.actual.numero;
-                  const columnas = "minmax(0,1fr) 58px 52px 50px";
+                  const columnas = "minmax(0,1fr) 68px 68px 54px";
+                  const fechaCorta = (f) => { if (!f) return "—"; const d = new Date(`${f}T00:00:00`); const base = d.toLocaleDateString("es-ES", { day: "numeric", month: "short" }).replace(".", ""); return d.getFullYear() === new Date().getFullYear() ? base : `${base} ${String(d.getFullYear()).slice(2)}`; };
                   const abreviar = (l) => l.replace("Potencia relativa", "Potencia rel.").replace("Fuerza relativa", "Fuerza rel.");
                   const elegir = (id) => {
                     setRefManual((prev) => { const n = new Map(prev); if (id) n.set(cardId, id); else n.delete(cardId); return n; });
@@ -557,8 +558,8 @@ function CmjEstadoActualReal() {
                   const rotuloMenu = (txt) => <div style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, padding: "8px 10px 2px" }}>{txt}</div>;
                   const cabCol = (tag, numero, fecha, extra) => (
                     <>
-                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: CMJ_TAG_META[tag]?.color }}>{nombreTag[tag]}{conNumero ? ` Nº${numero ?? "—"}` : ""}{extra}</span>
-                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, whiteSpace: "nowrap" }}>{fecha ? fmtDateShort(fecha) : "—"}</span>
+                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: CMJ_TAG_META[tag]?.color, whiteSpace: "nowrap" }}>{nombreTag[tag]}{extra}</span>
+                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, color: ds.inkMuted, whiteSpace: "nowrap" }}>{conNumero && numero != null ? `Nº${numero} · ` : ""}{fechaCorta(fecha)}</span>
                     </>
                   );
                   return (
@@ -599,11 +600,11 @@ function CmjEstadoActualReal() {
                                 {refAutoId && (
                                   <>
                                     {rotuloMenu("Automático")}
-                                    {botonMenu("auto", etiquetaTest(hoyAuto.ref.base), `${fmtDateShort(hoyAuto.ref.base.fecha)} · por defecto`, !esManual, () => elegir(null))}
+                                    {botonMenu("auto", etiquetaTest(hoyAuto.ref.base), `${fechaCorta(hoyAuto.ref.base.fecha)} · por defecto`, !esManual, () => elegir(null))}
                                   </>
                                 )}
                                 {otros.length > 0 && rotuloMenu("Otro test de este jugador")}
-                                {otros.map((x) => botonMenu(x.id, etiquetaTest(x), fmtDateShort(x.fecha), esManual && manualId === x.id, () => elegir(x.id)))}
+                                {otros.map((x) => botonMenu(x.id, etiquetaTest(x), fechaCorta(x.fecha), esManual && manualId === x.id, () => elegir(x.id)))}
                               </div>
                             </>
                           )}
