@@ -541,7 +541,6 @@ function CmjEstadoActualReal() {
                   const etiquetaTest = (x) => `${nombreTag[x.tag] || ""}${x.numero != null ? ` Nº${x.numero}` : ""}`;
                   const idActual = hoyAuto.testActual ? cmjTestId(hoyAuto.testActual) : null;
                   const otros = testsJugador.filter((x) => x.id !== refAutoId && x.id !== idActual);
-                  const conNumero = hoy.ref && hoy.ref.base.numero !== hoy.ref.actual.numero;
                   const columnas = "minmax(0,1fr) 72px 72px 56px";
                   const fechaCorta = (f) => { if (!f) return "—"; const d = new Date(`${f}T00:00:00`); const base = d.toLocaleDateString("es-ES", { day: "numeric", month: "short" }).replace(".", ""); return d.getFullYear() === new Date().getFullYear() ? base : `${base} ${String(d.getFullYear()).slice(2)}`; };
                   const abreviar = (l) => l.replace("Potencia relativa", "Potencia rel.").replace("Fuerza relativa", "Fuerza rel.");
@@ -556,10 +555,11 @@ function CmjEstadoActualReal() {
                     </button>
                   );
                   const rotuloMenu = (txt) => <div style={{ fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.06em", textTransform: "uppercase", color: ds.inkMuted, padding: "8px 10px 2px" }}>{txt}</div>;
-                  const cabCol = (tag, numero, fecha) => (
+                  const casilla = { display: "block", borderRadius: 9, padding: "3px 4px", textAlign: "center", lineHeight: 1.2, background: "rgba(0,0,0,0.17)" };
+                  const cabCol = (tag, fecha) => (
                     <>
                       <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: CMJ_TAG_META[tag]?.color, whiteSpace: "nowrap" }}>{nombreTag[tag]}</span>
-                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, whiteSpace: "nowrap" }}>{conNumero && numero != null ? `Nº${numero} · ` : ""}{fechaCorta(fecha)}</span>
+                      <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 10, color: ds.inkMuted, whiteSpace: "nowrap" }}>{fechaCorta(fecha)}</span>
                     </>
                   );
                   return (
@@ -584,17 +584,14 @@ function CmjEstadoActualReal() {
                       {hoy.rows.length > 0 ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2, position: "relative" }}>
                           {hoy.ref && (
-                            <div style={{ display: "grid", gridTemplateColumns: columnas, gap: 6, alignItems: "end", paddingBottom: 4, borderBottom: `1px solid ${ds.border}` }}>
+                            <div style={{ display: "grid", gridTemplateColumns: columnas, gap: 6, alignItems: "stretch", paddingBottom: 6 }}>
                               <span />
-                              <button type="button" onClick={() => setMenuRefId(menuRefId === cardId ? null : cardId)} aria-label="Cambiar el test de referencia" aria-expanded={menuRefId === cardId} style={{ position: "relative", background: "none", border: 0, padding: 0, textAlign: "center", lineHeight: 1.2, cursor: "pointer", color: "inherit" }}>
-                                {cabCol(hoy.ref.base.tag, hoy.ref.base.numero, hoy.ref.base.fecha)}
-                                <span aria-hidden="true" style={{ position: "absolute", right: -1, top: 0, fontSize: 8, color: ds.inkMuted }}>▾</span>
+                              <button type="button" onClick={() => setMenuRefId(menuRefId === cardId ? null : cardId)} aria-label="Cambiar el test de referencia" aria-expanded={menuRefId === cardId} style={{ ...casilla, position: "relative", border: `1px dashed ${ds.border}`, cursor: "pointer", color: "inherit" }}>
+                                {cabCol(hoy.ref.base.tag, hoy.ref.base.fecha)}
+                                <span aria-hidden="true" style={{ position: "absolute", right: 4, top: 2, fontSize: 8, color: ds.inkMuted }}>▾</span>
                               </button>
-                              <span style={{ textAlign: "center", lineHeight: 1.2 }}>{cabCol(hoy.ref.actual.tag, hoy.ref.actual.numero, hoy.ref.actual.fecha)}</span>
-                              <span style={{ textAlign: "center", lineHeight: 1.2 }}>
-                                <span style={{ display: "block", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: ds.inkMuted }}>Dif.</span>
-                                <span style={{ display: "block", fontSize: 10 }}>&nbsp;</span>
-                              </span>
+                              <span style={{ ...casilla, border: `1px solid ${ds.border}` }}>{cabCol(hoy.ref.actual.tag, hoy.ref.actual.fecha)}</span>
+                              <span style={{ alignSelf: "center", textAlign: "center", fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: ds.inkMuted }}>Dif.</span>
                             </div>
                           )}
                           {menuRefId === cardId && hoy.ref && (
