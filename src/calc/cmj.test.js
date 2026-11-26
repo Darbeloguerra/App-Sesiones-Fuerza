@@ -25,6 +25,8 @@ import {
   cmjSuggestNextNumero,
   cmjNormalizarNombre,
   cmjHoyDe,
+  cmjReferenciaDia,
+  cmjReferenciaRecuperacion,
   cmjVentanasMicrociclo,
   cmjMicroDeFecha,
   CMJ_METRICS,
@@ -217,4 +219,15 @@ test("cmjDeltaMismoDiaCicloAnterior: compara el mismo tag entre los dos últimos
   const r = cmjDeltaMismoDiaCicloAnterior(cmjPlayer, microList, "inicio", metric);
   assert.equal(r.actual, 36);
   assert.equal(r.pct, -10);
+});
+
+test("cmjReferenciaDia: MD-2 se compara con el Inicio de la misma semana", () => {
+  const r = cmjReferenciaDia({ numero: 12, inicio: { dateKey: "2026-11-09" } }, "md2");
+  assert.deepEqual([r.modo, r.numero, r.fecha, r.momento, r.columnaBase], ["semana", 12, "2026-11-09", "MD-2", "Inicio"]);
+});
+
+test("cmjReferenciaRecuperacion: indica el Inicio anterior y si se ha saltado un microciclo", () => {
+  const r = cmjReferenciaRecuperacion({ recuperacion: { contraNumero: 10, contraFecha: "2026-10-26", salta: true, saltadoNumero: 11 } });
+  assert.deepEqual([r.modo, r.numero, r.salta, r.saltadoNumero], ["anterior", 10, true, 11]);
+  assert.equal(cmjReferenciaRecuperacion({}), null);
 });
