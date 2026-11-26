@@ -462,7 +462,20 @@ function CmjEstadoActualReal() {
       {cabecera}
       <div style={{ marginBottom: 14 }}>
         <div style={{ fontSize: 13, color: ds.inkSecondary, marginBottom: 8 }}>
-          Microciclo Nº {meta.numero} · inicio {meta.inicio ? fmtDateShort(meta.inicio) : "—"} · {todayTag ? `hoy: ${CMJ_TAG_META[todayTag]?.label || "Inicio microciclo"}` : "hoy no hay test programado — última lectura de la semana"}
+          Microciclo Nº {meta.numero} · inicio {meta.inicio ? fmtDateShort(meta.inicio) : "—"}
+        </div>
+        <div style={{ display: "flex", gap: 10, alignItems: "stretch", background: ds.surface, border: `1px solid ${ds.border}`, borderRadius: 14, padding: "10px 12px", marginBottom: 10 }}>
+          <span style={{ width: 8, borderRadius: 4, background: ds.accent, flexShrink: 0 }} />
+          <div style={{ fontSize: 13, color: ds.ink }}>
+            {todayTag === "inicio" ? (
+              <><b>Hoy: test de Inicio.</b> Se compara con el Inicio del microciclo anterior.</>
+            ) : todayTag ? (
+              <><b>Hoy: {CMJ_TAG_META[todayTag]?.label}.</b> Se compara con el Inicio de esta semana.</>
+            ) : (
+              <><b>Hoy no hay test programado.</b> Se muestra la última lectura de la semana, comparada con el Inicio de esta semana (o con el Inicio anterior si aún no hay otra).</>
+            )}
+            <div style={{ fontSize: 12, color: ds.inkSecondary, marginTop: 2 }}>Cada tarjeta indica con qué test y qué fecha se compara.</div>
+          </div>
         </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
           {["red", "amber", "green", "gray"].map((s) => {
@@ -527,17 +540,35 @@ function CmjEstadoActualReal() {
                         <span style={{ marginLeft: "auto", fontSize: 10, fontWeight: 700, color: statusMeta.color, textTransform: "uppercase", letterSpacing: "0.03em" }}>{statusMeta.label}</span>
                       </div>
 
+                      {hoy.ref && hoy.rows.length > 0 && (
+                        <span style={{ alignSelf: "flex-start", maxWidth: "100%", display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap", minHeight: 22, padding: "2px 8px", borderRadius: 7, border: `1px dashed ${ds.border}`, fontSize: 11, fontWeight: 600, color: ds.inkSecondary }}>
+                          {hoy.ref.modo === "semana"
+                            ? `vs Inicio de esta semana${hoy.ref.numero != null ? ` · Mic. Nº ${hoy.ref.numero}` : ""}${hoy.ref.fecha ? ` · ${fmtDateShort(hoy.ref.fecha)}` : ""}`
+                            : `vs Inicio del Mic. Nº ${hoy.ref.numero ?? "—"}${hoy.ref.fecha ? ` · ${fmtDateShort(hoy.ref.fecha)}` : ""}`}
+                          {hoy.ref.salta && hoy.ref.saltadoNumero != null && <span style={{ color: ds.inkMuted, fontWeight: 500 }}>(sin Inicio en el Nº {hoy.ref.saltadoNumero})</span>}
+                        </span>
+                      )}
                       {hoy.rows.length > 0 ? (
                         <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                          {hoy.ref && (
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 8, fontFamily: dsF.mono, fontSize: 9.5, fontWeight: 600, letterSpacing: "0.05em", textTransform: "uppercase", color: ds.inkMuted, paddingBottom: 2, borderBottom: `1px solid ${ds.border}` }}>
+                              <span />
+                              <span style={{ textAlign: "right", minWidth: 40 }}>{hoy.ref.columnaBase}</span>
+                              <span style={{ textAlign: "right", minWidth: 40 }}>{hoy.ref.momento}</span>
+                              <span style={{ textAlign: "right", minWidth: 52 }}>Dif.</span>
+                            </div>
+                          )}
                           {hoy.rows.map((row) => {
                             const mkey = `${cardId}::${row.key}`;
                             const mOpen = expandedMetrics.has(mkey);
                             const rowMeta = CMJ_STATUS_META[row.status];
                             return (
                               <div key={row.key}>
-                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "flex", justifyContent: "space-between", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
+                                <div onClick={() => toggleMetrica(mkey)} style={{ display: "grid", gridTemplateColumns: "1fr auto auto auto", gap: 8, alignItems: "baseline", fontSize: 11.5, cursor: "pointer", padding: "1px 0" }}>
                                   <span style={{ color: ds.inkSecondary }}>› {row.label}</span>
-                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono }}>{cmjSigned(row.delta)}</span>
+                                  <span style={{ color: ds.inkMuted, fontFamily: dsF.mono, fontSize: 11, textAlign: "right", minWidth: 40 }}>{cmjFmt(row.base, row.decimales ?? 1)}</span>
+                                  <span style={{ color: ds.ink, fontFamily: dsF.mono, fontSize: 11, textAlign: "right", minWidth: 40 }}>{cmjFmt(row.actual, row.decimales ?? 1)}</span>
+                                  <span style={{ color: rowMeta.color, fontWeight: 700, fontFamily: dsF.mono, textAlign: "right", minWidth: 52 }}>{cmjSigned(row.delta)}</span>
                                 </div>
                                 {mOpen && <div style={{ fontSize: 11, color: ds.inkMuted, lineHeight: 1.5, padding: "2px 0 4px 12px" }}>{row.explicacion}</div>}
                               </div>
