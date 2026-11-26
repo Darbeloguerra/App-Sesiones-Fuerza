@@ -579,13 +579,54 @@ const CMJ_TAG_LABELS = { inicio: "Inicio microciclo", md2: "MD-2", md1: "MD+1" }
 // Contra qué test se calcula la diferencia que se muestra: los días MD-2/MD+1
 // contra el Inicio de la misma semana; el Inicio contra el último Inicio
 // anterior disponible (indicando si se ha saltado algún microciclo).
+// base = test de referencia; actual = test que se está evaluando.
 export function cmjReferenciaDia(m, dayField) {
-  return { modo: "semana", numero: m?.numero ?? null, fecha: m?.inicio?.dateKey || null, momento: CMJ_TAG_LABELS[dayField], columnaBase: "Inicio" };
+  return {
+    modo: "semana",
+    base: { tag: "inicio", numero: m?.numero ?? null, fecha: m?.inicio?.dateKey || null },
+    actual: { tag: dayField, numero: m?.numero ?? null, fecha: m?.[dayField]?.dateKey || null },
+  };
 }
 export function cmjReferenciaRecuperacion(m) {
   const rec = m?.recuperacion;
   if (!rec) return null;
-  return { modo: "anterior", numero: rec.contraNumero ?? null, fecha: rec.contraFecha || null, salta: !!rec.salta, saltadoNumero: rec.saltadoNumero ?? null, momento: "Inicio", columnaBase: "Antes" };
+  return {
+    modo: "anterior",
+    salta: !!rec.salta,
+    saltadoNumero: rec.saltadoNumero ?? null,
+    base: { tag: "inicio", numero: rec.contraNumero ?? null, fecha: rec.contraFecha || null },
+    actual: { tag: "inicio", numero: m?.numero ?? null, fecha: m?.inicio?.dateKey || null },
+  };
+}
+
+// Identificador estable de un test de un jugador (fecha + momento).
+export const cmjTestId = (r) => `${r.dateKey}|${r.tag}`;
+
+// Tests del jugador que se pueden usar como referencia manual: todos los que
+// están etiquetados (Inicio / MD-2 / MD+1) dentro de un microciclo, del más
+// reciente al más antiguo.
+export function cmjTestsDelJugador(player) {
+  return [...player.sorted]
+    .filter((r) => r.tag && r.microId != null)
+    .reverse()
+    .map((r) => ({ id: cmjTestId(r), tag: r.tag, fecha: r.dateKey, numero: player.microResults.get(r.microId)?.numero ?? null, row: r }));
+}
+
+// Comparación elegida a mano: el test que se está viendo (actualRow) contra
+// cualquier otro test del mismo jugador (baseRow). Usa los mismos umbrales
+// del jugador que la comparación automática.
+export function cmjComparacionManual(player, actualRow, baseRow) {
+  const rows = CMJ_METRIC_LIST.filter((x) => x.drivesStatus).map((metric) => {
+    const base = metric.get(baseRow);
+    const actual = metric.get(actualRow);
+    const delta = base != null && actual != null ? cmjPct(actual, base) : null;
+    const u = player.umbral[metric.key];
+    const status = cmjStatusFromDelta(delta, u.ambarPct, u.rojoPct);
+    return { key: metric.key, label: metric.label, delta, status, base, actual, decimales: metric.decimals, unidad: metric.unit, explicacion: cmjExplicacionMetrica(metric.key, delta, status, u.ambarPct, u.rojoPct) };
+  });
+  let status = "gray";
+  rows.forEach((r) => { if (CMJ_STATUS_ORDER[r.status] < CMJ_STATUS_ORDER[status]) status = r.status; });
+  return { status, rows };
 }
 
 export function cmjHoyDe(player, todayTag) {
@@ -600,21 +641,21 @@ export function cmjHoyDe(player, todayTag) {
       // hecho, por ejemplo cualquier día después del propio día de Inicio.
       if (m?.inicio) {
         const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
-        return { status: r.status, motivo: `Última lectura (Inicio): ${r.motivo}`, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m) };
+        return { status: r.status, motivo: `Última lectura (Inicio): ${r.motivo}`, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m), testActual: m.inicio };
       }
       return { status: "gray", motivo: "Sin tests registrados en este microciclo todavía.", rows: [], nivel: null };
     }
     const d = cmjMotivoDia(m, dayField, player.umbral);
-    return { status: d.status, motivo: `Última lectura (${CMJ_TAG_LABELS[dayField]}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, dayField) };
+    return { status: d.status, motivo: `Última lectura (${CMJ_TAG_LABELS[dayField]}): ${d.motivo}`, rows: cmjFilasDia(m, dayField, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, dayField), testActual: m[dayField] };
   }
   if (todayTag === "inicio") {
     if (!m || !m.inicio) return { status: "gray", motivo: "Test de inicio de hoy aún no registrado.", rows: [], nivel: null };
     const r = cmjMotivoRecuperacion(m.recuperacion, player.umbral);
-    return { status: r.status, motivo: r.motivo, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m) };
+    return { status: r.status, motivo: r.motivo, rows: cmjFilasRecuperacion(m.recuperacion, player.umbral), nivel: r.nivel, m, ref: cmjReferenciaRecuperacion(m), testActual: m.inicio };
   }
   if (!m || !m[todayTag]) return { status: "gray", motivo: `Test de hoy (${CMJ_TAG_LABELS[todayTag]}) aún no registrado.`, rows: [], nivel: null };
   const d = cmjMotivoDia(m, todayTag, player.umbral);
-  return { status: d.status, motivo: d.motivo, rows: cmjFilasDia(m, todayTag, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, todayTag) };
+  return { status: d.status, motivo: d.motivo, rows: cmjFilasDia(m, todayTag, player.umbral), nivel: d.nivel, m, ref: cmjReferenciaDia(m, todayTag), testActual: m[todayTag] };
 }
 
 // ---------- Fase 2 · carga de fuerza por microciclo ----------
